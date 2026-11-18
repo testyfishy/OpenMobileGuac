@@ -9,6 +9,9 @@ SDK. Workflows live in `.github/workflows/`:
 | `android.yml` (Android) | ubuntu-latest, JDK 21, preinstalled Android SDK | Web build, `npx cap sync android`, `./gradlew assembleDebug`. Uploads the APK as a run artifact. On pushes to `main` it also updates the rolling `nightly` prerelease. |
 | `ios.yml` (iOS) | macos-26 (Xcode 26.x) | Web build, `npx cap sync ios`, unsigned Simulator build. On pushes to `main` (or a manual run) **and** when the signing secrets exist, it archives, signs and uploads to TestFlight. |
 
+The Android and iOS workflows skip pushes/PRs that only change Markdown files (macOS
+runners can queue for a long time); run them by hand from the Actions tab if needed.
+
 > **Status legend.** "Verified" means the step was seen passing in CI. "Unverified" means it
 > is written but has not run end-to-end yet, usually because it needs the owner's Apple
 > account.
