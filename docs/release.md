@@ -107,7 +107,9 @@ default, select a version with `sudo xcode-select -s /Applications/Xcode_26.x.ap
 
 GitHub's macOS arm64 runners are sometimes out of capacity; the job then sits in the queue
 and ends "cancelled" with *"The job was not acquired by Runner of type hosted even after
-multiple attempts"*. That is not a build failure. Re-run it later, or use the Intel image
+multiple attempts"*. That is not a build failure. Only one iOS run per branch runs at a
+time, so first **cancel** any iOS run still waiting in the queue (Actions → iOS → the run →
+*Cancel workflow*), otherwise a new run waits behind it. Then re-run later, or use the Intel image
 (`macos-26-intel`, same Xcode 26.x set): either pick it under Actions → iOS → **Run
 workflow** → *runner*, or set a repository **variable** (Settings → Secrets and variables
 → Actions → *Variables*) named `IOS_RUNNER` with value `macos-26-intel` to make it the
