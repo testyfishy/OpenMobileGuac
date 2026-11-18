@@ -18,19 +18,63 @@ for the specification and [docs/PLAN.md](docs/PLAN.md) for the delivery plan.
 
 ## Status
 
-**Early development (Phase 0).** The repository has only a scaffold and a placeholder
-screen. It cannot connect to a server yet. Nothing is published to any app store.
+**Early development.** Nothing is published to any app store, and **nothing has been
+verified on a physical phone yet.** What exists has been exercised in unit tests and in a
+desktop browser (including phone-sized viewports) against the built-in Demo server.
+
+Implemented:
+
+- Server list: add and edit Guacamole servers and log in, with a warning for plain
+  `http://` servers. Remembered passwords and tokens use the platform's secure storage in
+  the app.
+- Connection browser with search, favourites and recent connections.
+- Session screen: direct-touch and trackpad pointer modes (tap, long press, drag,
+  two-finger scroll), pinch zoom and pan with fit modes, a soft-keyboard bridge with a key
+  bar, sticky modifiers and key combos, clipboard in both directions (UTF-8 exact, emoji
+  included), and automatic reconnect.
+- Settings: theme, fit and pointer modes, pointer speed, natural scrolling, haptics, keep
+  awake, clipboard behaviour.
+- A built-in **Demo server** that runs entirely on the device: a simulated desktop with a
+  text editor, an input tester and a zoom target, so every control can be tried without a
+  server. It contains no personal data and sends nothing over the network.
+
+Not yet verified:
+
+- Real-device behaviour: the soft keyboard on Android and iOS, OS paste prompts, real
+  multi-touch, rotation, and anything iOS-specific.
+- Sessions against a real Guacamole server: pending testing by the project owner (see
+  [docs/checklists/](docs/checklists/)).
+- The TestFlight and Android release-signing paths (see [docs/release.md](docs/release.md)).
+
+## Try it
+
+- **Android:** install the debug APK from the rolling
+  [`nightly` prerelease](https://github.com/testyfishy/OpenMobileGuac/releases/tag/nightly),
+  rebuilt on every push to `main`. It is an untested development build.
+- **Any build or the browser:** open **Demo** on the server list, then **Demo desktop**. The
+  two fixed-size variants (1024 × 768 and 1920 × 1080) are for trying zoom and pan.
+
+## Documentation
+
+- [docs/SPEC.md](docs/SPEC.md): specification.
+- [docs/PLAN.md](docs/PLAN.md): delivery plan and task list.
+- [docs/release.md](docs/release.md): CI, nightly APK, signing and TestFlight.
+- [docs/checklists/](docs/checklists/): on-device test checklists.
+- [docs/protocol-notes.md](docs/protocol-notes.md): notes on the Guacamole protocol and web
+  client.
 
 ## Repository layout
 
 ```
 app/              Capacitor + Vite + React + TypeScript app
   src/core/       API, transport, storage, models (no UI)
-  src/session/    gesture, pointer, key, viewport, display, clipboard
-  src/ui/         screens and components
+  src/session/    pure gesture, pointer, key and viewport logic (no DOM)
+  src/ui/         screens and components; ui/session/ holds the session screen and DOM glue
+  src/demo/       built-in Demo server (simulated desktop behind a tunnel)
   src/vendor/     vendored third-party code (guacamole-common-js)
   android/        generated Android project (committed)
-docs/             specification, plan, checklists
+  ios/            generated iOS project (committed)
+docs/             specification, plan, release notes, checklists
 ```
 
 ## Toolchain and platform minimums
@@ -68,24 +112,40 @@ Capacitor's defaults (`minSdkVersion = 24`).
 
 ## Development
 
-Requires Node.js 22 or later.
+Requires Node.js 22 or later. The whole app runs in a desktop browser for development:
 
 ```sh
 cd app
-npm install
-cp .env.example .env.local   # then edit; .env.local is git-ignored
-npm run dev                  # dev server with the placeholder screen
+npm ci
+npm run dev                  # Vite dev server; open the printed URL
 npm run check                # typecheck + lint + format check + unit tests + build
 ```
 
-Android builds additionally need the Android SDK (Android Studio) and JDK 21:
+The Demo server works in the browser with no further setup. Use the browser's device
+toolbar for a phone-sized viewport.
+
+To reach a real Guacamole server from the browser (it sends no CORS headers), the dev
+server can proxy it. Optional:
+
+```sh
+cp .env.example .env.local   # .env.local is git-ignored; use a low-privilege test account
+```
+
+Set `VITE_DEV_GUAC_URL` (including the context path), `VITE_DEV_GUAC_USER` and
+`VITE_DEV_GUAC_PASS`. `npm run dev` then forwards `/dev-guac/...`, websocket tunnel
+included, to that server and lists it pre-filled. These values are read only by the dev
+server and never go into a production build.
+
+Device builds are made by GitHub Actions (see [docs/release.md](docs/release.md)). For a
+local Android build you also need the Android SDK (Android Studio) and JDK 21:
 
 ```sh
 npm run build && npx cap sync android
 npx cap open android
 ```
 
-The iOS project has not been generated yet (PLAN task T0.6); building it requires macOS.
+The iOS project is generated and committed under `app/ios`; building it requires macOS and
+Xcode (CI builds it for the Simulator).
 
 ## Contributing
 

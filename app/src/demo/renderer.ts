@@ -7,10 +7,11 @@ import type { MeasureText, Painter } from './painter.ts';
 export interface DemoRenderer {
   readonly measureText: MeasureText;
   /**
-   * Paints the `w`×`h` region whose top-left corner is (`x`, `y`) in surface coordinates
-   * and returns it as base64 PNG without a `data:` prefix. `paint` must be called
-   * synchronously, before this returns, so it sees the current desktop state; only the
-   * encoding may finish later.
+   * Paints the `w`×`h` region whose top-left corner is (`x`, `y`) in surface device pixels
+   * and returns it as base64 PNG without a `data:` prefix. `paint` draws in logical pixels,
+   * which are `scale` device pixels each (default 1). `paint` must be called synchronously,
+   * before this returns, so it sees the current desktop state; only the encoding may finish
+   * later.
    */
   renderPng(
     x: number,
@@ -18,5 +19,6 @@ export interface DemoRenderer {
     w: number,
     h: number,
     paint: (p: Painter) => void,
+    scale?: number,
   ): string | Promise<string>;
 }

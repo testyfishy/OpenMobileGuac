@@ -58,10 +58,13 @@ export const LAYERS: Readonly<Record<SurfaceId, number>> = {
 export interface DemoWindow {
   readonly id: WindowId;
   readonly title: string;
+  /** Title on a narrow taskbar. */
+  readonly shortTitle: string;
   x: number;
   y: number;
-  readonly w: number;
-  readonly h: number;
+  /** Size follows the desktop size (see `desktopLayout`). */
+  w: number;
+  h: number;
   visible: boolean;
 }
 
@@ -90,42 +93,72 @@ export interface DamageReport {
   readonly copies: readonly CopyHint[];
 }
 
-// ---- Layout constants (window-local coordinates) -----------------------------------------
+// ---- Window layouts (window-local coordinates) ------------------------------------------
+//
+// Each window has a wide layout (its classic size) and narrower or shorter variants, so on a
+// phone-sized desktop (for example 375 × 812) every window fits on screen and stays usable.
+// The layouts are recomputed whenever the desktop size changes; painting and hit-testing
+// read the same objects from `DemoDesktop.layout`.
 
-export const NOTES = {
-  w: 520,
-  h: 392,
-  hint: rect(12, TITLE_H + 6, 496, 20),
-  area: rect(12, TITLE_H + 30, 496, 270),
-  clip: rect(12, TITLE_H + 306, 496, 20),
-  status: rect(12, TITLE_H + 330, 496, 20),
-  pad: 6,
-  lineH: 18,
-  font: { size: 13, mono: true } as FontSpec,
-} as const;
+/** Margin around windows when they are arranged. */
+const MARGIN = 16;
+
+const HINT_WIDE = [
+  'Click the text area and type. Ctrl+A select all, Ctrl+C copy, Ctrl+X cut, Ctrl+V paste.',
+] as const;
+const HINT_COMPACT = [
+  'Click the text area and type.',
+  'Ctrl+A select all, C copy, X cut, V paste.',
+] as const;
+
+export interface NotesLayout {
+  readonly w: number;
+  readonly h: number;
+  /** Lines of the hint above the text area. */
+  readonly hintLines: readonly string[];
+  readonly hint: Rect;
+  readonly area: Rect;
+  readonly clip: Rect;
+  readonly status: Rect;
+  readonly pad: number;
+  readonly lineH: number;
+  readonly font: FontSpec;
+  /** Shorter wording on the clipboard line, for narrow windows. */
+  readonly compact: boolean;
+}
+
+/** Notes at width `w`, with the text area shortened (to 120 px at least) to fit `maxH`. */
+export function notesLayout(w: number, maxH = Infinity): NotesLayout {
+  const inner = w - 24;
+  const hintLines = inner >= 480 ? HINT_WIDE : HINT_COMPACT;
+  const hint = rect(12, TITLE_H + 6, inner, hintLines.length * 14 + 6);
+  const areaY = hint.y + hint.h + 4;
+  // Below the area: 6 gap + clipboard line 20 + 4 gap + status line 20 + 14 bottom.
+  const below = 64;
+  const areaH = Math.max(120, Math.min(270, Math.floor(maxH - areaY - below)));
+  const area = rect(12, areaY, inner, areaH);
+  const clip = rect(12, areaY + areaH + 6, inner, 20);
+  const status = rect(12, clip.y + 24, inner, 20);
+  return {
+    w,
+    h: status.y + status.h + 14,
+    hintLines,
+    hint,
+    area,
+    clip,
+    status,
+    pad: 6,
+    lineH: 18,
+    font: { size: 13, mono: true },
+    compact: inner < 400,
+  };
+}
 
 const ROWS_TOP = TITLE_H + 8;
 const ROW_H = 20;
-export const INPUT = {
-  w: 560,
-  h: 416,
-  valueX: 120,
-  rowsTop: ROWS_TOP,
-  rowH: ROW_H,
-  row: (i: number): Rect => rect(0, ROWS_TOP + i * ROW_H, 560, ROW_H),
-  pill: (i: number): Rect => rect(120 + i * 70, ROWS_TOP + ROW_H + 2, 62, 16),
-  checkbox: (i: number): Rect => rect(120 + i * 26, ROWS_TOP + 6 * ROW_H + 4, 12, 12),
-  checkboxCount: 8,
-  captionsY: ROWS_TOP + 7 * ROW_H + 6,
-  dragArea: rect(14, 200, 300, 200),
-  boxSize: 44,
-  list: rect(330, 200, 216, 200),
-  listRowH: 20,
-  listItems: 60,
-  scrollbarW: 8,
-} as const;
+const INPUT_WIDE_W = 560;
 
-/** Input test rows, by index into `INPUT.row`. */
+/** Input test rows, by index into `InputLayout.row`. */
 export const ROW = {
   pointer: 0,
   buttons: 1,
@@ -136,7 +169,170 @@ export const ROW = {
   targets: 6,
 } as const;
 
-export const ABOUT = { w: 520, h: 236, target: rect(372, TITLE_H + 14, 132, 132) } as const;
+export interface InputLayout {
+  readonly w: number;
+  readonly h: number;
+  readonly valueX: number;
+  readonly rowsTop: number;
+  readonly rowH: number;
+  row(i: number): Rect;
+  pill(i: number): Rect;
+  checkbox(i: number): Rect;
+  readonly checkboxCount: number;
+  /** Where the "n of 8 checked" caption goes: its x and the row it sits on. */
+  readonly checkedCaption: { readonly x: number; readonly row: number };
+  /** Centre lines of the captions above the drag area and the list. */
+  readonly dragCaptionY: number;
+  readonly listCaption: { readonly x: number; readonly y: number };
+  readonly dragArea: Rect;
+  readonly boxSize: number;
+  readonly list: Rect;
+  readonly listRowH: number;
+  readonly listItems: number;
+  readonly scrollbarW: number;
+}
+
+/**
+ * The Input test window at width `w`. At its full 560 px the drag area and list sit side by
+ * side; narrower, they are stacked. Their height shrinks (to 100 px, or 80 px each when
+ * stacked) to fit `maxH`.
+ */
+export function inputLayout(w: number, maxH = Infinity): InputLayout {
+  const wide = w >= INPUT_WIDE_W;
+  const valueX = wide ? 120 : 108;
+  const pillStep = wide ? 70 : 60;
+  const boxStep = wide ? 26 : 22;
+  const checkboxCount = 8;
+  const common = {
+    w,
+    valueX,
+    rowsTop: ROWS_TOP,
+    rowH: ROW_H,
+    row: (i: number): Rect => rect(0, ROWS_TOP + i * ROW_H, w, ROW_H),
+    pill: (i: number): Rect => rect(valueX + i * pillStep, ROWS_TOP + ROW_H + 2, pillStep - 8, 16),
+    checkbox: (i: number): Rect => rect(valueX + i * boxStep, ROWS_TOP + 6 * ROW_H + 4, 12, 12),
+    checkboxCount,
+    boxSize: 44,
+    listRowH: 20,
+    listItems: 60,
+    scrollbarW: 8,
+  };
+  if (wide) {
+    const top = 200;
+    const panelH = Math.max(100, Math.min(200, Math.floor(maxH - top - 16)));
+    return {
+      ...common,
+      h: top + panelH + 16,
+      checkedCaption: { x: valueX + checkboxCount * boxStep + 6, row: ROW.targets },
+      dragCaptionY: ROWS_TOP + 7 * ROW_H + 13,
+      listCaption: { x: 330, y: ROWS_TOP + 7 * ROW_H + 13 },
+      dragArea: rect(14, top, 300, panelH),
+      list: rect(330, top, 216, panelH),
+    };
+  }
+  // Stacked: the checked caption gets its own row, then the drag area, then the list.
+  const dragTop = ROWS_TOP + 8 * ROW_H + 24;
+  const gap = 26;
+  const panelH = Math.max(80, Math.min(200, Math.floor((maxH - dragTop - gap - 14) / 2)));
+  const listTop = dragTop + panelH + gap;
+  return {
+    ...common,
+    h: listTop + panelH + 14,
+    checkedCaption: { x: valueX, row: ROW.targets + 1 },
+    dragCaptionY: dragTop - 11,
+    listCaption: { x: 14, y: listTop - 11 },
+    dragArea: rect(14, dragTop, w - 28, panelH),
+    list: rect(14, listTop, w - 28, panelH),
+  };
+}
+
+const ABOUT_WIDE = [
+  'This desktop is simulated inside the app. Nothing you',
+  'do here leaves your device, and it holds no real data.',
+  'It speaks the Guacamole protocol, so the session',
+  'controls can be tried without a server.',
+  'Right-click the wallpaper for a menu.',
+] as const;
+const ABOUT_COMPACT = [
+  'This desktop is simulated inside the',
+  'app. Nothing you do here leaves your',
+  'device, and it holds no real data. It',
+  'speaks the Guacamole protocol, so the',
+  'session controls can be tried without',
+  'a server. Right-click the wallpaper',
+  'for a menu.',
+] as const;
+
+export interface AboutLayout {
+  readonly w: number;
+  readonly h: number;
+  readonly lines: readonly string[];
+  /** Sample text after the "9 px: " size prefix. */
+  readonly sample: string;
+  /** The fine-detail target. */
+  readonly target: Rect;
+}
+
+/** The About window at width `w`: the detail target moves below the text when narrow. */
+export function aboutLayout(w: number): AboutLayout {
+  if (w >= 520) {
+    return {
+      w,
+      h: 236,
+      lines: ABOUT_WIDE,
+      sample: 'The quick brown fox jumps over the lazy dog 0123456789',
+      target: rect(w - 148, TITLE_H + 14, 132, 132),
+    };
+  }
+  // Heading (20 + 22), the lines at 17 px, a 6 px gap, then the 9, 8 and 7 px samples.
+  const textEnd = TITLE_H + 20 + 22 + ABOUT_COMPACT.length * 17 + 6 + 15 + 14 + 13;
+  const target = rect(14, textEnd, 132, 132);
+  return {
+    w,
+    h: target.y + target.h + 26,
+    lines: ABOUT_COMPACT,
+    sample: 'The quick brown fox jumps over the lazy dog',
+    target,
+  };
+}
+
+/** Wide layouts, for reference and tests. */
+export const NOTES = notesLayout(520);
+export const INPUT = inputLayout(INPUT_WIDE_W);
+export const ABOUT = aboutLayout(520);
+
+export interface DesktopLayout {
+  readonly notes: NotesLayout;
+  readonly input: InputLayout;
+  readonly about: AboutLayout;
+  /** Narrow taskbar: no "Demo" label, short button titles, a narrower clock. */
+  readonly compactTaskbar: boolean;
+}
+
+/** Top of the arranged windows, below the wallpaper heading. */
+const ARRANGE_TOP = 56;
+/** Vertical step between cascaded windows on a narrow desktop: one title bar and a gap. */
+const CASCADE_DY = TITLE_H + 4;
+
+/** Whether windows are arranged as a full-width cascade (a phone in portrait). */
+export function isNarrowDesktop(width: number): boolean {
+  return width < INPUT_WIDE_W + 2 * MARGIN;
+}
+
+/** Window layouts for a desktop of `width` × `height` pixels. */
+export function desktopLayout(width: number, height: number): DesktopLayout {
+  const avail = width - 2 * MARGIN;
+  // Narrow: every window must fit even in the lowest of the three cascade slots.
+  const maxH = isNarrowDesktop(width)
+    ? height - TASKBAR_H - 4 - (ARRANGE_TOP + 2 * CASCADE_DY)
+    : height - TASKBAR_H - 8;
+  return {
+    notes: notesLayout(Math.min(NOTES.w, avail), maxH),
+    input: inputLayout(Math.min(INPUT_WIDE_W, avail), maxH),
+    about: aboutLayout(Math.min(ABOUT.w, avail)),
+    compactTaskbar: width < 96 + 3 * 124 + 108,
+  };
+}
 
 export const MENU_ITEMS = [
   'Arrange windows',
@@ -151,13 +347,11 @@ export const WALLPAPER_COUNT = 3;
 /** Longest paste into Notes, in code points, to keep layout and painting fast. */
 export const MAX_PASTE = 20000;
 
-// No astral characters here: guacamole-common-js 1.6.0's StringReader mangles them, so a
-// select-all and copy of the seed text would arrive garbled on the device.
 const INITIAL_NOTES =
   'Welcome to the demo desktop.\n' +
   'Everything here runs inside the app; nothing is sent anywhere.\n' +
   '\n' +
-  'Try typing, Unicode (café, 日本語), Enter and Backspace.\n';
+  'Try typing, Unicode (café, 日本語, 🙂), Enter and Backspace.\n';
 
 export interface DemoDesktopOptions {
   readonly width?: number;
@@ -201,6 +395,8 @@ export class DemoDesktop {
   readonly measure: MeasureText;
 
   readonly windows: Record<WindowId, DemoWindow>;
+  /** Window layouts for the current size (see `desktopLayout`). */
+  layout: DesktopLayout;
   /** Stacking order, bottom first. */
   readonly stack: WindowId[] = ['about', 'notes', 'input'];
   focused: WindowId | null = 'notes';
@@ -253,26 +449,21 @@ export class DemoDesktop {
     this.height = height;
     this.measure = options.measure;
     this.clockText = formatClock(options.now ?? 0);
+    this.layout = desktopLayout(width, height);
+    const win = (id: WindowId, title: string, shortTitle: string): DemoWindow => ({
+      id,
+      title,
+      shortTitle,
+      x: 0,
+      y: 0,
+      w: this.layout[id].w,
+      h: this.layout[id].h,
+      visible: true,
+    });
     this.windows = {
-      notes: { id: 'notes', title: 'Notes', x: 0, y: 0, w: NOTES.w, h: NOTES.h, visible: true },
-      input: {
-        id: 'input',
-        title: 'Input test',
-        x: 0,
-        y: 0,
-        w: INPUT.w,
-        h: INPUT.h,
-        visible: true,
-      },
-      about: {
-        id: 'about',
-        title: 'About this demo',
-        x: 0,
-        y: 0,
-        w: ABOUT.w,
-        h: ABOUT.h,
-        visible: true,
-      },
+      notes: win('notes', 'Notes', 'Notes'),
+      input: win('input', 'Input test', 'Input'),
+      about: win('about', 'About this demo', 'About'),
     };
     this.arrange();
   }
@@ -362,17 +553,44 @@ export class DemoDesktop {
     this.height = size.height;
     this.closeMenu();
     this.drag = null;
+    this.layout = desktopLayout(this.width, this.height);
+    for (const id of ['notes', 'input', 'about'] as const) {
+      const w = this.windows[id];
+      w.w = this.layout[id].w;
+      w.h = this.layout[id].h;
+    }
+    // Keep content positions valid for the new window sizes.
+    const { dragArea, boxSize } = this.layout.input;
+    this.boxX = Math.max(0, Math.min(dragArea.w - boxSize, this.boxX));
+    this.boxY = Math.max(0, Math.min(dragArea.h - boxSize, this.boxY));
+    this.listScroll = Math.min(this.listScroll, this.listMaxScroll);
+    if (this.pendingScroll !== 0) {
+      // A scroll not yet sent: repaint the list rather than copying within a resized window.
+      this.pendingScroll = 0;
+      this.invalidate('input', this.listViewport());
+      this.invalidate('input', this.scrollbarRect());
+    }
+    this.ensureCaretVisible();
     this.arrange();
     this.invalidate('desktop');
   }
 
   /** Places the windows in their default layout for the current size. */
   arrange(): void {
-    const m = 16;
-    const top = 56;
+    const m = MARGIN;
+    const top = ARRANGE_TOP;
     const bottom = this.height - TASKBAR_H;
     const { notes, input, about } = this.windows;
-    if (this.width >= notes.w + input.w + 3 * m) {
+    if (isNarrowDesktop(this.width)) {
+      // Narrow (a phone in portrait): full-width windows cascade straight down, Notes on top
+      // and lowest, so every title bar shows and each window fits on screen when raised.
+      // (`desktopLayout` sizes them for this; only very short desktops need the clamp.)
+      for (const [i, w] of [about, input, notes].entries()) {
+        w.x = m;
+        w.y = Math.max(0, Math.min(top + i * CASCADE_DY, bottom - w.h - 4));
+      }
+      this.stack.splice(0, this.stack.length, 'about', 'input', 'notes');
+    } else if (this.width >= notes.w + input.w + 3 * m) {
       notes.x = m;
       notes.y = top;
       input.x = Math.min(notes.x + notes.w + m * 2, this.width - input.w - m);
@@ -388,7 +606,7 @@ export class DemoDesktop {
       const fits = notes.h + input.h + about.h + 2 * m + top <= bottom;
       for (const [i, w] of [notes, input, about].entries()) {
         w.x = fits ? m : m + i * 32;
-        w.y = fits ? y : top + i * 40;
+        w.y = fits ? y : Math.max(0, Math.min(top + i * 40, bottom - w.h - 4));
         y += w.h + m;
       }
       // Stack in cascade order so every title bar stays visible.
@@ -401,7 +619,7 @@ export class DemoDesktop {
   receiveClipboard(text: string): void {
     this.clipboard = text;
     this.clipboardSource = 'client';
-    this.invalidate('notes', NOTES.clip);
+    this.invalidate('notes', this.layout.notes.clip);
   }
 
   /** Updates the clock; returns whether it changed. */
@@ -445,8 +663,9 @@ export class DemoDesktop {
       else this.wheelDown++;
       this.invalidateRow(ROW.wheel);
       const hit = this.hitTest(x, y);
-      if (hit.kind === 'window' && hit.win.id === 'input' && contains(INPUT.list, hit.lx, hit.ly)) {
-        this.scrollList(bit === Button.UP ? -2 * INPUT.listRowH : 2 * INPUT.listRowH);
+      const L = this.layout.input;
+      if (hit.kind === 'window' && hit.win.id === 'input' && contains(L.list, hit.lx, hit.ly)) {
+        this.scrollList(bit === Button.UP ? -2 * L.listRowH : 2 * L.listRowH);
       }
       return;
     }
@@ -519,26 +738,28 @@ export class DemoDesktop {
       return;
     }
     if (win.id === 'notes') {
-      if (contains(NOTES.area, lx, ly)) {
+      if (contains(this.layout.notes.area, lx, ly)) {
         this.setNotesFocused(true);
         this.placeCaret(lx, ly);
       } else {
         this.setNotesFocused(false);
       }
     } else if (win.id === 'input') {
-      for (let i = 0; i < INPUT.checkboxCount; i++) {
+      const L = this.layout.input;
+      for (let i = 0; i < L.checkboxCount; i++) {
         // A 2px margin keeps the target honest while forgiving sub-pixel rounding.
-        const cb = INPUT.checkbox(i);
+        const cb = L.checkbox(i);
         if (contains(rect(cb.x - 2, cb.y - 2, cb.w + 4, cb.h + 4), lx, ly)) {
           this.checks[i] = !this.checks[i];
           this.invalidateRow(ROW.targets);
+          this.invalidateRow(L.checkedCaption.row);
           return;
         }
       }
-      const area = INPUT.dragArea;
+      const area = L.dragArea;
       const bx = area.x + this.boxX;
       const by = area.y + this.boxY;
-      if (contains(rect(bx, by, INPUT.boxSize, INPUT.boxSize), lx, ly)) {
+      if (contains(rect(bx, by, L.boxSize, L.boxSize), lx, ly)) {
         this.drag = { kind: 'box', dx: lx - bx, dy: ly - by };
       }
     }
@@ -554,11 +775,11 @@ export class DemoDesktop {
       this.clampWindow(w);
     } else {
       const win = this.windows.input;
-      const area = INPUT.dragArea;
+      const { dragArea: area, boxSize } = this.layout.input;
       const lx = this.pointerX - win.x - area.x - d.dx;
       const ly = this.pointerY - win.y - area.y - d.dy;
-      const nx = Math.max(0, Math.min(area.w - INPUT.boxSize, lx));
-      const ny = Math.max(0, Math.min(area.h - INPUT.boxSize, ly));
+      const nx = Math.max(0, Math.min(area.w - boxSize, lx));
+      const ny = Math.max(0, Math.min(area.h - boxSize, ly));
       if (nx !== this.boxX || ny !== this.boxY) {
         this.boxX = nx;
         this.boxY = ny;
@@ -599,7 +820,9 @@ export class DemoDesktop {
       const hit = this.hitTest(this.pointerX, this.pointerY);
       if (hit.kind === 'window') {
         if (hit.ly < TITLE_H && !contains(closeButtonRect(hit.win), hit.lx, hit.ly)) shape = 'move';
-        else if (hit.win.id === 'notes' && contains(NOTES.area, hit.lx, hit.ly)) shape = 'text';
+        else if (hit.win.id === 'notes' && contains(this.layout.notes.area, hit.lx, hit.ly)) {
+          shape = 'text';
+        }
       }
     }
     this.cursor = shape;
@@ -629,7 +852,7 @@ export class DemoDesktop {
   private setNotesFocused(focused: boolean): void {
     if (this.notesFocused === focused) return;
     this.notesFocused = focused;
-    this.invalidate('notes', NOTES.area);
+    this.invalidate('notes', this.layout.notes.area);
   }
 
   hide(id: WindowId): void {
@@ -698,8 +921,8 @@ export class DemoDesktop {
       case 'Clear notes':
         this.notes.setText('');
         this.notesScroll = 0;
-        this.invalidate('notes', NOTES.area);
-        this.invalidate('notes', NOTES.status);
+        this.invalidate('notes', this.layout.notes.area);
+        this.invalidate('notes', this.layout.notes.status);
         break;
     }
   }
@@ -821,19 +1044,20 @@ export class DemoDesktop {
     this.clipboard = text;
     this.clipboardSource = 'notes';
     this.outgoingClipboard = text;
-    this.invalidate('notes', NOTES.clip);
+    this.invalidate('notes', this.layout.notes.clip);
     return true;
   }
 
   private textChanged(): void {
     this.ensureCaretVisible();
-    this.invalidate('notes', NOTES.area);
-    this.invalidate('notes', NOTES.status);
+    this.invalidate('notes', this.layout.notes.area);
+    this.invalidate('notes', this.layout.notes.status);
   }
 
   /** Visible text lines in the Notes area. */
   get notesVisibleLines(): number {
-    return Math.floor((NOTES.area.h - NOTES.pad * 2) / NOTES.lineH);
+    const L = this.layout.notes;
+    return Math.floor((L.area.h - L.pad * 2) / L.lineH);
   }
 
   readonly charWidth = (c: string): number => {
@@ -846,7 +1070,8 @@ export class DemoDesktop {
   };
 
   notesLines(): TextLine[] {
-    return layoutText(this.notes.codePoints, NOTES.area.w - NOTES.pad * 2, this.charWidth);
+    const L = this.layout.notes;
+    return layoutText(this.notes.codePoints, L.area.w - L.pad * 2, this.charWidth);
   }
 
   private ensureCaretVisible(): void {
@@ -859,30 +1084,32 @@ export class DemoDesktop {
   }
 
   private placeCaret(lx: number, ly: number): void {
+    const L = this.layout.notes;
     const lines = this.notesLines();
-    const row = Math.floor((ly - NOTES.area.y - NOTES.pad) / NOTES.lineH) + this.notesScroll;
+    const row = Math.floor((ly - L.area.y - L.pad) / L.lineH) + this.notesScroll;
     const line = lines[Math.max(0, Math.min(lines.length - 1, row))] as TextLine;
-    const x = lx - NOTES.area.x - NOTES.pad;
+    const x = lx - L.area.x - L.pad;
     this.notes.moveTo(indexAtX(this.notes.codePoints, line, x, this.charWidth));
-    this.invalidate('notes', NOTES.area);
-    this.invalidate('notes', NOTES.status);
+    this.invalidate('notes', L.area);
+    this.invalidate('notes', L.status);
   }
 
   // ---- Scroll list --------------------------------------------------------------------
 
   get listMaxScroll(): number {
-    return Math.max(0, INPUT.listItems * INPUT.listRowH - this.listViewport().h);
+    const L = this.layout.input;
+    return Math.max(0, L.listItems * L.listRowH - this.listViewport().h);
   }
 
   /** The scrolling part of the list (inside its border, left of the scrollbar). */
   listViewport(): Rect {
-    const l = INPUT.list;
-    return rect(l.x + 1, l.y + 1, l.w - 2 - INPUT.scrollbarW, l.h - 2);
+    const { list: l, scrollbarW } = this.layout.input;
+    return rect(l.x + 1, l.y + 1, l.w - 2 - scrollbarW, l.h - 2);
   }
 
   scrollbarRect(): Rect {
-    const l = INPUT.list;
-    return rect(l.x + l.w - 1 - INPUT.scrollbarW, l.y + 1, INPUT.scrollbarW, l.h - 2);
+    const { list: l, scrollbarW } = this.layout.input;
+    return rect(l.x + l.w - 1 - scrollbarW, l.y + 1, scrollbarW, l.h - 2);
   }
 
   private scrollList(delta: number): void {
@@ -896,7 +1123,7 @@ export class DemoDesktop {
   // ---- Geometry helpers ----------------------------------------------------------------
 
   private invalidateRow(i: number): void {
-    this.invalidate('input', INPUT.row(i));
+    this.invalidate('input', this.layout.input.row(i));
   }
 
   private surfaceSize(id: SurfaceId): { w: number; h: number } {
@@ -914,11 +1141,17 @@ export class DemoDesktop {
   }
 
   taskbarButtonRect(i: number): Rect {
-    return rect(96 + i * 124, this.height - TASKBAR_H + 5, 116, TASKBAR_H - 10);
+    const y = this.height - TASKBAR_H + 5;
+    if (!this.layout.compactTaskbar) return rect(96 + i * 124, y, 116, TASKBAR_H - 10);
+    // Narrow: buttons share the space between the logo and the clock.
+    const left = 40;
+    const step = Math.floor((this.width - left - this.clockRect().w) / TASKBAR_ORDER.length);
+    return rect(left + i * step, y, step - 6, TASKBAR_H - 10);
   }
 
   clockRect(): Rect {
-    return rect(this.width - 100, this.height - TASKBAR_H, 100, TASKBAR_H);
+    const w = this.layout.compactTaskbar ? 80 : 100;
+    return rect(this.width - w, this.height - TASKBAR_H, w, TASKBAR_H);
   }
 
   ellipsize(text: string, maxWidth: number, font: FontSpec): string {

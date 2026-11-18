@@ -5,9 +5,10 @@ Session-level logic: gesture recogniser, `PointerModel`, `KeyModel`, `Viewport`,
 
 The modules below are **pure TypeScript**: no React, Capacitor, DOM globals, timers or
 imports from `src/vendor`. Time and input are injected, so every behaviour is unit-tested
-(`*.test.ts` next to each module). The DOM/Capacitor glue (`GestureLayer`,
-`TextInputBridge`, `RemoteDisplay`) will be added to this folder in T1.6/T1.7; it only
-translates platform events into these plain types and back.
+(`*.test.ts` next to each module). The DOM/Capacitor glue lives in
+[`src/ui/session/`](../ui/session/index.ts): mainly `SessionController.ts`, with tested
+helpers such as `inputMapping.ts`, `layout.ts` and `clipboardText.ts` (clipboard streams).
+It only translates platform events into these plain types and back.
 
 | Module                         | SPEC                       | Role                                                                             |
 | ------------------------------ | -------------------------- | -------------------------------------------------------------------------------- |

@@ -174,12 +174,12 @@ export function createCanvasRenderer(): DemoRenderer {
 
   return {
     measureText,
-    renderPng(x, y, w, h, paint) {
+    renderPng(x, y, w, h, paint, scale = 1) {
       const canvas = shared ?? makeCanvas(w, h);
       canvas.width = w;
       canvas.height = h;
       const ctx = context(canvas);
-      ctx.setTransform(1, 0, 0, 1, -x, -y);
+      ctx.setTransform(scale, 0, 0, scale, -x, -y);
       paint(new CanvasPainter(ctx));
       if (shared) {
         const url = shared.toDataURL('image/png');

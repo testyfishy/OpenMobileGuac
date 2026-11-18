@@ -355,6 +355,13 @@ The `Client.connect(connectString)` call passes this string to `tunnel.connect(d
     `blob` instructions of at most `DEFAULT_BLOB_LENGTH = 6048` bytes, sent base64-encoded
     (`JS/ArrayBufferWriter.js`). `sendEnd` sends `end,<index>` (`JS/OutputStream.js`,
     `JS/Client.js`).
+- **Astral characters (1.6.0 bug, worked around here).** `StringWriter` encodes each UTF-16
+  code unit separately (`charCodeAt`), so an emoji becomes two 3-byte surrogate encodings
+  (CESU-8, invalid UTF-8). `StringReader`'s `UTF8Parser` decodes 4-byte sequences but emits
+  them with `String.fromCharCode`, which truncates code points above U+FFFF. OpenMobileGuac
+  therefore moves clipboard text as raw bytes: `ArrayBufferReader` chunks joined and decoded
+  once at `end` with `TextDecoder`, and `TextEncoder` bytes sent with `ArrayBufferWriter`
+  (`app/src/ui/session/clipboardText.ts`). The wire format is unchanged.
 - `ClipboardData` is `{ source, type (default 'text/plain'), data (default '') }`
   (`FE/clipboard/types/ClipboardData.js`).
 - `FE/clipboard/services/clipboardService.js` bridges to the local clipboard with

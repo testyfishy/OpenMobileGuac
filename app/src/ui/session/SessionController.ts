@@ -60,6 +60,7 @@ import {
   toGuacMouseTemplate,
   wheelDeltaPx,
 } from './inputMapping.ts';
+import { readTextStream, writeTextStream } from './clipboardText.ts';
 import { computeLayout, cursorDrawScale, visualViewportInset } from './layout.ts';
 import { pointerConfigFromSettings, type SessionSettings } from './settings.ts';
 import {
@@ -350,14 +351,10 @@ export class SessionController {
     };
     client.onclipboard = (stream, mimetype) => {
       if (!live() || !/^text\//.test(mimetype)) return;
-      const reader = new Guacamole.StringReader(stream);
-      let text = '';
-      reader.ontext = (chunk) => {
-        text += chunk;
-      };
-      reader.onend = () => {
+      // Raw bytes, decoded once at the end: upstream StringReader garbles emoji.
+      readTextStream(stream, (text) => {
         if (live()) this.opts?.onRemoteClipboard(text);
-      };
+      });
     };
 
     const display = client.getDisplay();
@@ -737,14 +734,14 @@ export class SessionController {
     this.sendKeyEvents(this.keys.typeText(text));
   }
 
-  /** CLP-1: set the remote clipboard (clipboard stream + StringWriter, as the web client). */
+  /**
+   * CLP-1: set the remote clipboard. A clipboard stream as in the web client, but written as
+   * `TextEncoder` UTF-8 bytes: upstream StringWriter mis-encodes characters above U+FFFF.
+   */
   sendClipboard(text: string): boolean {
     const client = this.client;
     if (!client || this.machine.phase.kind !== 'connected') return false;
-    const stream = client.createClipboardStream('text/plain');
-    const writer = new Guacamole.StringWriter(stream);
-    writer.sendText(text);
-    writer.sendEnd();
+    writeTextStream(client.createClipboardStream('text/plain'), text);
     return true;
   }
 

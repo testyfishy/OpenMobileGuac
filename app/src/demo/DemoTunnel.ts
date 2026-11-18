@@ -9,6 +9,7 @@ import { createCanvasRenderer } from './canvasRenderer.ts';
 import { demoVariant } from './profile.ts';
 import { WireParser, encodeInstruction } from './protocol.ts';
 import type { DemoRenderer } from './renderer.ts';
+import { scaleForDpi } from './scale.ts';
 import { DemoServer, defaultScheduler, type DemoScheduler } from './server.ts';
 
 export interface DemoTunnelOptions {
@@ -50,8 +51,8 @@ function randomSuffix(): string {
  * 2. After 0 ms, `onuuid` fires, the state becomes `OPEN`, and the server sends `name`,
  *    the cursor, the layers and the first frame ending in `sync`.
  *
- * `data` is the usual connect string; `GUAC_WIDTH`, `GUAC_HEIGHT` and `GUAC_ID` are read
- * (see `profile.ts` for the IDs). Messages sent while not connected are dropped, as upstream.
+ * `data` is the usual connect string; `GUAC_WIDTH`, `GUAC_HEIGHT`, `GUAC_DPI` and `GUAC_ID`
+ * are read (see `profile.ts` for the IDs and `scale.ts` for the DPI). Messages sent while not connected are dropped, as upstream.
  */
 export class DemoTunnel implements TunnelLike {
   state: number = TunnelState.CLOSED;
@@ -87,6 +88,8 @@ export class DemoTunnel implements TunnelLike {
     const variant = demoVariant(params.get('GUAC_ID'));
     const reqW = Number(params.get('GUAC_WIDTH') ?? NaN);
     const reqH = Number(params.get('GUAC_HEIGHT') ?? NaN);
+    // Fixed-size variants keep 1:1 pixels; the default one honours the device's DPI.
+    const scale = variant.fixed ? 1 : scaleForDpi(Number(params.get('GUAC_DPI') ?? NaN));
     this.setState(TunnelState.CONNECTING);
 
     this.openTimer = this.scheduler.setTimeout(() => {
@@ -99,6 +102,7 @@ export class DemoTunnel implements TunnelLike {
           width: variant.fixed?.width ?? (reqW > 0 ? reqW : this.options.width),
           height: variant.fixed?.height ?? (reqH > 0 ? reqH : this.options.height),
           fixedSize: variant.fixed !== undefined,
+          scale,
           name: variant.name,
           scheduler: this.scheduler,
           now: this.options.now,

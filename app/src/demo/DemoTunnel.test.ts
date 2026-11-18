@@ -9,6 +9,7 @@ import { assertHttpBaseUrl } from '../core/models/ServerProfile.ts';
 import { base64ToBytes, bytesToBase64, encodeInstruction } from './protocol.ts';
 import { STAGING_LAYER, type DemoServer } from './server.ts';
 import { createStubRenderer } from './testing.ts';
+import { readTextStream, writeTextStream } from '../ui/session/clipboardText.ts';
 
 interface Rx {
   readonly opcode: string;
@@ -49,22 +50,19 @@ function srv(t: DemoTunnel): DemoServer {
 const ops = (list: readonly Rx[]) => list.map((i) => i.opcode);
 const find = (list: readonly Rx[], opcode: string) => list.filter((i) => i.opcode === opcode);
 
-/** Reads a server-to-client stream with the vendored StringReader, as the UI would. */
-function readTextStream(list: readonly Rx[], index: string): string {
+/** Reads a server-to-client stream with the app's clipboard reader, as the UI does. */
+function readStreamText(list: readonly Rx[], index: string): string {
   const fakeClient = { sendAck: () => {} } as unknown as Guacamole.Client;
   const stream = new Guacamole.InputStream(fakeClient, Number(index));
-  const reader = new Guacamole.StringReader(stream);
-  let text = '';
-  let ended = false;
-  reader.ontext = (t) => (text += t);
-  reader.onend = () => (ended = true);
+  let text: string | null = null;
+  readTextStream(stream, (t) => (text = t));
   for (const i of list) {
     if (i.args[0] !== index) continue;
     if (i.opcode === 'blob') stream.onblob?.(i.args[1] ?? '');
     if (i.opcode === 'end') stream.onend?.();
   }
-  expect(ended).toBe(true);
-  return text;
+  expect(text).not.toBeNull();
+  return text ?? '';
 }
 
 beforeEach(() => {
@@ -423,19 +421,17 @@ describe('DemoTunnel clipboard', () => {
     expect(d.notes.text).toBe(text);
   });
 
-  it('accepts a clipboard written by the vendored StringWriter', () => {
+  it("accepts a clipboard written by the app's clipboard writer, emoji included", () => {
     const { tunnel } = setup();
     open(tunnel);
-    // Minimal client: just enough for OutputStream/StringWriter to send through the tunnel.
+    // Minimal client: just enough for OutputStream/ArrayBufferWriter to send through the tunnel.
     const client = {
       sendBlob: (i: number, data: string) => tunnel.sendMessage('blob', i, data),
       endStream: (i: number) => tunnel.sendMessage('end', i),
     } as unknown as Guacamole.Client;
     tunnel.sendMessage('clipboard', 0, 'text/plain');
-    const writer = new Guacamole.StringWriter(new Guacamole.OutputStream(client, 0));
-    const long = 'é'.repeat(5000) + ' end';
-    writer.sendText(long);
-    writer.sendEnd();
+    const long = 'é🙂'.repeat(3000) + ' end';
+    writeTextStream(new Guacamole.OutputStream(client, 0), long);
     expect(srv(tunnel).desktop.clipboard).toBe(long);
   });
 
@@ -480,10 +476,152 @@ describe('DemoTunnel clipboard', () => {
       .filter((b) => b.args[0] === index)
       .map((b) => base64ToBytes(b.args[1] ?? ''));
     expect(new TextDecoder().decode(bytes[0])).toBe('Copied: ☕ naïve 🙂');
-    // ...and the vendored StringReader decodes them. (Its UTF8Parser in 1.6.0 truncates
-    // code points above U+FFFF with String.fromCharCode, so compare only the BMP part.)
-    expect(readTextStream(out, index).startsWith('Copied: ☕ naïve ')).toBe(true);
+    // ...and the app's clipboard reader decodes them exactly.
+    expect(readStreamText(out, index)).toBe('Copied: ☕ naïve 🙂');
     expect(d.clipboardSource).toBe('notes');
+  });
+});
+
+describe('DemoTunnel high-DPI scaling', () => {
+  const PHONE = 'GUAC_ID=demo-desktop&GUAC_WIDTH=1125&GUAC_HEIGHT=2436&GUAC_DPI=288';
+  const layer0Size = (list: readonly Rx[]) =>
+    find(list, 'size')
+      .find((i) => i.args[0] === '0')
+      ?.args.slice(1);
+
+  it('lays out a DPR 3 phone screen in logical pixels and draws it at 3×', () => {
+    const { tunnel, rx, renderer } = setup();
+    open(tunnel, PHONE);
+    const s = srv(tunnel);
+    expect(s.scale.scale).toBe(3);
+    expect([s.desktop.width, s.desktop.height]).toEqual([375, 812]);
+    // Layer 0 is exactly the requested device size.
+    expect(layer0Size(rx)).toEqual(['1125', '2436']);
+    // Window layers and positions are logical × 3.
+    const notes = s.desktop.windows.notes;
+    const sizeNotes = find(rx, 'size').find((i) => i.args[0] === String(LAYERS.notes));
+    expect(sizeNotes?.args.slice(1)).toEqual([String(notes.w * 3), String(notes.h * 3)]);
+    const moveNotes = find(rx, 'move').filter((m) => m.args[0] === '1' && m.args[1] === '0');
+    expect(moveNotes.at(-1)?.args.slice(2, 4)).toEqual([String(notes.x * 3), String(notes.y * 3)]);
+    // Every tile is painted at scale 3 and lies inside its layer.
+    expect(renderer.renders.every((r) => r.scale === 3)).toBe(true);
+    for (const img of find(rx, 'img')) {
+      const [, , layer = '', , x = '', y = ''] = img.args;
+      if (layer === '0') {
+        expect(Number(x)).toBeLessThan(1125);
+        expect(Number(y)).toBeLessThan(2436);
+      }
+    }
+    // The cursor is scaled too, so it keeps its size on screen.
+    expect(find(rx, 'cursor')[0]?.args).toEqual(['3', '3', '-1', '0', '0', '39', '60']);
+  });
+
+  it('maps pointer coordinates back to logical pixels', () => {
+    const { tunnel } = setup();
+    open(tunnel, PHONE);
+    tunnel.sendMessage('mouse', 302, 601, 0);
+    const d = srv(tunnel).desktop;
+    expect([d.pointerX, d.pointerY]).toEqual([100, 200]);
+    // A click in the middle of Notes' text area (device px) places the caret there.
+    const notes = d.windows.notes;
+    const area = d.layout.notes.area;
+    const cx = (notes.x + area.x + area.w / 2) * 3;
+    const cy = (notes.y + area.y + area.h / 2) * 3;
+    d.setFocus('input');
+    tunnel.sendMessage('mouse', cx, cy, 1);
+    tunnel.sendMessage('mouse', cx, cy, 0);
+    expect(d.focused).toBe('notes');
+    expect(d.notesFocused).toBe(true);
+  });
+
+  it('scrolls the list with a device-pixel copy at an integer scale', () => {
+    const { tunnel, take } = setup();
+    open(tunnel, PHONE);
+    const d = srv(tunnel).desktop;
+    d.raise('input');
+    frame();
+    take();
+    const input = d.windows.input;
+    const list = d.layout.input.list;
+    const x = (input.x + list.x + 40) * 3;
+    const y = (input.y + list.y + 40) * 3;
+    tunnel.sendMessage('mouse', x, y, 16);
+    tunnel.sendMessage('mouse', x, y, 0);
+    frame();
+    const out = take();
+    const copy = find(out, 'copy');
+    expect(copy).toHaveLength(1);
+    const view = d.listViewport();
+    const [, sx, sy, w, h, , , dx, dy] = (copy[0]?.args ?? []).map(Number);
+    expect([sx, dx, w]).toEqual([view.x * 3, view.x * 3, view.w * 3]);
+    expect(Number(sy) - Number(dy)).toBe(40 * 3);
+    expect(h).toBe((view.h - 40) * 3);
+  });
+
+  it('keeps the scale when the client sends a new size', () => {
+    const { tunnel, take } = setup();
+    open(tunnel, PHONE);
+    take();
+    tunnel.sendMessage('size', 2436, 1125);
+    frame();
+    const out = take();
+    const d = srv(tunnel).desktop;
+    expect([d.width, d.height]).toEqual([812, 375]);
+    expect(layer0Size(out)).toEqual(['2436', '1125']);
+    expect(srv(tunnel).scale.scale).toBe(3);
+  });
+
+  it('keeps a fractional scale exact at the layer-0 edge and repaints instead of copying', () => {
+    const { tunnel, take, renderer } = setup();
+    open(tunnel, 'GUAC_ID=demo-desktop&GUAC_WIDTH=1080&GUAC_HEIGHT=2340&GUAC_DPI=252');
+    const s = srv(tunnel);
+    expect(s.scale.scale).toBe(2.625);
+    expect([s.desktop.width, s.desktop.height]).toEqual([412, 892]);
+    const d = s.desktop;
+    d.raise('input');
+    frame();
+    take();
+    const input = d.windows.input;
+    const list = d.layout.input.list;
+    const x = Math.round((input.x + list.x + 40) * 2.625);
+    const y = Math.round((input.y + list.y + 40) * 2.625);
+    renderer.renders.length = 0;
+    tunnel.sendMessage('mouse', x, y, 16);
+    tunnel.sendMessage('mouse', x, y, 0);
+    frame();
+    const out = take();
+    expect(d.listScroll).toBe(40);
+    expect(find(out, 'copy')).toEqual([]);
+    expect(find(out, 'img').some((i) => i.args[2] === String(LAYERS.input))).toBe(true);
+    expect(renderer.renders.every((r) => r.scale === 2.625)).toBe(true);
+  });
+
+  it('scales by 1.5 at 144 dpi', () => {
+    const { tunnel, rx } = setup();
+    open(tunnel, 'GUAC_WIDTH=1200&GUAC_HEIGHT=900&GUAC_DPI=144');
+    expect([srv(tunnel).desktop.width, srv(tunnel).desktop.height]).toEqual([800, 600]);
+    expect(layer0Size(rx)).toEqual(['1200', '900']);
+  });
+
+  it('uses scale 1 without GUAC_DPI and for the fixed-size variants', () => {
+    const a = setup();
+    open(a.tunnel, 'GUAC_WIDTH=1125&GUAC_HEIGHT=2436');
+    expect(srv(a.tunnel).scale.scale).toBe(1);
+    expect(srv(a.tunnel).desktop.width).toBe(1125);
+
+    for (const [id, w, h] of [
+      ['demo-desktop-1024', 1024, 768],
+      ['demo-desktop-1920', 1920, 1080],
+    ] as const) {
+      const b = setup();
+      open(b.tunnel, `GUAC_ID=${id}&GUAC_WIDTH=1125&GUAC_HEIGHT=2436&GUAC_DPI=288`);
+      const s = srv(b.tunnel);
+      expect(s.scale.scale).toBe(1);
+      expect([s.desktop.width, s.desktop.height]).toEqual([w, h]);
+      expect(layer0Size(b.rx)).toEqual([String(w), String(h)]);
+      b.tunnel.sendMessage('mouse', 302, 601, 0);
+      expect([s.desktop.pointerX, s.desktop.pointerY]).toEqual([302, 601]);
+    }
   });
 });
 

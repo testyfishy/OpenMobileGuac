@@ -9,18 +9,13 @@
  * `send*` methods (client to server). See README.md for the list.
  */
 import { CURSORS } from './cursors.ts';
-import {
-  DemoDesktop,
-  clampSize,
-  type CursorShape,
-  type SurfaceId,
-  type SurfaceState,
-} from './desktop.ts';
+import { DemoDesktop, type CursorShape, type SurfaceId, type SurfaceState } from './desktop.ts';
 import { intersect, isEmpty, rect, tiles, type Rect } from './geometry.ts';
 import { DESKTOP_BASE_RGB, WINDOW_BASE_RGB, paintSurface } from './paintDesktop.ts';
 import { base64ToBytes, bytesToBase64, chunkBase64, type Instruction } from './protocol.ts';
 import type { Painter } from './painter.ts';
 import type { DemoRenderer } from './renderer.ts';
+import { DemoScale, fitScale } from './scale.ts';
 
 /** Same shape as core's `ReplayScheduler`; the defaults work with Vitest fake timers. */
 export interface DemoScheduler {
@@ -35,9 +30,15 @@ export const defaultScheduler: DemoScheduler = {
 
 export interface DemoServerOptions {
   readonly renderer: DemoRenderer;
-  /** Initial size in pixels (clamped). Default 1280×800. */
+  /** Initial size in device pixels (clamped). Default 1280×800. */
   readonly width?: number;
   readonly height?: number;
+  /**
+   * Device pixels per logical pixel (see `scale.ts`), normally from `GUAC_DPI`. Default 1.
+   * Lowered if needed so the initial desktop keeps its minimum logical size, then kept for
+   * the whole session, `size` requests included.
+   */
+  readonly scale?: number;
   /** Ignore `size` requests from the client and keep the initial size. */
   readonly fixedSize?: boolean;
   /** Sent with the `name` instruction. */
@@ -73,6 +74,9 @@ type Piece = Instruction | PendingPng;
 
 interface SentSurface {
   readonly state: SurfaceState;
+  /** Layer size in device pixels. */
+  readonly dw: number;
+  readonly dh: number;
   /** Damage arrived while hidden, so repaint everything when shown. */
   readonly stale: boolean;
 }
@@ -94,6 +98,11 @@ function int(s: string | undefined): number {
 
 export class DemoServer {
   readonly desktop: DemoDesktop;
+  /** Logical ↔ device pixel conversion; fixed for the session. */
+  readonly scale: DemoScale;
+  /** Layer 0 size in device pixels. */
+  deviceWidth: number;
+  deviceHeight: number;
   /** Receives each server-to-client instruction. */
   onInstruction: ((opcode: string, args: string[]) => void) | null = null;
 
@@ -127,9 +136,15 @@ export class DemoServer {
     this.renderer = options.renderer;
     this.scheduler = options.scheduler ?? defaultScheduler;
     this.now = options.now ?? (() => Date.now());
+    const w = options.width ?? 1280;
+    const h = options.height ?? 800;
+    this.scale = new DemoScale(fitScale(options.scale ?? 1, w, h));
+    const sizes = this.scale.sizes(w, h);
+    this.deviceWidth = sizes.device.width;
+    this.deviceHeight = sizes.device.height;
     this.desktop = new DemoDesktop({
-      width: options.width,
-      height: options.height,
+      width: sizes.logical.width,
+      height: sizes.logical.height,
       measure: options.renderer.measureText,
       now: this.now(),
     });
@@ -169,7 +184,7 @@ export class DemoServer {
         const y = int(args[1]);
         const mask = int(args[2]);
         if ([x, y, mask].some(Number.isNaN)) return;
-        d.pointer(x, y, mask, this.now());
+        d.pointer(this.scale.toLogical(x), this.scale.toLogical(y), mask, this.now());
         break;
       }
       case 'key': {
@@ -180,8 +195,10 @@ export class DemoServer {
       }
       case 'size': {
         if (this.opts.fixedSize) return;
-        const { width, height } = clampSize(int(args[0]), int(args[1]));
-        d.resize(width, height);
+        const { logical, device } = this.scale.sizes(int(args[0]), int(args[1]));
+        this.deviceWidth = device.width;
+        this.deviceHeight = device.height;
+        d.resize(logical.width, logical.height);
         break;
       }
       case 'sync':
@@ -342,24 +359,36 @@ export class DemoServer {
     return i;
   }
 
+  /** A PNG of device-pixel rect `r` of a layer, painted in logical pixels. */
   private png(layer: number, r: Rect, paint: (p: Painter) => void): PendingPng {
-    return { layer, x: r.x, y: r.y, data: this.renderer.renderPng(r.x, r.y, r.w, r.h, paint) };
+    const data = this.renderer.renderPng(r.x, r.y, r.w, r.h, paint, this.scale.scale);
+    return { layer, x: r.x, y: r.y, data };
+  }
+
+  /** A surface's layer size in device pixels. */
+  private deviceSize(s: SurfaceState): { dw: number; dh: number } {
+    if (s.layer === 0) return { dw: this.deviceWidth, dh: this.deviceHeight };
+    return { dw: this.scale.dev(s.w), dh: this.scale.dev(s.h) };
   }
 
   private buildFrame(): Piece[] {
     const d = this.desktop;
+    const sc = this.scale;
     const out: Piece[] = [];
 
+    // Cursor images are scaled with the desktop so they keep their usual size on screen.
     if (!this.cursorsSent) {
       for (const c of Object.values(CURSORS)) {
-        out.push(ins('size', c.buffer, c.w, c.h));
-        out.push(this.png(c.buffer, rect(0, 0, c.w, c.h), (p) => c.paint(p)));
+        out.push(ins('size', c.buffer, sc.dev(c.w), sc.dev(c.h)));
+        out.push(this.png(c.buffer, rect(0, 0, sc.dev(c.w), sc.dev(c.h)), (p) => c.paint(p)));
       }
       this.cursorsSent = true;
     }
     if (d.cursor !== this.sentCursor) {
       const c = CURSORS[d.cursor];
-      out.push(ins('cursor', c.hotX, c.hotY, c.buffer, 0, 0, c.w, c.h));
+      out.push(
+        ins('cursor', sc.dev(c.hotX), sc.dev(c.hotY), c.buffer, 0, 0, sc.dev(c.w), sc.dev(c.h)),
+      );
       this.sentCursor = d.cursor;
     }
 
@@ -385,11 +414,12 @@ export class DemoServer {
 
     for (const s of surfaces) {
       const prev = this.sent.get(s.id);
-      const resized = !prev || prev.state.w !== s.w || prev.state.h !== s.h;
+      const { dw, dh } = this.deviceSize(s);
+      const resized = !prev || prev.dw !== dw || prev.dh !== dh;
       if (resized) {
         const [r, g, b] = s.layer === 0 ? DESKTOP_BASE_RGB : WINDOW_BASE_RGB;
-        out.push(ins('size', s.layer, s.w, s.h));
-        out.push(ins('rect', s.layer, 0, 0, s.w, s.h));
+        out.push(ins('size', s.layer, dw, dh));
+        out.push(ins('rect', s.layer, 0, 0, dw, dh));
         out.push(ins('cfill', OVER, s.layer, r, g, b, 255));
       }
       if (
@@ -397,17 +427,18 @@ export class DemoServer {
         !restack.has(s.id) &&
         (!prev || prev.state.x !== s.x || prev.state.y !== s.y)
       ) {
-        out.push(ins('move', s.layer, 0, s.x, s.y, 0));
+        out.push(ins('move', s.layer, 0, sc.dev(s.x), sc.dev(s.y), 0));
       }
       if (prev ? prev.state.visible !== s.visible : !s.visible) {
         out.push(ins('shade', s.layer, s.visible ? 255 : 0));
       }
 
-      const bounds = rect(0, 0, s.w, s.h);
-      const rects = damage.rects.get(s.id) ?? [];
+      // Damage is in logical pixels; everything sent below is in device pixels.
+      const bounds = rect(0, 0, dw, dh);
+      const rects = [...(damage.rects.get(s.id) ?? [])];
       let stale = resized || (prev?.stale ?? false);
       if (!s.visible) {
-        this.sent.set(s.id, { state: s, stale: stale || rects.length > 0 });
+        this.sent.set(s.id, { state: s, dw, dh, stale: stale || rects.length > 0 });
         continue;
       }
       let paint: Rect[];
@@ -416,14 +447,20 @@ export class DemoServer {
       } else {
         for (const c of damage.copies) {
           if (c.surface !== s.id) continue;
+          if (!sc.isInteger) {
+            // A fractional scale cannot shift pixels exactly; repaint the region instead.
+            rects.push(c.rect);
+            continue;
+          }
           const v = c.rect;
           const dy = c.dy;
           // Content moves by dy: copy the part that stays visible to its new place.
           const src = dy < 0 ? rect(v.x, v.y - dy, v.w, v.h + dy) : rect(v.x, v.y, v.w, v.h - dy);
           const dstY = dy < 0 ? v.y : v.y + dy;
-          out.push(ins('copy', s.layer, src.x, src.y, src.w, src.h, OVER, s.layer, src.x, dstY));
+          const ds = sc.devRect(src);
+          out.push(ins('copy', s.layer, ds.x, ds.y, ds.w, ds.h, OVER, s.layer, ds.x, sc.dev(dstY)));
         }
-        paint = rects.map((r) => intersect(r, bounds)).filter((r) => !isEmpty(r));
+        paint = rects.map((r) => intersect(sc.devRect(r), bounds)).filter((r) => !isEmpty(r));
       }
       stale = false;
       for (const r of paint) {
@@ -431,14 +468,14 @@ export class DemoServer {
           out.push(this.png(s.layer, t, (p) => paintSurface(d, s.id, p)));
         }
       }
-      this.sent.set(s.id, { state: s, stale });
+      this.sent.set(s.id, { state: s, dw, dh, stale });
     }
 
     for (const id of order) {
       if (!restack.has(id)) continue;
       const s = surfaces.find((x) => x.id === id) as SurfaceState;
       out.push(ins('move', s.layer, STAGING_LAYER, 0, 0, 0));
-      out.push(ins('move', s.layer, 0, s.x, s.y, 0));
+      out.push(ins('move', s.layer, 0, sc.dev(s.x), sc.dev(s.y), 0));
     }
     this.sentOrder = order;
 

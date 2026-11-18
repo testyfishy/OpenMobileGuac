@@ -1,11 +1,13 @@
 /**
  * Developer harness: the real `Guacamole.Client` against `DemoTunnel` in a browser.
  * Run `npm run dev` and open `/src/demo/dev/harness.html`. Query options:
- * `?w=1280&h=800` initial size, `?id=demo-desktop-1024` connection variant,
+ * `?w=1280&h=800` initial size in device pixels, `?dpi=288` the `GUAC_DPI` sent (default
+ * 96, so 1:1), `?id=demo-desktop-1024` connection variant,
  * `?noImageDecoder` to force the data-URI image path used where `ImageDecoder` is missing
  * (older iOS WebKit).
  */
 import Guacamole from '../../vendor/guacamole-common-js/index.js';
+import { readTextStream, writeTextStream } from '../../ui/session/clipboardText.ts';
 import { DemoTunnel } from '../DemoTunnel.ts';
 
 const params = new URLSearchParams(location.search);
@@ -56,21 +58,15 @@ keyboard.onkeydown = (keysym) => {
 keyboard.onkeyup = (keysym) => client.sendKeyEvent(0, keysym);
 
 client.onclipboard = (stream, mimetype) => {
-  const reader = new Guacamole.StringReader(stream);
-  let text = '';
-  reader.ontext = (t) => (text += t);
-  reader.onend = () => {
+  readTextStream(stream, (text) => {
     $('remote-clip').textContent = text;
     log(`clipboard from remote (${mimetype}): ${JSON.stringify(text)}`);
-  };
+  });
 };
 
 $('send-clip').onclick = () => {
   const text = $<HTMLTextAreaElement>('clip').value;
-  const stream = client.createClipboardStream('text/plain');
-  const writer = new Guacamole.StringWriter(stream);
-  writer.sendText(text);
-  writer.sendEnd();
+  writeTextStream(client.createClipboardStream('text/plain'), text);
   log(`clipboard to remote: ${JSON.stringify(text)}`);
   container.focus();
 };
@@ -80,7 +76,10 @@ $('disconnect').onclick = () => client.disconnect();
 const w = Number(params.get('w') ?? 1280);
 const h = Number(params.get('h') ?? 800);
 const id = params.get('id') ?? 'demo-desktop';
-client.connect(`GUAC_ID=${encodeURIComponent(id)}&GUAC_WIDTH=${w}&GUAC_HEIGHT=${h}&GUAC_DPI=96`);
+const dpi = Number(params.get('dpi') ?? 96);
+client.connect(
+  `GUAC_ID=${encodeURIComponent(id)}&GUAC_WIDTH=${w}&GUAC_HEIGHT=${h}&GUAC_DPI=${dpi}`,
+);
 container.focus();
 
 // For inspection from the devtools console.

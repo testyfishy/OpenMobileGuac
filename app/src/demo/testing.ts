@@ -63,7 +63,14 @@ export const stubMeasure = (text: string, font: FontSpec): number =>
 
 export interface StubRenderer extends DemoRenderer {
   /** Every region rendered, with the painter used. */
-  readonly renders: { x: number; y: number; w: number; h: number; painter: RecordingPainter }[];
+  readonly renders: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    scale: number;
+    painter: RecordingPainter;
+  }[];
 }
 
 /**
@@ -75,10 +82,10 @@ export function createStubRenderer(options: { async?: boolean } = {}): StubRende
   return {
     renders,
     measureText: stubMeasure,
-    renderPng(x, y, w, h, paint) {
+    renderPng(x, y, w, h, paint, scale = 1) {
       const painter = new RecordingPainter();
       paint(painter);
-      renders.push({ x, y, w, h, painter });
+      renders.push({ x, y, w, h, scale, painter });
       const data = btoa(`tile ${x},${y} ${w}x${h}`);
       return options.async ? Promise.resolve(data) : data;
     },

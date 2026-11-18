@@ -36,6 +36,15 @@ UI list a built-in "Demo server" (base URL `https://demo.invalid`) with three co
   `canvasRenderer.ts` implements it on a detached `<canvas>` with `toDataURL`, and falls back
   to `OffscreenCanvas.convertToBlob` when there is no `document`. Tests use
   `createStubRenderer()` from `testing.ts`.
+- **High DPI** (`scale.ts`). The app requests the desktop in device pixels and sends
+  `GUAC_DPI` = 96 × devicePixelRatio. `demo-desktop` uses scale = clamp(dpi / 96, 1, 4)
+  (lowered if the logical desktop would fall below 320 × 240) and keeps it for the session.
+  `DemoDesktop` works in logical pixels (device ÷ scale, rounded up). The server multiplies
+  everything it sends (layer sizes, `move`, tiles, cursors) by the scale and the renderer
+  paints at that scale, so the UI keeps its normal size and stays crisp. Layer 0 is exactly
+  the requested size. Incoming `mouse` coordinates are divided back; `size` re-lays out at
+  the same scale. Scroll `copy` is used only at integer scales (fractional scales repaint).
+  The fixed-size variants always use scale 1.
 
 ## The desktop
 
@@ -53,7 +62,14 @@ A gradient wallpaper, a taskbar with window buttons and a clock, and three windo
 Windows drag by their title bar and close with ×; the taskbar reopens them. Right-click the
 wallpaper for a menu, which closes on the next click.
 
+Window layouts adapt to the desktop size (`desktopLayout` in `desktop.ts`). Below 592
+logical pixels wide (a phone in portrait, e.g. 375 × 812), windows take the full width,
+their contents reflow (Input test stacks its drag area above the list, About puts the
+detail target under the text, the taskbar shortens its labels) and they cascade straight
+down with Notes on top, so each fits on screen and every title bar shows. On short desktops
+the Notes text area and the Input test panels shrink to fit.
+
 ## Developer harness
 
-Run `npm run dev` and open `/src/demo/dev/harness.html` (options: `?w=&h=`, `?id=`,
-`?noImageDecoder`). Nothing links to it, so it is not part of the production build.
+Run `npm run dev` and open `/src/demo/dev/harness.html` (options: `?w=&h=` in device
+pixels, `?dpi=` for `GUAC_DPI`, `?id=`, `?noImageDecoder`). Nothing links to it, so it is not part of the production build.

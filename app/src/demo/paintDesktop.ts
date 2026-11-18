@@ -4,16 +4,14 @@
  */
 import type { DemoDesktop, DemoWindow, SurfaceId } from './desktop.ts';
 import {
-  ABOUT,
-  INPUT,
   MENU,
   MENU_ITEMS,
-  NOTES,
   ROW,
   TASKBAR_H,
   TASKBAR_ORDER,
   TITLE_H,
   closeButtonRect,
+  type AboutLayout,
 } from './desktop.ts';
 import { keysymName } from './keysyms.ts';
 import type { FontSpec, Painter } from './painter.ts';
@@ -94,7 +92,7 @@ export function paintSurface(d: DemoDesktop, id: SurfaceId, p: Painter): void {
       return paintInput(d, p);
     case 'about':
       paintFrame(d, d.windows.about, p);
-      return paintAbout(p);
+      return paintAbout(d.layout.about, p);
   }
 }
 
@@ -131,9 +129,10 @@ function paintDesktop(d: DemoDesktop, p: Painter): void {
   const cy = top + TASKBAR_H / 2;
   p.fillRect(0, top, W, TASKBAR_H, COLORS.taskbar);
   p.fillRect(0, top, W, 1, '#2a303b');
+  const compact = d.layout.compactTaskbar;
   p.fillCircle(22, cy, 9, COLORS.mint);
   p.fillCircle(22, cy, 4, COLORS.taskbar);
-  p.text('Demo', 38, cy, { size: 13, bold: true }, COLORS.taskbarText);
+  if (!compact) p.text('Demo', 38, cy, { size: 13, bold: true }, COLORS.taskbarText);
   for (const [i, id] of TASKBAR_ORDER.entries()) {
     const r = d.taskbarButtonRect(i);
     const w = d.windows[id];
@@ -141,7 +140,7 @@ function paintDesktop(d: DemoDesktop, p: Painter): void {
     if (w.visible) p.fillRect(r.x, r.y, r.w, r.h, active ? '#3a4352' : '#262c36');
     if (active) p.fillRect(r.x + 8, r.y + r.h - 2, r.w - 16, 2, COLORS.mint);
     p.text(
-      w.title,
+      d.ellipsize(compact ? w.shortTitle : w.title, r.w - 8, UI),
       r.x + r.w / 2,
       r.y + r.h / 2,
       UI,
@@ -168,14 +167,11 @@ function paintFrame(d: DemoDesktop, w: DemoWindow, p: Painter): void {
 }
 
 function paintNotes(d: DemoDesktop, p: Painter): void {
-  const { hint, area, clip, status, pad, lineH, font } = NOTES;
-  p.text(
-    'Click the text area and type. Ctrl+A select all, Ctrl+C copy, Ctrl+X cut, Ctrl+V paste.',
-    hint.x,
-    hint.y + hint.h / 2,
-    SMALL,
-    COLORS.muted,
-  );
+  const L = d.layout.notes;
+  const { hint, area, clip, status, pad, lineH, font } = L;
+  for (const [i, line] of L.hintLines.entries()) {
+    p.text(line, hint.x, hint.y + 10 + i * 14, SMALL, COLORS.muted);
+  }
 
   const focused = d.notesFocused && d.focused === 'notes';
   p.fillRect(area.x, area.y, area.w, area.h, COLORS.field);
@@ -221,9 +217,13 @@ function paintNotes(d: DemoDesktop, p: Painter): void {
   p.text('Clipboard:', clip.x, cyClip, UI_BOLD, COLORS.text);
   const source =
     d.clipboardSource === 'client'
-      ? 'received from your device'
+      ? L.compact
+        ? 'from your device'
+        : 'received from your device'
       : d.clipboardSource === 'notes'
-        ? 'copied here, sent to your device'
+        ? L.compact
+          ? 'sent to your device'
+          : 'copied here, sent to your device'
         : 'empty';
   const sourceW = d.measure(source, SMALL);
   p.text(source, clip.x + clip.w, cyClip, SMALL, COLORS.muted, 'right');
@@ -242,17 +242,19 @@ function paintNotes(d: DemoDesktop, p: Painter): void {
   let s = `${t.length} characters · line ${li + 1}, column ${col + 1}`;
   if (t.hasSelection()) s += ` · ${selEnd - selStart} selected`;
   if (!focused) s += ' · click the text area to type';
-  p.text(s, status.x, status.y + status.h / 2, SMALL, COLORS.muted);
+  p.text(d.ellipsize(s, status.w, SMALL), status.x, status.y + status.h / 2, SMALL, COLORS.muted);
 }
 
 function paintInput(d: DemoDesktop, p: Painter): void {
+  const INPUT = d.layout.input;
   const label = (i: number, text: string) => {
     const r = INPUT.row(i);
     p.text(text, 14, r.y + r.h / 2, UI_BOLD, COLORS.text);
   };
   const value = (i: number, text: string, color: string = COLORS.text) => {
     const r = INPUT.row(i);
-    p.text(text, INPUT.valueX, r.y + r.h / 2, UI, color);
+    const maxW = INPUT.w - INPUT.valueX - 10;
+    p.text(d.ellipsize(text, maxW, UI), INPUT.valueX, r.y + r.h / 2, UI, color);
   };
 
   label(ROW.pointer, 'Pointer');
@@ -310,18 +312,20 @@ function paintInput(d: DemoDesktop, p: Painter): void {
       p.line(r.x + 5, r.y + 9, r.x + 9, r.y + 3, '#ffffff', 1.5);
     }
   }
-  const tr = INPUT.row(ROW.targets);
+  const cap = INPUT.checkedCaption;
+  const tr = INPUT.row(cap.row);
   p.text(
     `${checked} of ${INPUT.checkboxCount} checked (12 px boxes)`,
-    INPUT.valueX + INPUT.checkboxCount * 26 + 6,
+    cap.x,
     tr.y + tr.h / 2,
     SMALL,
     COLORS.muted,
   );
 
   // Captions
-  p.text('Drag the box with the left button', 14, INPUT.captionsY + 7, SMALL, COLORS.muted);
-  p.text('Scroll with the wheel', INPUT.list.x, INPUT.captionsY + 7, SMALL, COLORS.muted);
+  p.text('Drag the box with the left button', 14, INPUT.dragCaptionY, SMALL, COLORS.muted);
+  const lc = INPUT.listCaption;
+  p.text('Scroll with the wheel', lc.x, lc.y, SMALL, COLORS.muted);
 
   // Drag area
   const a = INPUT.dragArea;
@@ -365,35 +369,24 @@ function paintInput(d: DemoDesktop, p: Painter): void {
   p.fillRect(sb.x + 1, thumbY, sb.w - 2, thumbH, '#9aa4b2');
 }
 
-function paintAbout(p: Painter): void {
+function paintAbout(L: AboutLayout, p: Painter): void {
   const x = 14;
   let y = TITLE_H + 20;
   p.text('About this demo', x, y, { size: 13, bold: true }, COLORS.text);
   y += 22;
-  for (const line of [
-    'This desktop is simulated inside the app. Nothing you',
-    'do here leaves your device, and it holds no real data.',
-    'It speaks the Guacamole protocol, so the session',
-    'controls can be tried without a server.',
-    'Right-click the wallpaper for a menu.',
-  ]) {
+  for (const line of L.lines) {
     p.text(line, x, y, UI, COLORS.text);
     y += 17;
   }
   y += 6;
   for (const size of [9, 8, 7]) {
-    p.text(
-      `${size} px: The quick brown fox jumps over the lazy dog 0123456789`,
-      x,
-      y,
-      { size },
-      COLORS.muted,
-    );
+    p.text(`${size} px: ${L.sample}`, x, y, { size }, COLORS.muted);
     y += size + 6;
   }
 
-  // Fine-detail target: 1 px lines, a 2 px checkerboard and nested squares.
-  const t = ABOUT.target;
+  // Fine-detail target: 1 px lines, a 2 px checkerboard and nested squares. On a scaled
+  // (high-DPI) demo desktop these are logical pixels, drawn crisply at the device scale.
+  const t = L.target;
   const half = t.w / 2;
   p.fillRect(t.x, t.y, t.w, t.h, '#ffffff');
   for (let i = 0; i < half; i += 2) p.fillRect(t.x + i, t.y, 1, half, '#000000');

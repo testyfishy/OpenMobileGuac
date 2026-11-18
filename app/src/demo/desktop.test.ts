@@ -1,8 +1,180 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Button, DemoDesktop, INPUT, MENU, MENU_ITEMS, TASKBAR_H, TITLE_H } from './desktop.ts';
+import {
+  Button,
+  DemoDesktop,
+  INPUT,
+  MENU,
+  MENU_ITEMS,
+  TASKBAR_H,
+  TASKBAR_ORDER,
+  TITLE_H,
+  type WindowId,
+} from './desktop.ts';
+import { contains, type Rect } from './geometry.ts';
 import { Keysym } from './keysyms.ts';
 import { paintSurface } from './paintDesktop.ts';
+import type { FontSpec } from './painter.ts';
 import { RecordingPainter, stubMeasure } from './testing.ts';
+
+const inside = (outer: Rect, r: Rect) =>
+  r.x >= outer.x &&
+  r.y >= outer.y &&
+  r.x + r.w <= outer.x + outer.w &&
+  r.y + r.h <= outer.y + outer.h;
+
+/** Every text a window paints, as [left, right] extents with the stub font metrics. */
+function textExtents(d: DemoDesktop, id: WindowId): { text: string; l: number; r: number }[] {
+  const p = new RecordingPainter();
+  paintSurface(d, id, p);
+  return p.calls
+    .filter((c) => c.op === 'text')
+    .map((c) => {
+      const [text, x, , font, , align] = c.args as [
+        string,
+        number,
+        number,
+        FontSpec,
+        string,
+        string?,
+      ];
+      const w = stubMeasure(text, font);
+      const l = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+      return { text, l, r: l + w };
+    });
+}
+
+describe.each([
+  [375, 812],
+  [412, 892],
+  [320, 568],
+])('phone portrait layout at %i × %i', (width, height) => {
+  let d: DemoDesktop;
+  beforeEach(() => {
+    d = new DemoDesktop({ width, height, measure: stubMeasure, now: 0 });
+  });
+
+  it('gives every window the full width and a fully visible place above the taskbar', () => {
+    const screen = { x: 0, y: 0, w: width, h: height - TASKBAR_H };
+    for (const w of Object.values(d.windows)) {
+      expect(w.w).toBe(width - 32);
+      expect(inside(screen, w)).toBe(true);
+    }
+    // Notes is on top and focused; the title bars of the windows below still show.
+    expect(d.stack.at(-1)).toBe('notes');
+    expect(d.focused).toBe('notes');
+    const ys = d.stack.map((id) => d.windows[id].y);
+    for (let i = 1; i < ys.length; i++) {
+      expect(ys[i] as number).toBeGreaterThanOrEqual((ys[i - 1] as number) + TITLE_H);
+    }
+  });
+
+  it('keeps every interactive part inside its window', () => {
+    const { notes, input, about } = d.layout;
+    const box = (w: { w: number; h: number }) => ({ x: 0, y: 0, w: w.w, h: w.h });
+    for (const r of [notes.hint, notes.area, notes.clip, notes.status]) {
+      expect(inside(box(notes), r)).toBe(true);
+    }
+    const parts = [input.dragArea, input.list, input.row(input.checkedCaption.row)];
+    for (let i = 0; i < 3; i++) parts.push(input.pill(i));
+    for (let i = 0; i < input.checkboxCount; i++) parts.push(input.checkbox(i));
+    for (const r of parts) expect(inside(box(input), r)).toBe(true);
+    expect(input.dragArea.y + input.dragArea.h).toBeLessThanOrEqual(input.list.y);
+    expect(inside(box(about), about.target)).toBe(true);
+  });
+
+  it('paints no window text past the window edges', () => {
+    d.receiveClipboard('a long clipboard text from the phone that cannot fit on the line');
+    d.notes.selectAll();
+    d.pointer(1234, 2345, Button.LEFT | Button.RIGHT, 0);
+    for (const k of [Keysym.Control_L, Keysym.Shift_L, Keysym.Alt_L, Keysym.Delete]) {
+      d.key(k, true);
+    }
+    for (const id of ['notes', 'input', 'about'] as const) {
+      for (const t of textExtents(d, id)) {
+        expect(t.l, t.text).toBeGreaterThanOrEqual(0);
+        expect(t.r, t.text).toBeLessThanOrEqual(d.windows[id].w);
+      }
+    }
+  });
+
+  it('fits the taskbar buttons between the logo and the clock', () => {
+    const clock = d.clockRect();
+    for (const [i] of TASKBAR_ORDER.entries()) {
+      const b = d.taskbarButtonRect(i);
+      expect(b.x).toBeGreaterThanOrEqual(36);
+      expect(b.x + b.w).toBeLessThanOrEqual(clock.x);
+      expect(b.w).toBeGreaterThanOrEqual(50);
+    }
+    const p = new RecordingPainter();
+    paintSurface(d, 'desktop', p);
+    expect(p.texts()).toEqual(expect.arrayContaining(['Notes', 'Input', 'About']));
+  });
+
+  it('lets each window be raised from the taskbar and used: type into Notes, tick a box', () => {
+    const b = d.taskbarButtonRect(TASKBAR_ORDER.indexOf('input'));
+    d.pointer(b.x + 5, b.y + 5, Button.LEFT, 0);
+    d.pointer(b.x + 5, b.y + 5, 0, 1);
+    expect(d.stack.at(-1)).toBe('input');
+    const win = d.windows.input;
+    const cb = d.layout.input.checkbox(7);
+    d.pointer(win.x + cb.x + 6, win.y + cb.y + 6, Button.LEFT, 1000);
+    d.pointer(win.x + cb.x + 6, win.y + cb.y + 6, 0, 1001);
+    expect(d.checks[7]).toBe(true);
+    // The list at the bottom of the stacked Input window scrolls.
+    const list = d.layout.input.list;
+    d.pointer(win.x + list.x + 20, win.y + list.y + list.h - 10, Button.DOWN, 2000);
+    expect(d.listScroll).toBeGreaterThan(0);
+
+    const nb = d.taskbarButtonRect(TASKBAR_ORDER.indexOf('notes'));
+    d.pointer(nb.x + 5, nb.y + 5, Button.LEFT, 2500);
+    d.pointer(nb.x + 5, nb.y + 5, 0, 2501);
+    expect(d.stack.at(-1)).toBe('notes');
+    const n = d.windows.notes;
+    const area = d.layout.notes.area;
+    d.pointer(n.x + area.x + 10, n.y + area.y + 10, Button.LEFT, 3000);
+    d.pointer(n.x + area.x + 10, n.y + area.y + 10, 0, 3001);
+    expect(d.notesFocused).toBe(true);
+    d.notes.setText('');
+    d.key(0x61, true);
+    expect(d.notes.text).toBe('a');
+  });
+});
+
+describe('other sizes', () => {
+  it('keeps every window fully on screen even on a very short narrow desktop', () => {
+    const d = new DemoDesktop({ width: 320, height: 480, measure: stubMeasure, now: 0 });
+    for (const w of Object.values(d.windows)) {
+      expect(w.y).toBeGreaterThanOrEqual(0);
+      expect(w.y + w.h).toBeLessThanOrEqual(480 - TASKBAR_H);
+    }
+  });
+
+  it('fits every window on a landscape phone (812 × 375 logical)', () => {
+    const d = new DemoDesktop({ width: 812, height: 375, measure: stubMeasure, now: 0 });
+    for (const w of Object.values(d.windows)) {
+      expect(w.y).toBeGreaterThanOrEqual(0);
+      expect(w.y + w.h).toBeLessThanOrEqual(375 - TASKBAR_H);
+      expect(w.x + w.w).toBeLessThanOrEqual(812);
+    }
+  });
+
+  it('re-flows when rotated, keeping the box and the list scroll valid', () => {
+    const d = new DemoDesktop({ width: 1280, height: 800, measure: stubMeasure, now: 0 });
+    d.boxX = INPUT.dragArea.w - INPUT.boxSize;
+    d.boxY = INPUT.dragArea.h - INPUT.boxSize;
+    d.listScroll = d.listMaxScroll;
+    d.resize(320, 240);
+    const L = d.layout.input;
+    expect(d.boxX + L.boxSize).toBeLessThanOrEqual(L.dragArea.w);
+    expect(d.boxY + L.boxSize).toBeLessThanOrEqual(L.dragArea.h);
+    expect(d.listScroll).toBeLessThanOrEqual(d.listMaxScroll);
+    for (const w of Object.values(d.windows)) expect(w.w).toBe(288);
+    d.resize(1280, 800);
+    expect(d.windows.input.w).toBe(INPUT.w);
+    expect(d.layout.input.list).toEqual(INPUT.list);
+    expect(contains(d.taskbarButtonRect(2), 96 + 2 * 124 + 1, 800 - TASKBAR_H + 6)).toBe(true);
+  });
+});
 
 const CTRL = Keysym.Control_L;
 
