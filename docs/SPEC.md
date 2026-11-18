@@ -1,0 +1,371 @@
+# OpenMobileGuac — Product & Technical Specification
+
+Status: draft v0.1 (2026-11-18). Working name; the store name is an open question (§2).
+Companion document: [PLAN.md](PLAN.md) — phases and task briefs.
+
+## 1. Summary
+
+OpenMobileGuac is an open-source iOS and Android client for self-hosted
+[Apache Guacamole](https://guacamole.apache.org/) servers. It connects to a Guacamole
+server the user already runs (typically over Tailscale, a VPN, or a LAN) and replaces the
+mobile-browser experience with one built for touch: a summonable keyboard, a
+direct-touch / trackpad toggle, proper fit and zoom modes, two-way clipboard, and an extra
+key bar. It will be published free on the App Store and Google Play.
+
+The app does not replace any server component. It speaks the same REST API and tunnel that
+the stock Guacamole web client uses.
+
+## 2. Assumptions and open questions
+
+These were assumed so planning could proceed. Each one names what changes if it is wrong.
+
+| # | Assumption | If wrong |
+|---|---|---|
+| A1 | The owner has no Mac. iOS builds run on CI macOS runners and reach devices through TestFlight. | With a Mac, iOS tasks can be verified locally and Phase 0 gets faster. |
+| A2 | The owner has at least one iPhone and one Android phone (ideally a foldable) for manual checks. | Without an iPhone, iOS behaviour cannot be verified by anyone before public release. |
+| A3 | The owner's Guacamole server is reachable from the dev PC and is plain `http://` on a tailnet address. | If it is `https://` with a valid certificate, the cleartext and mixed-content work in §8.3 shrinks. |
+| A4 | Auth on the owner's server is username/password, possibly with TOTP. | SSO (SAML/OIDC) moves from Phase 2 to Phase 1. |
+| A5 | Docker is not installed on the dev PC (checked: it is not). Development tests against the owner's own server with a dedicated low-privilege test account. | Installing Docker Desktop allows a disposable local Guacamole stack; see PLAN task T0.2. |
+| A6 | Licence is Apache-2.0, matching upstream and avoiding the GPL/App Store conflict. | — |
+
+Open questions for the owner:
+
+1. **Store name.** "Guacamole" is an Apache Software Foundation trademark. The listing should
+   follow the "X for Apache Guacamole" pattern with an "unofficial, not affiliated" line.
+   A distinct product name (X) is needed before store submission, not before coding.
+2. **Developer accounts.** Apple Developer Program and Google Play Console accounts must be
+   opened by the owner (PLAN task U2). Individual or organisation?
+3. **Demo server for store review** (§10.3): acceptable to host a small public one, or
+   prefer an in-app demo mode only?
+
+## 3. Background and prior art
+
+- **Stock Guacamole web client on mobile.** Works, but on phones the soft keyboard cannot be
+  raised reliably, phone-to-remote paste does not work, and scaling is limited. These are the
+  owner's first-hand complaints and the reason for this project.
+- **PocketGuac** ([site](https://guac.pocketsized.app/),
+  [repo](https://github.com/pocketsized-apps/pocketguac)). Android only, distributed as an APK
+  on GitHub Releases, not on Play. Its site states it is **not open source**, and the repo
+  holds no source and no licence. Its public feature list is a useful reference: trackpad
+  gestures, pinch zoom, key-combo menu with saved combos, two-way clipboard, audio, file
+  transfer, saved servers, nested connection groups, TOTP with stored seed, SSO through a
+  webview, biometric lock, JSON backup. **Feature reference only: no code or assets may be
+  taken from it.**
+- **DWService mobile.** Not examined for this spec. The behaviours cited from it come from
+  the owner's description: the whole remote screen visible at once, a choice between fit
+  modes, and a switch between direct touch input and whole-screen-as-trackpad.
+- A brief, non-exhaustive search found no native iOS Guacamole client. It did surface a
+  mention of an open-source "Flutter Guacamole" project whose page no longer loads; it is
+  unverified prior art worth one more look in T0.1.
+
+## 4. Goals and non-goals
+
+Goals
+
+- G1. Everything a user can do in a Guacamole session from a desktop browser is comfortable
+  on a phone, tablet, or foldable.
+- G2. One codebase, feature parity between iOS and Android.
+- G3. Fully open source (Apache-2.0), reproducible builds from the public repo.
+- G4. No telemetry, no ads, no account, no third-party servers. The app talks only to servers
+  the user adds.
+- G5. Published on the App Store and Google Play; APK also on GitHub Releases.
+
+Non-goals
+
+- Bundling a VPN or Tailscale. The app needs a network path the OS already provides.
+- Speaking RDP/VNC/SSH directly. Guacamole's server does that.
+- Server administration (users, permissions, connection editing) in v1.
+- Session recording playback, printing, and microphone input in v1.
+
+## 5. Users and scenarios
+
+Primary user: someone who self-hosts Guacamole on a private network and wants to reach
+their machines from a phone.
+
+- S1. On a phone in portrait, open a saved server, pick a Windows PC, see the whole desktop,
+  zoom into a window, type a command, send Ctrl+Shift+Esc.
+- S2. Copy a URL on the phone, paste it into a remote browser.
+- S3. Unfold a foldable mid-session; the session re-lays out without reconnecting.
+- S4. Nudge a small UI control precisely using trackpad mode.
+- S5. On a tablet with a hardware keyboard and mouse, use the session like a desktop.
+
+## 6. Functional requirements
+
+Priority: **P1** = first public release, **P2** = fast follow, **P3** = later.
+Every requirement has an acceptance criterion (AC) that a tester can check.
+
+### 6.1 Servers and authentication
+
+| ID | Pri | Requirement | AC |
+|---|---|---|---|
+| SRV-1 | P1 | Add, edit, delete, reorder multiple server profiles (name, base URL, username, optional saved password). | Two servers saved; each logs in independently. |
+| SRV-2 | P1 | URL entry tolerates missing scheme and missing/trailing `/guacamole/` path, and reports a clear error for unreachable host, TLS failure, and "not a Guacamole server". | Each failure shows a distinct, human-readable message. |
+| SRV-3 | P1 | Credentials stored only in the iOS Keychain / Android Keystore-backed storage. | Nothing sensitive in plain app storage or backups. |
+| SRV-4 | P1 | Username/password login; session token reused until it expires, then silent re-login if a password is saved. | Kill and reopen the app within token lifetime: no login prompt. |
+| SRV-5 | P1 | Handle the server's "additional credentials required" response generically (this is how TOTP is requested): render the requested fields and resubmit. | Login to a TOTP-enabled server succeeds by typing the code. |
+| SRV-6 | P2 | Optional biometric/device-credential gate before saved credentials are used. | With the gate on, a session cannot start without Face ID / fingerprint. |
+| SRV-7 | P2 | SSO (SAML/OIDC/CAS) by completing the login in an in-app browser and capturing the resulting session token. | Login succeeds against an OIDC-configured test server. |
+| SRV-8 | P2 | Per-server trust of a self-signed certificate after showing its fingerprint. Never a global "ignore TLS errors". | Untrusted cert prompts once; a changed cert prompts again. |
+| SRV-9 | P3 | Stored TOTP seed with auto-fill (off by default; storing the seed beside the password weakens 2FA and the UI must say so). | — |
+| SRV-10 | P2 | Export/import server profiles as JSON, without passwords. | Round trip restores profiles. |
+
+### 6.2 Connection browser
+
+| ID | Pri | Requirement | AC |
+|---|---|---|---|
+| CON-1 | P1 | Show the connection tree across all of the user's data sources, with nested groups, protocol icon, and active-use indicator. | Matches what the web client home screen lists. |
+| CON-2 | P1 | Search by name; pull to refresh. | — |
+| CON-3 | P1 | Recents and favourites, per server, stored locally. | — |
+| CON-4 | P2 | Thumbnail of the last session frame on recents (stored locally, can be disabled). | — |
+| CON-5 | P2 | Deep link / home-screen shortcut straight to a connection. | — |
+| CON-6 | P3 | Balancing groups and sharing-profile links. | — |
+
+### 6.3 Session display
+
+| ID | Pri | Requirement | AC |
+|---|---|---|---|
+| DSP-1 | P1 | View modes selectable in-session and remembered per connection: **Fit screen** (whole remote desktop visible), **Fit width**, **Fit height**, **1:1**. | Each mode produces the expected framing in portrait and landscape. |
+| DSP-2 | P1 | Pinch zoom and pan from any mode, with bounds, momentum, and double-tap-with-two-fingers (or toolbar button) to return to the selected mode. | Zoom holds 60 fps on a mid-range phone at 1080p remote. |
+| DSP-3 | P1 | Rotation, split-screen, and fold/unfold re-lay out the view without reconnecting. | S3 passes. |
+| DSP-4 | P1 | "Match device" option: ask the server to resize the remote desktop to the device viewport where the protocol supports it (RDP with display-update; SSH/terminal always). Off by default for VNC. | With the option on, an RDP session fills the screen with no letterboxing after rotation. |
+| DSP-5 | P1 | Viewport follows the pointer in trackpad mode when zoomed in, and keeps the pointer/focus area visible above the soft keyboard. | Typing into a field near the bottom of the remote screen stays visible. |
+| DSP-6 | P1 | Remote cursor is always drawn (server cursor image when sent, fallback arrow otherwise). | Cursor visible in trackpad mode on RDP and VNC. |
+| DSP-7 | P1 | Safe-area, notch, and gesture-bar aware; optional immersive full screen; keep-screen-awake during a session. | — |
+| DSP-8 | P2 | Foldable tabletop posture: display on the upper half, trackpad surface and key bar on the lower half. | — |
+| DSP-9 | P2 | Clear connection-state UI: connecting, reconnecting with backoff after network loss, error with reason, disconnect. | Toggle airplane mode for 5 s: session resumes on its own. |
+
+### 6.4 Pointer input
+
+The app owns the gesture layer. It does not rely on the library's default touch handlers,
+because the modes below need behaviours those do not offer.
+
+| ID | Pri | Requirement | AC |
+|---|---|---|---|
+| PTR-1 | P1 | **Direct touch mode**: tap = left click at that point; double tap = double click; long press = right click; long press then move = left drag; two-finger drag = scroll; pinch = zoom. | — |
+| PTR-2 | P1 | **Trackpad mode**: the whole screen is a relative trackpad. One-finger move = move pointer; tap = left click; two-finger tap = right click; three-finger tap = middle click; two-finger drag = scroll; double-tap-and-hold then move = drag; pinch = zoom. Pointer speed and acceleration adjustable. | S4 passes. |
+| PTR-3 | P1 | One-tap toggle between the two modes from the session toolbar; mode remembered per connection. | — |
+| PTR-4 | P1 | Haptic tick on click, right click, and drag start (can be disabled). | — |
+| PTR-5 | P2 | Hardware mouse / trackpad / stylus: hover moves the pointer, buttons and wheel map 1:1, pointer capture where the OS allows. | S5 passes. |
+| PTR-6 | P2 | **Native touch pass-through** mode for RDP connections with touch enabled (multi-touch events sent to the remote instead of mouse emulation). | Pinch zooms a remote Windows photo viewer. |
+| PTR-7 | P2 | Configurable scroll direction, two-finger-drag behaviour (scroll vs pan), and long-press duration. | — |
+
+### 6.5 Keyboard and text input
+
+| ID | Pri | Requirement | AC |
+|---|---|---|---|
+| KEY-1 | P1 | A keyboard button raises the device soft keyboard at any time, regardless of what is focused on the remote. | Works on iOS and Android, in both pointer modes. |
+| KEY-2 | P1 | Typed text reaches the remote correctly including backspace, enter, emoji-free Unicode, and IME composition (e.g. Japanese, swipe typing). Autocorrect and autocapitalise are off by default. | Type a mixed-case password, a URL, and a composed CJK string without errors. |
+| KEY-3 | P1 | **Extra key bar** above the keyboard: Esc, Tab, Ctrl, Alt, Shift, Super/Win, arrows, Home, End, PgUp, PgDn, Del, and an F-key row. Modifiers are sticky: tap = next key only, double tap = locked. | Ctrl (sticky) + C from the soft keyboard copies on the remote. |
+| KEY-4 | P1 | Key-combo menu with presets (Ctrl+Alt+Del, Alt+Tab, Alt+F4, Win, Win+D, Ctrl+Shift+Esc, PrtSc) and user-defined combos, reorderable. | A saved custom combo fires correctly. |
+| KEY-5 | P1 | The key bar is usable with the soft keyboard hidden (docked at the bottom, collapsible). | — |
+| KEY-6 | P2 | Hardware keyboard: all keys and modifier chords pass through, including those the OS does not reserve. | S5 passes. |
+| KEY-7 | P2 | User-editable key bar layout. | — |
+
+### 6.6 Clipboard
+
+| ID | Pri | Requirement | AC |
+|---|---|---|---|
+| CLP-1 | P1 | **Phone → remote**: a Paste button sends the device clipboard to the remote clipboard. Optional automatic send when a session comes to the foreground. | S2 passes on iOS and Android. |
+| CLP-2 | P1 | **Remote → phone**: text copied on the remote lands on the device clipboard (can be disabled per server). | — |
+| CLP-3 | P1 | "Type clipboard" fallback that sends the clipboard as keystrokes, for connections where the server has clipboard disabled. | Works on a connection with `disable-paste` set. |
+| CLP-4 | P1 | iOS paste-permission prompts are kept to a minimum: read the clipboard only on an explicit user action unless auto-send is enabled. | No unexpected "Allow Paste" prompt. |
+| CLP-5 | P2 | In-session clipboard panel to view/edit the text before sending. | — |
+
+### 6.7 Later features
+
+| ID | Pri | Requirement |
+|---|---|---|
+| AUD-1 | P2 | Remote audio playback, with a mute toggle; respects the silent switch and audio focus. |
+| FIL-1 | P2 | File browser for filesystems a session exposes (SFTP, RDP drive): upload from and download to the OS file picker / share sheet. |
+| MUL-1 | P2 | Several sessions open at once with a switcher; sessions survive brief backgrounding. |
+| SET-1 | P1 | Settings: defaults for view mode, pointer mode, pointer speed, haptics, clipboard sync, keep-awake, theme (system/light/dark). |
+| I18N-1 | P2 | All strings externalised; English at launch; community translations accepted. |
+| A11Y-1 | P1 | App chrome (everything except the remote canvas) works with VoiceOver/TalkBack, dynamic type, and sufficient contrast. |
+| DIAG-1 | P2 | Local-only diagnostics screen and shareable log with secrets redacted. |
+
+## 7. Non-functional requirements
+
+- **Performance.** Input-to-send latency under 16 ms on device; display at the server's frame
+  rate without dropped frames at 1080p on a mid-range 2022 phone; cold start to server list
+  under 2 s.
+- **Compatibility.** Guacamole server 1.5.x and 1.6.x (developed against 1.6.0). iOS 16+ and
+  Android 8.0 (API 26)+; final floors set in Phase 0 from what the toolchain supports.
+- **Privacy.** No network request to any host other than user-added servers. No analytics or
+  crash SDKs. Stated in a public privacy policy.
+- **Security.** Secrets only in OS secure storage; TLS validation on by default; tokens never
+  logged; the session view is excluded from the app-switcher snapshot when the biometric gate
+  is on.
+- **Battery/data.** Tunnel closed when the app is backgrounded beyond a grace period
+  (default 60 s, configurable), with clean resume.
+
+## 8. Architecture
+
+### 8.1 Decision (provisional, gated by Phase 0)
+
+**A Capacitor app: TypeScript + React UI, with the official Guacamole JavaScript client
+library (`guacamole-common-js`, Apache-2.0) doing protocol, rendering, audio, and streams
+inside the system WebView, and thin native plugins for what the web platform cannot do.**
+
+Why this over a fully native client:
+
+- The owner's complaints are about input and app chrome, not rendering. The official library
+  already renders the protocol correctly and is what every browser session uses.
+- It is the only option whose core can be developed and verified on the Windows dev PC, in a
+  desktop browser, by an automated agent. A native-rendering client (Flutter/Kotlin
+  Multiplatform with a re-implemented protocol) would need device or emulator verification
+  for nearly every task, and iOS could not be verified at all without a Mac.
+- Re-implementing the drawing protocol, audio, and stream handling is months of work with a
+  long tail of rendering bugs.
+
+Cost accepted: rendering runs in a WebView, and soft-keyboard/IME handling must be engineered
+carefully (§8.4).
+
+Alternatives kept open:
+
+- **Native WebSocket/HTTP bridge** if the WebView cannot reach the server directly (§8.3).
+- **Native rendering core later**, swapped in behind the `SessionTransport` and
+  `RemoteDisplay` interfaces, if profiling shows the WebView is the bottleneck.
+
+**Phase 0 is a spike with pass/fail criteria (PLAN §Phase 0). If it fails on a point with
+no workaround, this decision is revisited before any Phase 1 work.**
+
+### 8.2 Components
+
+```
+┌──────────────────────── App shell (Capacitor) ────────────────────────┐
+│  React UI: servers · connection browser · settings · session chrome   │
+│                                                                        │
+│  session/                                                              │
+│    GestureLayer ──► PointerModel (direct | trackpad | passthrough)     │
+│    TextInputBridge + KeyBar ──► KeyModel (keysyms, sticky modifiers)   │
+│    Viewport (fit modes, zoom/pan, follow-pointer, keyboard inset)      │
+│    ClipboardBridge                                                     │
+│    RemoteDisplay ◄── guacamole-common-js Client/Display (vendored)     │
+│                                                                        │
+│  core/                                                                 │
+│    GuacApi (REST)  ──► HttpClient      [native HTTP | fetch (dev)]     │
+│    SessionTransport ─► Tunnel          [WebSocket | native bridge]     │
+│    SecureStore, Settings, Profiles                                     │
+│                                                                        │
+│  Native plugins: HTTP, secure storage, biometrics, clipboard, haptics, │
+│  keyboard insets, keep-awake, file picker/share, foldable posture      │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+Rules:
+
+- `PointerModel`, `KeyModel`, and `Viewport` are pure TypeScript with no DOM or Capacitor
+  imports, so they are unit-testable. They are where most of the product's value lives.
+- All network access goes through `HttpClient` and `SessionTransport`. Nothing else calls
+  `fetch` or opens a socket.
+- `guacamole-common-js` is **vendored from the upstream `apache/guacamole-client` repo at the
+  1.6.0 tag** (`guacamole-common-js/src/main/webapp/modules/*.js`), with its licence and
+  NOTICE. The package of that name on npm is a third-party repackaging at 1.5.0 and is not
+  used.
+
+### 8.3 Network path (the main technical risk)
+
+| Concern | Expected handling | Verified in |
+|---|---|---|
+| REST calls from the app origin are cross-origin and Guacamole sends no CORS headers. | Route REST through Capacitor's native HTTP so CORS does not apply. In browser dev mode, use a Vite dev proxy. | T0.6, G0 |
+| WebSocket from the WebView to `ws://` on a tailnet IP or MagicDNS name. | Android: allow cleartext and mixed content for the WebView. iOS: App Transport Security exception with a written justification for review. | T0.4, T0.6 |
+| Self-signed HTTPS. | WebView sockets cannot trust a custom cert, so SRV-8 needs the native tunnel bridge. | Phase 2 |
+| Server rejects the WebSocket origin (reverse proxies sometimes do). | Fall back to the native tunnel bridge, or to the HTTP tunnel. | T0.4 |
+
+The server interface is not a documented public API. Endpoints and parameters must be read
+from the 1.6.0 source, not assumed. Reference files in `apache/guacamole-client`:
+
+- REST client usage: `guacamole/src/main/frontend/src/app/rest/services/*.js`
+  (`tunnelService.js`, `connectionGroupService.js`, `requestService.js`), and the auth
+  service under `frontend/src/app/auth/`.
+- REST server side: `guacamole/src/main/java/org/apache/guacamole/rest/**`.
+- Tunnel: `guacamole-common-js/.../modules/Tunnel.js` and the web client's
+  `guacClientManager` / `ManagedClient` for the connect parameters.
+
+### 8.4 Text input
+
+A focused, visually hidden text field owned by `TextInputBridge` is what raises the soft
+keyboard. It holds sentinel content so that backspace always produces an event, listens to
+`beforeinput`/`input`/composition events, converts the result to key events or committed
+text, and resets itself. Hardware keys are handled separately through key events on the
+document. The library's `Keyboard.js` and `OnScreenKeyboard.js` and the web client's "text
+input" mode are prior art to read before implementing. iOS behaviour here can only be
+confirmed on a real device.
+
+### 8.5 Pointer and viewport
+
+`GestureLayer` consumes Pointer Events on an overlay above the display and feeds a small
+gesture recogniser. `PointerModel` turns recognised gestures into remote mouse state
+(position, buttons, wheel) according to the active mode. `Viewport` owns the transform
+between remote and screen coordinates. Zoom is applied as a compositor transform on the
+display element, not by re-scaling the canvas each frame. The library's `Mouse.js` and
+`Touch.js` are read for the wire format and as reference only.
+
+### 8.6 Repository layout
+
+```
+/app            Capacitor + Vite + React + TypeScript app
+  /src/core     api, transport, storage, models (no UI)
+  /src/session  gesture, pointer, key, viewport, display, clipboard
+  /src/ui       screens and components
+  /src/vendor/guacamole-common-js   vendored upstream + LICENSE/NOTICE
+  /android /ios native projects (generated, committed)
+/docs           SPEC.md, PLAN.md, privacy policy, store listing text
+/.github        CI workflows, issue templates
+```
+
+## 9. Testing strategy
+
+- **Unit** (Vitest): `PointerModel`, `KeyModel`, `Viewport`, gesture recogniser, API parsing.
+  These must cover every row of §6.3–6.6 that can be expressed as input → output.
+- **Replay tests**: a fake `SessionTransport` that plays a captured instruction stream, so
+  display and session code run in CI with no server.
+- **Browser integration**: the app in a desktop browser with touch emulation against a real
+  server through the dev proxy.
+- **Device checklists**: `docs/checklists/*.md`, run by the owner on real hardware for
+  everything that cannot be automated — above all iOS keyboard, paste, and foldables.
+
+## 10. Distribution
+
+### 10.1 Builds
+
+GitHub Actions builds Android (AAB + APK) on Linux and iOS (IPA) on macOS runners, signs
+with secrets, and uploads to Play internal testing and TestFlight. Tagged releases also
+attach the APK to a GitHub Release.
+
+### 10.2 Store requirements to confirm at submission time
+
+Rules change; each is a checklist item in PLAN Phase 3, to be verified against the current
+official pages rather than this document.
+
+- Apple Developer Program membership (annual fee) and Google Play Console registration
+  (one-time fee).
+- Google Play's closed-testing requirement for new personal developer accounts (a minimum
+  number of opted-in testers for a minimum number of days before production access).
+- Apple export-compliance declaration (the app uses only standard TLS).
+- Privacy policy URL and the stores' data-safety / privacy-label forms ("no data collected").
+- ATS exception justification for cleartext connections to user-specified private hosts.
+- ASF trademark guidance for naming and the "not affiliated" disclaimer.
+
+### 10.3 Store review access
+
+Reviewers cannot reach a tailnet. The app needs one of:
+
+- **Demo mode** (recommended baseline): a built-in "Demo server" entry that plays a bundled
+  session through the replay transport. View modes, zoom, pointer modes, the keyboard, and
+  the key bar can all be operated, but the recorded desktop does not react to clicks or
+  typing. A reviewer may or may not accept that as sufficient.
+- **Public demo server**: a small hosted Guacamole with a throwaway desktop and review
+  credentials, mentioned in the review notes. More convincing, but it is infrastructure to
+  run and secure.
+
+## 11. Risks
+
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| WebView cannot reach the server reliably (§8.3). | Medium | Phase 0 gate; native bridge fallback behind interfaces. |
+| iOS soft keyboard / IME quirks. | High | Prototype in Phase 0 on a real iPhone; device checklist; budget iteration. |
+| No Mac: slow iOS feedback loop through CI and TestFlight. | Certain | Keep native iOS code minimal; verify logic in browser; batch device checks. |
+| App Store rejection (ATS exception, reviewer cannot test, trademark). | Medium | Demo mode, written justifications, naming per ASF guidance. |
+| Undocumented server API changes between Guacamole versions. | Low–medium | Isolate in `GuacApi`; pin and state tested versions; version check on login. |
+| WebView rendering performance on low-end Android. | Low–medium | Measure in Phase 0; compositor-only zoom; native core as later option. |

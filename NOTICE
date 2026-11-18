@@ -1,0 +1,33 @@
+OpenMobileGuac
+Copyright 2026 The OpenMobileGuac contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+OpenMobileGuac is an unofficial client for Apache Guacamole. It is not affiliated
+with, endorsed by, or sponsored by the Apache Software Foundation. "Apache",
+"Apache Guacamole", and "Guacamole" are trademarks of the Apache Software
+Foundation.
+
+-------------------------------------------------------------------------------
+Third-party components
+-------------------------------------------------------------------------------
+
+Runtime dependencies bundled into the app (app/package.json "dependencies"):
+
+  React, React DOM (react, react-dom, scheduler)   MIT License
+    Copyright (c) Meta Platforms, Inc. and affiliates.
+  Capacitor (@capacitor/core, @capacitor/android)  MIT License
+    Copyright (c) 2017-present Drifty Co.
+  tslib (dependency of @capacitor/core)            0BSD License
+    Copyright (c) Microsoft Corporation.
+
+Build and development tools (app/package.json "devDependencies"; not shipped in
+the app): Vite, @vitejs/plugin-react, TypeScript, Vitest, ESLint, typescript-eslint,
+eslint-plugin-react-hooks, eslint-plugin-react-refresh, eslint-config-prettier,
+globals, Prettier, @capacitor/cli, @types/*. Their licences are recorded in their
+own packages under app/node_modules.
+
+The generated Android project (app/android) uses AndroidX libraries
+(Apache License 2.0) resolved by Gradle at build time.
+
+Vendored code (app/src/vendor) carries its own LICENSE and NOTICE files.
