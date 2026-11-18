@@ -6,6 +6,6 @@ export default defineConfig({
   plugins: [react()],
   test: {
     include: ['src/**/*.test.{ts,tsx}', 'test/**/*.test.{ts,tsx}'],
-    exclude: ['node_modules', 'dist', 'android', 'ios', 'src/vendor/**'],
+    exclude: ['node_modules', 'dist', 'android', 'ios', 'src/vendor/**/modules/**'],
   },
 });

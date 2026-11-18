@@ -30,4 +30,9 @@ own packages under app/node_modules.
 The generated Android project (app/android) uses AndroidX libraries
 (Apache License 2.0) resolved by Gradle at build time.
 
-Vendored code (app/src/vendor) carries its own LICENSE and NOTICE files.
+Vendored code (app/src/vendor) carries its own LICENSE and NOTICE files:
+
+  Apache Guacamole guacamole-common-js 1.6.0       Apache License 2.0
+    app/src/vendor/guacamole-common-js (from apache/guacamole-client, tag 1.6.0)
+    Copyright The Apache Software Foundation. This product includes software
+    developed at The Apache Software Foundation (http://www.apache.org/).
