@@ -12,6 +12,11 @@ on:
         description: Upload to TestFlight (needs signing secrets)
         type: boolean
         default: true
+      runner:
+        description: macOS runner label (switch to Intel if arm64 runners are out of capacity)
+        type: choice
+        default: macos-26
+        options: [macos-26, macos-26-intel]
 
 permissions:
   contents: read
@@ -25,7 +30,9 @@ jobs:
     name: Simulator build (+ TestFlight when signing is configured)
     # Capacitor 8 requires Xcode 26+. The macos-26 image's default Xcode is 26.x;
     # macos-15's default is still 16.4, so don't use that label.
-    runs-on: macos-26
+    # macos-26-intel (x64) has the same Xcode 26.x set; use it via "Run workflow" or the
+    # IOS_RUNNER repository variable when arm64 runners are out of capacity.
+    runs-on: ${{ inputs.runner || vars.IOS_RUNNER || 'macos-26' }}
     timeout-minutes: 45
     env:
       # Secrets can't be used directly in `if:`; expose a flag instead.
