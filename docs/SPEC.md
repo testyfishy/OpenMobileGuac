@@ -351,10 +351,10 @@ official pages rather than this document.
 
 Reviewers cannot reach a tailnet. The app needs one of:
 
-- **Demo mode** (recommended baseline): a built-in "Demo server" entry that plays a bundled
-  session through the replay transport. View modes, zoom, pointer modes, the keyboard, and
-  the key bar can all be operated, but the recorded desktop does not react to clicks or
-  typing. A reviewer may or may not accept that as sufficient.
+- **Demo mode** (built): a built-in "Demo server" entry backed by a simulated desktop that
+  runs inside the app and speaks the real protocol (`app/src/demo`). It reacts to clicks,
+  drags, scrolling, typing, key combos, and clipboard in both directions, so a reviewer can
+  exercise every session control offline.
 - **Public demo server**: a small hosted Guacamole with a throwaway desktop and review
   credentials, mentioned in the review notes. More convincing, but it is infrastructure to
   run and secure.

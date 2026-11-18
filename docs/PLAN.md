@@ -43,6 +43,14 @@ Android SDK presence not yet checked. No Mac (assumed).
 
 ---
 
+## Progress (2026-11-18)
+
+Built and passing CI: T0.1–T0.3, T0.6 (TestFlight upload untested, needs owner secrets),
+T1.1–T1.9 in first form, and demo mode (T3.2). T0.4/T0.5 were replaced by building against
+the in-app demo server; **nothing has run against a real Guacamole server or on a physical
+phone yet**, so gates G0 and G1 are still open and no Phase 2 work should start before them.
+Checklists: `docs/checklists/phase0.md`, `docs/checklists/session-device.md`.
+
 ## Owner tasks (U)
 
 - [ ] **U1. Dev test access.** Create a low-privilege test user on your Guacamole server with
