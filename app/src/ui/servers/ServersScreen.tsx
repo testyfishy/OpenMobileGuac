@@ -1,0 +1,192 @@
+import { useState } from 'react';
+import type { ServerProfile } from '../../core/models/ServerProfile.ts';
+import { EmptyState } from '../components/Feedback.tsx';
+import { Icon } from '../components/Icon.tsx';
+import { IconButton, Screen } from '../components/Screen.tsx';
+import { useNav } from '../nav/NavContext.ts';
+import { selectedServerId } from '../nav/navigation.ts';
+import { useServices } from '../services/context.ts';
+import { strings } from '../strings.ts';
+import { hostOf, isInsecureUrl } from './serverForm.ts';
+import { DEMO_SERVER_ID, useSavedProfiles } from './useServers.ts';
+
+/** Server list (SRV-1): Demo, the dev server (dev builds), then saved servers in user order. */
+export function ServersScreen() {
+  const nav = useNav();
+  const services = useServices();
+  const { profiles, reload } = useSavedProfiles();
+  const [reordering, setReordering] = useState(false);
+  const selected = selectedServerId(nav.state);
+  const s = strings.servers;
+
+  const move = async (p: ServerProfile, delta: number) => {
+    if (!profiles) return;
+    const index = profiles.findIndex((x) => x.id === p.id);
+    await services.profiles.move(p.id, index + delta);
+    reload();
+  };
+
+  const openServer = (id: string) => nav.open({ name: 'connections', serverId: id });
+  const canReorder = (profiles?.length ?? 0) >= 2;
+
+  return (
+    <Screen
+      title={s.title}
+      focusTitle={false}
+      className="servers-screen"
+      actions={
+        <>
+          {canReorder ? (
+            <IconButton
+              icon={reordering ? 'close' : 'up'}
+              label={reordering ? strings.common.done : s.reorder}
+              pressed={reordering}
+              onClick={() => setReordering((r) => !r)}
+            />
+          ) : null}
+          <IconButton
+            icon="gear"
+            label={strings.common.settings}
+            onClick={() => nav.open({ name: 'settings' })}
+          />
+          <IconButton icon="plus" label={s.add} onClick={() => nav.open({ name: 'server-edit' })} />
+        </>
+      }
+    >
+      <ul className="list" aria-label={s.title}>
+        <li>
+          <ServerRow
+            id={DEMO_SERVER_ID}
+            name={s.demoName}
+            subtitle={s.demoSubtitle}
+            badge={s.demoBadge}
+            badgeKind="demo"
+            icon="play"
+            selected={selected === DEMO_SERVER_ID}
+            onOpen={() => openServer(DEMO_SERVER_ID)}
+          />
+        </li>
+        {services.devServer ? (
+          <li>
+            <ServerRow
+              id={services.devServer.profile.id}
+              name={s.devName}
+              subtitle={s.devSubtitle}
+              badge={s.devBadge}
+              badgeKind="dev"
+              icon="beaker"
+              selected={selected === services.devServer.profile.id}
+              onOpen={() => openServer(services.devServer?.profile.id ?? '')}
+            />
+          </li>
+        ) : null}
+        {(profiles ?? []).map((p, i, all) => (
+          <li key={p.id}>
+            <ServerRow
+              id={p.id}
+              name={p.name || hostOf(p.baseUrl)}
+              subtitle={[p.username, hostOf(p.baseUrl)].filter(Boolean).join(' · ')}
+              badge={isInsecureUrl(p.baseUrl) ? s.insecureBadge : undefined}
+              badgeLabel={isInsecureUrl(p.baseUrl) ? s.insecureBadgeLabel : undefined}
+              badgeKind="insecure"
+              icon="server"
+              selected={selected === p.id}
+              onOpen={() => openServer(p.id)}
+              trailing={
+                reordering ? (
+                  <>
+                    <IconButton
+                      icon="up"
+                      label={strings.common.moveUp(p.name)}
+                      disabled={i === 0}
+                      onClick={() => void move(p, -1)}
+                    />
+                    <IconButton
+                      icon="down"
+                      label={strings.common.moveDown(p.name)}
+                      disabled={i === all.length - 1}
+                      onClick={() => void move(p, 1)}
+                    />
+                  </>
+                ) : (
+                  <IconButton
+                    icon="edit"
+                    label={s.editServer(p.name)}
+                    onClick={() => nav.open({ name: 'server-edit', serverId: p.id })}
+                  />
+                )
+              }
+            />
+          </li>
+        ))}
+      </ul>
+      {profiles && profiles.length === 0 ? (
+        <EmptyState icon="server" title={s.empty}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => nav.open({ name: 'server-edit' })}
+          >
+            <Icon name="plus" /> {s.add}
+          </button>
+        </EmptyState>
+      ) : null}
+    </Screen>
+  );
+}
+
+function ServerRow({
+  id,
+  name,
+  subtitle,
+  badge,
+  badgeLabel,
+  badgeKind,
+  icon,
+  selected,
+  onOpen,
+  trailing,
+}: {
+  id: string;
+  name: string;
+  subtitle: string;
+  badge?: string;
+  badgeLabel?: string;
+  badgeKind: 'demo' | 'dev' | 'insecure';
+  icon: 'play' | 'beaker' | 'server';
+  selected: boolean;
+  onOpen: () => void;
+  trailing?: React.ReactNode;
+}) {
+  return (
+    <div className={selected ? 'row row-selected' : 'row'} data-server-id={id}>
+      <button
+        type="button"
+        className="row-main"
+        onClick={onOpen}
+        aria-current={selected ? 'true' : undefined}
+      >
+        <span className={`row-icon row-icon-${badgeKind}`}>
+          <Icon name={icon} />
+        </span>
+        <span className="row-text">
+          <span className="row-title">
+            {name}
+            {badge ? (
+              <span
+                className={`badge badge-${badgeKind}`}
+                title={badgeLabel}
+                aria-label={badgeLabel}
+              >
+                {badge}
+              </span>
+            ) : null}
+          </span>
+          {subtitle ? <span className="row-subtitle">{subtitle}</span> : null}
+        </span>
+        <Icon name="chevron-right" className="row-chevron" />
+      </button>
+      {trailing ? <div className="row-trailing">{trailing}</div> : null}
+    </div>
+  );
+}

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Demo server harness</title>
+    <style>
+      body {
+        margin: 0;
+        font:
+          13px system-ui,
+          sans-serif;
+        background: #222;
+        color: #eee;
+      }
+      #bar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        padding: 6px 8px;
+        background: #111;
+      }
+      #display {
+        outline: none;
+        display: inline-block;
+      }
+      #display:focus {
+        box-shadow: 0 0 0 2px #5cc8b0;
+      }
+      textarea {
+        width: 220px;
+        height: 34px;
+      }
+      #log {
+        white-space: pre;
+        font:
+          11px ui-monospace,
+          monospace;
+        height: 120px;
+        overflow: auto;
+        padding: 4px 8px;
+        background: #181818;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Developer harness only; not linked from index.html, so it is not in the build. -->
+    <div id="bar">
+      <span id="state">idle</span>
+      <button id="resize">Send size 1024×700</button>
+      <textarea id="clip" placeholder="Local clipboard text"></textarea>
+      <button id="send-clip">Send clipboard</button>
+      <span>Remote clipboard: <b id="remote-clip">(none)</b></span>
+      <button id="disconnect">Disconnect</button>
+    </div>
+    <div id="log"></div>
+    <div id="display" tabindex="0"></div>
+    <script type="module" src="./harness.ts"></script>
+  </body>
+</html>

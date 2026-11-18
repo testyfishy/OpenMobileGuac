@@ -4,6 +4,7 @@ import { createHttpClient, createSecureStore } from '../platform.ts';
 import { FetchHttpClient, type FetchLike } from './FetchHttpClient.ts';
 import { HttpTransportError, encodeForm, withQuery } from './HttpClient.ts';
 import { NativeHttpClient, classifyNativeError } from './NativeHttpClient.ts';
+import { NativeSecureStore } from '../storage/NativeSecureStore.ts';
 
 describe('form and query encoding', () => {
   it('encodes like jQuery $.param for flat data', () => {
@@ -195,7 +196,10 @@ describe('platform selection', () => {
   });
 
   it('never uses the insecure store on native or in production web builds', () => {
-    expect(createSecureStore({ native: true, dev: true }).persistent).toBe(false);
+    const native = createSecureStore({ native: true, dev: true });
+    expect(native).toBeInstanceOf(NativeSecureStore);
+    expect(native.protectedAtRest).toBe(true);
     expect(createSecureStore({ native: false, dev: false }).persistent).toBe(false);
+    expect(createSecureStore({ native: false, dev: false }).protectedAtRest).toBe(false);
   });
 });

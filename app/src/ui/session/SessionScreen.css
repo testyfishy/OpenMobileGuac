@@ -1,0 +1,773 @@
+/*
+ * Session screen styles. Theme tokens come from the app shell when present
+ * (--omg-bg, --omg-surface, ...); each has a fallback so the screen also works standalone.
+ */
+
+.omg-session {
+  --_bg: var(--omg-bg, #0d0f12);
+  --_surface: var(--omg-surface, rgba(28, 31, 38, 0.92));
+  --_surface-2: var(--omg-surface-2, rgba(48, 53, 64, 0.95));
+  --_text: var(--omg-text, #f1f3f6);
+  --_muted: var(--omg-text-muted, #a7aebb);
+  --_accent: var(--omg-accent, #4c8dff);
+  --_accent-text: var(--omg-accent-text, #ffffff);
+  --_border: var(--omg-border, rgba(255, 255, 255, 0.14));
+  --_danger: var(--omg-danger, #ff5d5d);
+  --_radius: var(--omg-radius, 12px);
+  --_kb: var(--omg-kb-cover, 0px);
+  --_dur: 160ms;
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  color: var(--_text);
+  font:
+    15px/1.35 system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omg-session {
+    --_dur: 0ms;
+  }
+}
+
+.omg-safe-probe {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  inset: 0;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
+/* ---- Stage: display, cursor overlay, gesture layer -------------------------------- */
+
+.omg-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
+}
+
+.omg-display {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.omg-display canvas {
+  image-rendering: auto;
+}
+
+.omg-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  will-change: transform;
+  visibility: hidden;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6));
+}
+
+.omg-cursor[data-mode='direct'] {
+  opacity: 0.55;
+}
+
+.omg-cursor [data-cursor-image] canvas {
+  display: block;
+}
+
+.omg-gesture {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  outline: none;
+  cursor: none;
+}
+
+/* ---- Hidden text field ------------------------------------------------------------ */
+
+/* Real, focusable and on-screen (top-left) so iOS does not scroll to it, but invisible.
+   font-size >= 16px prevents iOS from zooming the page on focus. */
+.omg-text-input {
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
+  left: 0;
+  width: 2px;
+  height: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  opacity: 0;
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  font-size: 16px;
+  line-height: 1;
+  pointer-events: none;
+  white-space: pre;
+  z-index: 0;
+}
+
+/* ---- Chrome ------------------------------------------------------------------------ */
+
+.omg-chrome {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.omg-chrome > * {
+  pointer-events: auto;
+}
+
+.omg-badge {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: calc(env(safe-area-inset-left, 0px) + 8px);
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--_accent);
+  color: var(--_accent-text);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+.omg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--_radius) - 2px);
+  background: var(--_surface-2);
+  color: var(--_text);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background var(--_dur),
+    border-color var(--_dur),
+    transform var(--_dur);
+}
+
+.omg-btn:focus-visible {
+  outline: 2px solid var(--_accent);
+  outline-offset: 2px;
+}
+
+.omg-btn:active {
+  transform: scale(0.96);
+}
+
+.omg-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.omg-btn--primary {
+  background: var(--_accent);
+  color: var(--_accent-text);
+}
+
+.omg-btn--ghost {
+  background: transparent;
+  border-color: var(--_border);
+}
+
+.omg-btn--icon {
+  padding: 0;
+  background: transparent;
+}
+
+.omg-btn--danger {
+  color: var(--_danger);
+}
+
+/* Dock: toolbar + key bar, pinned to the bottom (above the soft keyboard). */
+.omg-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--_kb);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  pointer-events: none;
+}
+
+.omg-dock > * {
+  pointer-events: auto;
+}
+
+.omg-toolbar {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 16px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  margin: 0 8px 8px;
+  padding: 4px;
+  border: 1px solid var(--_border);
+  border-radius: calc(var(--_radius) + 4px);
+  background: var(--_surface);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.omg-session[data-keyboard='closed'] .omg-keybar-slot:empty {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.omg-toolbar__scroll {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.omg-toolbar__scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.omg-toolbar--collapsed {
+  align-self: flex-end;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  margin-right: calc(env(safe-area-inset-right, 0px) + 10px);
+}
+
+.omg-handle {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--_border);
+  background: var(--_surface);
+  opacity: 0.75;
+}
+
+.omg-handle:hover,
+.omg-handle:focus-visible {
+  opacity: 1;
+}
+
+.omg-tool {
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 56px;
+  min-height: 52px;
+  padding: 4px 6px;
+  background: transparent;
+  border-radius: var(--_radius);
+}
+
+.omg-tool__label {
+  font-size: 11px;
+  color: var(--_muted);
+  white-space: nowrap;
+}
+
+.omg-tool--on,
+.omg-tool--mode-trackpad {
+  background: var(--_accent);
+  color: var(--_accent-text);
+}
+
+.omg-tool--on .omg-tool__label,
+.omg-tool--mode-trackpad .omg-tool__label {
+  color: var(--_accent-text);
+}
+
+.omg-tool--danger {
+  color: var(--_danger);
+}
+
+.omg-tool--confirm {
+  background: var(--_danger);
+  color: #fff;
+}
+
+.omg-tool--confirm .omg-tool__label {
+  color: #fff;
+}
+
+.omg-tool--collapse {
+  min-width: 44px;
+}
+
+@media (max-width: 420px) {
+  .omg-toolbar {
+    margin: 0 4px 6px;
+    padding: 2px;
+    gap: 0;
+  }
+
+  .omg-toolbar__scroll {
+    gap: 0;
+  }
+
+  .omg-tool {
+    min-width: 44px;
+    padding: 4px 0;
+  }
+
+  .omg-tool__label {
+    font-size: 10px;
+  }
+}
+
+@media (max-height: 480px) {
+  /* Landscape phones: icons only, to cover less of the desktop. */
+  .omg-tool__label {
+    display: none;
+  }
+
+  .omg-tool {
+    min-height: 44px;
+    min-width: 46px;
+  }
+}
+
+/* ---- Key bar ----------------------------------------------------------------------- */
+
+.omg-keybar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px calc(env(safe-area-inset-right, 0px) + 4px) 4px
+    calc(env(safe-area-inset-left, 0px) + 4px);
+  background: var(--_surface);
+  border-top: 1px solid var(--_border);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.omg-session[data-keyboard='closed'] .omg-keybar {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 4px);
+}
+
+.omg-keybar__row {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  scroll-snap-type: x proximity;
+}
+
+.omg-keybar__row::-webkit-scrollbar {
+  display: none;
+}
+
+.omg-key {
+  position: relative;
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  background: var(--_surface-2);
+  font-size: 14px;
+  font-weight: 500;
+  scroll-snap-align: start;
+}
+
+.omg-key--wide {
+  min-width: 54px;
+}
+
+.omg-key--once {
+  border-color: var(--_accent);
+  color: var(--_accent);
+}
+
+.omg-key--locked {
+  background: var(--_accent);
+  color: var(--_accent-text);
+}
+
+.omg-key__lock {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: translateX(-50%);
+  transition: width var(--_dur);
+}
+
+.omg-key--once .omg-key__lock {
+  width: 6px;
+}
+
+.omg-key--locked .omg-key__lock {
+  width: 18px;
+}
+
+/* ---- Sheets (menus) ---------------------------------------------------------------- */
+
+.omg-sheet-layer {
+  position: absolute;
+  inset: 0;
+  bottom: var(--_kb);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 10;
+}
+
+.omg-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.omg-sheet {
+  position: relative;
+  width: min(520px, 100%);
+  max-height: min(78%, 640px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--_border);
+  border-bottom: 0;
+  border-radius: calc(var(--_radius) + 6px) calc(var(--_radius) + 6px) 0 0;
+  background: var(--omg-surface, #1c1f26);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  animation: omg-sheet-in var(--_dur) ease-out;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+@keyframes omg-sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
+@media (min-width: 720px) and (min-height: 520px) {
+  .omg-sheet-layer {
+    align-items: center;
+  }
+
+  .omg-sheet {
+    border-bottom: 1px solid var(--_border);
+    border-radius: calc(var(--_radius) + 6px);
+    padding-bottom: 0;
+  }
+}
+
+.omg-sheet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 2px 18px;
+}
+
+.omg-sheet__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.omg-sheet__body {
+  overflow-y: auto;
+  padding: 6px 16px 16px;
+  overscroll-behavior: contain;
+}
+
+.omg-sheet__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.omg-choice-list {
+  display: grid;
+  gap: 6px;
+}
+
+.omg-choice,
+.omg-switch-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 14px;
+  text-align: left;
+  border-color: var(--_border);
+  background: transparent;
+}
+
+.omg-choice--on {
+  border-color: var(--_accent);
+  background: color-mix(in srgb, var(--_accent) 18%, transparent);
+}
+
+.omg-choice__label {
+  display: block;
+  font-weight: 600;
+}
+
+.omg-choice__hint {
+  display: block;
+  font-size: 12.5px;
+  color: var(--_muted);
+}
+
+.omg-switch-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.omg-switch {
+  flex: none;
+  position: relative;
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--_surface-2);
+  border: 1px solid var(--_border);
+  transition: background var(--_dur);
+}
+
+.omg-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--_text);
+  transition: transform var(--_dur);
+}
+
+.omg-switch--on {
+  background: var(--_accent);
+}
+
+.omg-switch--on::after {
+  transform: translateX(18px);
+  background: var(--_accent-text);
+}
+
+.omg-combo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.omg-combo {
+  min-height: 48px;
+  font-weight: 500;
+}
+
+.omg-combo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.omg-combo-list__item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 12px;
+  border: 1px solid var(--_border);
+  border-radius: var(--_radius);
+}
+
+.omg-combo-list__label {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+}
+
+.omg-combo-form {
+  margin-top: 14px;
+}
+
+.omg-combo-form__row {
+  display: flex;
+  gap: 8px;
+}
+
+.omg-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--_muted);
+}
+
+.omg-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--_border);
+  border-radius: calc(var(--_radius) - 2px);
+  background: var(--omg-bg, #0d0f12);
+  color: var(--_text);
+  font: inherit;
+  font-size: 16px;
+}
+
+.omg-input:focus-visible {
+  outline: 2px solid var(--_accent);
+  outline-offset: 1px;
+}
+
+.omg-muted {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--_muted);
+}
+
+.omg-error {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--_danger);
+}
+
+/* ---- Status overlay and toast ------------------------------------------------------ */
+
+.omg-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.62);
+  z-index: 20;
+}
+
+.omg-overlay__card {
+  width: min(380px, 100%);
+  padding: 20px;
+  border: 1px solid var(--_border);
+  border-radius: calc(var(--_radius) + 4px);
+  background: var(--omg-surface, #1c1f26);
+  text-align: center;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.omg-overlay__heading {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.omg-overlay__detail {
+  margin: 8px 0 0;
+  color: var(--_muted);
+}
+
+.omg-overlay__actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.omg-spinner {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 12px;
+  border: 3px solid var(--_border);
+  border-top-color: var(--_accent);
+  border-radius: 50%;
+  animation: omg-spin 0.9s linear infinite;
+}
+
+@keyframes omg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omg-spinner {
+    animation-duration: 3s;
+  }
+
+  .omg-sheet {
+    animation: none;
+  }
+}
+
+.omg-toast-region {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.omg-chrome > .omg-toast-region {
+  pointer-events: none;
+}
+
+.omg-toast {
+  max-width: min(440px, calc(100% - 32px));
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--_surface);
+  border: 1px solid var(--_border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  font-size: 13.5px;
+  text-align: center;
+  animation: omg-toast-in var(--_dur) ease-out;
+}
+
+@keyframes omg-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}

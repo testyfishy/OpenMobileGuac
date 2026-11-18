@@ -1,7 +1,16 @@
+import { KeychainAccess, SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { Capacitor } from '@capacitor/core';
+import { Preferences } from '@capacitor/preferences';
 import { FetchHttpClient } from './http/FetchHttpClient.ts';
 import type { HttpClient } from './http/HttpClient.ts';
 import { NativeHttpClient } from './http/NativeHttpClient.ts';
+import {
+  MemoryKeyValueStore,
+  WebStorageKeyValueStore,
+  type KeyValueStore,
+} from './storage/KeyValueStore.ts';
+import { NativeSecureStore } from './storage/NativeSecureStore.ts';
+import { PreferencesKeyValueStore } from './storage/PreferencesKeyValueStore.ts';
 import {
   InsecureDevLocalStorageSecureStore,
   MemorySecureStore,
@@ -33,17 +42,41 @@ export function createHttpClient(overrides: PlatformOverrides = {}): HttpClient 
 }
 
 /**
- * - Native: TODO(native-secure-store). Keychain/Keystore are not wired up yet, so this
- *   returns a memory-only store. Secrets are not persisted and never touch plain storage
- *   (SRV-3).
+ * - Native: `NativeSecureStore` (iOS Keychain, "this device only", no iCloud sync; Android
+ *   Keystore-encrypted storage) via `@aparajita/capacitor-secure-storage` (SRV-3).
  * - Web dev build: an INSECURE localStorage store, for convenience only.
  * - Web production build: memory only.
+ *
+ * The plugin's own web implementation is plain localStorage, so it is never used on web.
  */
 export function createSecureStore(overrides: PlatformOverrides = {}): SecureStore {
-  if (isNativePlatform(overrides)) return new MemorySecureStore();
+  if (isNativePlatform(overrides)) {
+    // Until `npx cap sync` registers the plugin in the native project, keep secrets in
+    // memory (the UI then says they are not saved) rather than failing every write.
+    const available =
+      overrides.native !== undefined || Capacitor.isPluginAvailable('SecureStorage');
+    if (!available) return new MemorySecureStore();
+    return new NativeSecureStore(SecureStorage, {
+      keychainAccess: KeychainAccess.whenUnlockedThisDeviceOnly,
+    });
+  }
   const dev = overrides.dev ?? import.meta.env.DEV;
   if (dev && typeof globalThis.localStorage !== 'undefined') {
     return new InsecureDevLocalStorageSecureStore(globalThis.localStorage);
   }
   return new MemorySecureStore();
+}
+
+/**
+ * Non-secret app data (profiles, favourites, recents, settings).
+ * - Native: Capacitor Preferences, which the OS does not evict the way it may evict WebView
+ *   storage.
+ * - Web: `localStorage`, or memory when it is unavailable.
+ */
+export function createKeyValueStore(overrides: PlatformOverrides = {}): KeyValueStore {
+  if (isNativePlatform(overrides)) return new PreferencesKeyValueStore(Preferences);
+  if (typeof globalThis.localStorage !== 'undefined') {
+    return new WebStorageKeyValueStore(globalThis.localStorage);
+  }
+  return new MemoryKeyValueStore();
 }

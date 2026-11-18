@@ -3,11 +3,9 @@ import type { StorageLike } from './KeyValueStore.ts';
 /**
  * Storage for secrets: saved passwords and auth tokens (SPEC SRV-3).
  *
- * The production implementation must be backed by the iOS Keychain or Android Keystore.
- * TODO(native-secure-store): add a Keychain/Keystore-backed implementation behind this
- * interface, using a permissively licensed Capacitor plugin or a small in-repo plugin, and
- * select it in `core/platform.ts` `createSecureStore()`. Until then native builds fall back
- * to `MemorySecureStore`, so nothing is persisted and nothing is written to plain storage.
+ * The production implementation is backed by the iOS Keychain or Android Keystore:
+ * `NativeSecureStore` (see `NativeSecureStore.ts`), selected in `core/platform.ts`
+ * `createSecureStore()`. Web builds use `MemorySecureStore` (or the insecure dev store).
  */
 export interface SecureStore {
   /** Whether values are protected at rest by the OS (Keychain/Keystore). */
