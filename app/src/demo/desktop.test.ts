@@ -53,8 +53,8 @@ describe.each([
     d = new DemoDesktop({ width, height, measure: stubMeasure, now: 0 });
   });
 
-  it('gives every window the full width and a fully visible place above the taskbar', () => {
-    const screen = { x: 0, y: 0, w: width, h: height - TASKBAR_H };
+  it('gives every window the full width and a fully visible place below the taskbar', () => {
+    const screen = { x: 0, y: TASKBAR_H, w: width, h: height - TASKBAR_H };
     for (const w of Object.values(d.windows)) {
       expect(w.w).toBe(width - 32);
       expect(inside(screen, w)).toBe(true);
@@ -140,21 +140,150 @@ describe.each([
   });
 });
 
+const overlaps = (a: Rect, b: Rect) =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+describe.each([
+  // [width, height, arrangement, About open by default]
+  [812, 375, 'columns', false],
+  [667, 375, 'columns', false],
+  [640, 360, 'columns', false],
+  [932, 430, 'columns', false],
+  [1024, 768, 'columns', true],
+  [1366, 1024, 'row', true],
+] as const)('landscape and tablet layout at %i × %i', (width, height, arrangement, aboutOpen) => {
+  let d: DemoDesktop;
+  beforeEach(() => {
+    d = new DemoDesktop({ width, height, measure: stubMeasure, now: 0 });
+  });
+  const visible = () => Object.values(d.windows).filter((w) => w.visible);
+
+  it(`uses the ${arrangement} arrangement with every open window fully below the taskbar`, () => {
+    expect(d.layout.arrangement).toBe(arrangement);
+    expect(d.windows.about.visible).toBe(aboutOpen);
+    expect(d.windows.notes.visible && d.windows.input.visible).toBe(true);
+    const work = { x: 0, y: TASKBAR_H, w: width, h: height - TASKBAR_H };
+    for (const w of visible()) expect(inside(work, w), w.id).toBe(true);
+  });
+
+  it('opens no window on top of another, with Notes and Input side by side', () => {
+    const open = visible();
+    for (const [i, a] of open.entries()) {
+      for (const b of open.slice(i + 1)) expect(overlaps(a, b), `${a.id}/${b.id}`).toBe(false);
+    }
+    const { notes, input } = d.windows;
+    expect(notes.y).toBe(input.y);
+    expect(notes.x + notes.w).toBeLessThan(input.x);
+  });
+
+  it('puts the taskbar along the top, clear of the session toolbar at the bottom', () => {
+    expect(d.taskbarRect()).toEqual({ x: 0, y: 0, w: width, h: TASKBAR_H });
+    expect(d.clockRect().y).toBe(0);
+    for (const [i] of TASKBAR_ORDER.entries()) {
+      expect(inside(d.taskbarRect(), d.taskbarButtonRect(i))).toBe(true);
+    }
+    const p = new RecordingPainter();
+    paintSurface(d, 'desktop', p);
+    const bar = p.calls.find((c) => c.op === 'fillRect' && c.args[3] === TASKBAR_H);
+    expect(bar?.args.slice(0, 3)).toEqual([0, 0, width]);
+  });
+
+  it('keeps every interactive part inside its window and all text inside its edges', () => {
+    const { notes, input, about } = d.layout;
+    const box = (w: { w: number; h: number }) => ({ x: 0, y: 0, w: w.w, h: w.h });
+    for (const r of [notes.hint, notes.area, notes.clip, notes.status]) {
+      expect(inside(box(notes), r)).toBe(true);
+    }
+    const parts = [input.dragArea, input.list, input.row(input.checkedCaption.row)];
+    for (let i = 0; i < 3; i++) parts.push(input.pill(i));
+    for (let i = 0; i < input.checkboxCount; i++) parts.push(input.checkbox(i));
+    for (const r of parts) expect(inside(box(input), r)).toBe(true);
+    expect(overlaps(input.dragArea, input.list)).toBe(false);
+    expect(input.dragArea.w).toBeGreaterThanOrEqual(input.boxSize * 2);
+    expect(input.dragArea.h).toBeGreaterThanOrEqual(input.boxSize + 20);
+    expect(inside(box(about), about.target)).toBe(true);
+
+    d.receiveClipboard('a long clipboard text from the phone that cannot fit on the line');
+    d.pointer(1234, 2345, Button.LEFT | Button.RIGHT, 0);
+    for (const k of [Keysym.Control_L, Keysym.Shift_L, Keysym.Alt_L, Keysym.Delete]) {
+      d.key(k, true);
+    }
+    for (const id of ['notes', 'input', 'about'] as const) {
+      for (const t of textExtents(d, id)) {
+        expect(t.l, t.text).toBeGreaterThanOrEqual(0);
+        expect(t.r, t.text).toBeLessThanOrEqual(d.windows[id].w);
+      }
+    }
+  });
+
+  it('lets Notes and Input be used without moving anything: type, tick, drag, scroll', () => {
+    const n = d.windows.notes;
+    const area = d.layout.notes.area;
+    click(d, n.x + area.x + 10, n.y + area.y + 10, 1000);
+    expect(d.notesFocused).toBe(true);
+    d.notes.setText('');
+    tap(d, 0x61);
+    expect(d.notes.text).toBe('a');
+
+    const win = d.windows.input;
+    const L = d.layout.input;
+    const cb = L.checkbox(7);
+    click(d, win.x + cb.x + 6, win.y + cb.y + 6, 2000);
+    expect(d.checks[7]).toBe(true);
+    const bx = win.x + L.dragArea.x + d.boxX + 10;
+    const by = win.y + L.dragArea.y + d.boxY + 10;
+    d.pointer(bx, by, Button.LEFT, 3000);
+    d.pointer(bx + 12, by + 4, Button.LEFT, 3016);
+    d.pointer(bx + 12, by + 4, 0, 3032);
+    expect([d.boxX, d.boxY]).toEqual([24 + 12, 24 + 4]);
+    d.pointer(win.x + L.list.x + 20, win.y + L.list.y + 10, Button.DOWN, 4000);
+    expect(d.listScroll).toBeGreaterThan(0);
+  });
+
+  it('opens About from the taskbar fully on screen', () => {
+    const b = d.taskbarButtonRect(TASKBAR_ORDER.indexOf('about'));
+    if (d.windows.about.visible) {
+      click(d, b.x + 5, b.y + 5, 1000); // raise
+    } else {
+      click(d, b.x + 5, b.y + 5, 1000);
+      expect(d.windows.about.visible).toBe(true);
+    }
+    expect(d.stack.at(-1)).toBe('about');
+    const work = { x: 0, y: TASKBAR_H, w: width, h: height - TASKBAR_H };
+    expect(inside(work, d.windows.about)).toBe(true);
+  });
+});
+
+describe('About closed for lack of room', () => {
+  it('comes back by itself when the desktop rotates to portrait', () => {
+    const d = new DemoDesktop({ width: 812, height: 375, measure: stubMeasure, now: 0 });
+    expect(d.windows.about.visible).toBe(false);
+    d.resize(375, 812);
+    expect(d.windows.about.visible).toBe(true);
+    expect(d.focused).toBe('notes');
+    d.resize(812, 375);
+    expect(d.windows.about.visible).toBe(false);
+  });
+
+  it('is closed again by the next arrangement that has no room for it', () => {
+    const d = new DemoDesktop({ width: 812, height: 375, measure: stubMeasure, now: 0 });
+    d.show('about');
+    expect(d.windows.about.visible).toBe(true);
+    d.resize(375, 812);
+    d.resize(812, 375);
+    expect(d.windows.about.visible).toBe(false);
+    d.show('about');
+    d.resize(812, 376);
+    expect(d.windows.about.visible).toBe(false);
+  });
+});
+
 describe('other sizes', () => {
   it('keeps every window fully on screen even on a very short narrow desktop', () => {
     const d = new DemoDesktop({ width: 320, height: 480, measure: stubMeasure, now: 0 });
     for (const w of Object.values(d.windows)) {
-      expect(w.y).toBeGreaterThanOrEqual(0);
-      expect(w.y + w.h).toBeLessThanOrEqual(480 - TASKBAR_H);
-    }
-  });
-
-  it('fits every window on a landscape phone (812 × 375 logical)', () => {
-    const d = new DemoDesktop({ width: 812, height: 375, measure: stubMeasure, now: 0 });
-    for (const w of Object.values(d.windows)) {
-      expect(w.y).toBeGreaterThanOrEqual(0);
-      expect(w.y + w.h).toBeLessThanOrEqual(375 - TASKBAR_H);
-      expect(w.x + w.w).toBeLessThanOrEqual(812);
+      expect(w.y).toBeGreaterThanOrEqual(TASKBAR_H);
+      expect(w.y + w.h).toBeLessThanOrEqual(480);
     }
   });
 
@@ -172,7 +301,7 @@ describe('other sizes', () => {
     d.resize(1280, 800);
     expect(d.windows.input.w).toBe(INPUT.w);
     expect(d.layout.input.list).toEqual(INPUT.list);
-    expect(contains(d.taskbarButtonRect(2), 96 + 2 * 124 + 1, 800 - TASKBAR_H + 6)).toBe(true);
+    expect(contains(d.taskbarButtonRect(2), 96 + 2 * 124 + 1, 6)).toBe(true);
   });
 });
 
@@ -206,7 +335,7 @@ function at(d: DemoDesktop, id: 'notes' | 'input' | 'about', lx: number, ly: num
 }
 
 function emptyDesktopPoint(d: DemoDesktop): [number, number] {
-  return [d.width - 40, d.height - TASKBAR_H - 60];
+  return [d.width - 40, d.height - 60];
 }
 
 let d: DemoDesktop;
@@ -221,7 +350,8 @@ describe('layout', () => {
     for (const w of Object.values(d.windows)) {
       expect(w.x).toBeGreaterThanOrEqual(0);
       expect(w.x + w.w).toBeLessThanOrEqual(1280);
-      expect(w.y + w.h).toBeLessThanOrEqual(800 - TASKBAR_H);
+      expect(w.y).toBeGreaterThanOrEqual(TASKBAR_H);
+      expect(w.y + w.h).toBeLessThanOrEqual(800);
     }
   });
 
@@ -232,7 +362,7 @@ describe('layout', () => {
     const { notes, input, about } = d.windows;
     expect(notes.y + notes.h).toBeLessThanOrEqual(input.y);
     expect(input.y + input.h).toBeLessThanOrEqual(about.y);
-    expect(about.y + about.h).toBeLessThanOrEqual(1200 - TASKBAR_H);
+    expect(about.y + about.h).toBeLessThanOrEqual(1200);
     expect(d.takeDamage().rects.get('desktop')).toEqual([{ x: 0, y: 0, w: 800, h: 1200 }]);
 
     d.resize(10, 99999);
@@ -241,7 +371,8 @@ describe('layout', () => {
       // Title bars stay reachable.
       expect(w.x + w.w).toBeGreaterThanOrEqual(80);
       expect(w.x).toBeLessThanOrEqual(320 - 80);
-      expect(w.y).toBeLessThanOrEqual(4096 - TASKBAR_H - TITLE_H);
+      expect(w.y).toBeGreaterThanOrEqual(TASKBAR_H);
+      expect(w.y).toBeLessThanOrEqual(4096 - TITLE_H);
     }
   });
 });

@@ -106,15 +106,17 @@ describe('DemoTunnel handshake', () => {
 
     // Windows are positioned with move; the hidden menu is shaded out.
     // Every layer has z = 0; stacking is DOM order, built by re-appending bottom to top
-    // through the staging layer. At 1024 px the windows cascade, stacked in cascade order:
-    // Notes, Input test, About, then the menu.
+    // through the staging layer. At 1024 × 700 the windows are arranged in two columns that
+    // do not overlap, so the default stacking holds: About, Notes, Input test, then the menu.
+    // About has no room below Notes there, so it starts closed (shaded) like the menu.
     const moves = find(rx, 'move').map((i) => i.args);
     expect(moves.every((m) => m[4] === '0')).toBe(true);
-    const order = ['1', '2', '3', '4'];
+    const order = ['3', '1', '2', '4'];
     expect(moves.filter((m) => m[1] === '0').map((m) => m[0])).toEqual(order);
     expect(moves.filter((m) => m[1] === String(STAGING_LAYER)).map((m) => m[0])).toEqual(order);
     expect(find(rx, 'shade')).toEqual([
       { opcode: 'shade', args: [String(STAGING_LAYER), '0'] },
+      { opcode: 'shade', args: [String(LAYERS.about), '0'] },
       { opcode: 'shade', args: [String(LAYERS.menu), '0'] },
     ]);
 
@@ -337,7 +339,10 @@ describe('DemoTunnel input', () => {
     tunnel.sendMessage('size', 800, 1000);
     frame();
     const out = take();
-    expect(find(out, 'size')).toEqual([{ opcode: 'size', args: ['0', '800', '1000'] }]);
+    // Layer 0 takes the new size; at 800 × 1000 the windows also change size (two columns).
+    const sizes = find(out, 'size').map((i) => i.args);
+    expect(sizes[0]).toEqual(['0', '800', '1000']);
+    expect(sizes.slice(1).every((s) => ['1', '2', '3'].includes(s[0] as string))).toBe(true);
     expect(find(out, 'move').length).toBeGreaterThan(0);
     const layer0 = find(out, 'img').filter((i) => i.args[2] === '0');
     expect(layer0.length).toBe(Math.ceil(800 / 256) * Math.ceil(1000 / 256));

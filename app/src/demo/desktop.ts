@@ -98,13 +98,14 @@ export interface DamageReport {
 // Each window has a wide layout (its classic size) and narrower or shorter variants, so on a
 // phone-sized desktop (for example 375 × 812) every window fits on screen and stays usable.
 // The layouts are recomputed whenever the desktop size changes; painting and hit-testing
-// read the same objects from `DemoDesktop.layout`.
+// read the same objects from `DemoDesktop.layout`. A landscape phone (for example 812 × 375)
+// gets two columns (see `Arrangement`).
 
 /** Margin around windows when they are arranged. */
 const MARGIN = 16;
 
 const HINT_WIDE = [
-  'Click the text area and type. Ctrl+A select all, Ctrl+C copy, Ctrl+X cut, Ctrl+V paste.',
+  'Click the text area and type. Ctrl+A select all, C copy, X cut, V paste.',
 ] as const;
 const HINT_COMPACT = [
   'Click the text area and type.',
@@ -130,7 +131,7 @@ export interface NotesLayout {
 /** Notes at width `w`, with the text area shortened (to 120 px at least) to fit `maxH`. */
 export function notesLayout(w: number, maxH = Infinity): NotesLayout {
   const inner = w - 24;
-  const hintLines = inner >= 480 ? HINT_WIDE : HINT_COMPACT;
+  const hintLines = inner >= 496 ? HINT_WIDE : HINT_COMPACT;
   const hint = rect(12, TITLE_H + 6, inner, hintLines.length * 14 + 6);
   const areaY = hint.y + hint.h + 4;
   // Below the area: 6 gap + clipboard line 20 + 4 gap + status line 20 + 14 bottom.
@@ -157,6 +158,8 @@ export function notesLayout(w: number, maxH = Infinity): NotesLayout {
 const ROWS_TOP = TITLE_H + 8;
 const ROW_H = 20;
 const INPUT_WIDE_W = 560;
+/** Below this, stacked Input panels get too short and go side by side instead. */
+const MIN_STACKED_PANEL_H = 64;
 
 /** Input test rows, by index into `InputLayout.row`. */
 export const ROW = {
@@ -195,7 +198,8 @@ export interface InputLayout {
 /**
  * The Input test window at width `w`. At its full 560 px the drag area and list sit side by
  * side; narrower, they are stacked. Their height shrinks (to 100 px, or 80 px each when
- * stacked) to fit `maxH`.
+ * stacked) to fit `maxH`; when stacked panels would drop below 64 px each (a short window),
+ * the narrow layout puts them side by side too.
  */
 export function inputLayout(w: number, maxH = Infinity): InputLayout {
   const wide = w >= INPUT_WIDE_W;
@@ -230,10 +234,27 @@ export function inputLayout(w: number, maxH = Infinity): InputLayout {
       list: rect(330, top, 216, panelH),
     };
   }
-  // Stacked: the checked caption gets its own row, then the drag area, then the list.
+  // Narrow: the checked caption gets its own row, then the drag area and the list.
   const dragTop = ROWS_TOP + 8 * ROW_H + 24;
   const gap = 26;
-  const panelH = Math.max(80, Math.min(200, Math.floor((maxH - dragTop - gap - 14) / 2)));
+  const stackedH = Math.floor((maxH - dragTop - gap - 14) / 2);
+  if (stackedH < MIN_STACKED_PANEL_H) {
+    // Short (a landscape phone column): the drag area and the list side by side.
+    const panelW = Math.floor((w - 28 - 16) / 2);
+    const sideH = Math.max(64, Math.min(200, Math.floor(maxH - dragTop - 14)));
+    const listX = 14 + panelW + 16;
+    return {
+      ...common,
+      h: dragTop + sideH + 14,
+      checkedCaption: { x: valueX, row: ROW.targets + 1 },
+      dragCaptionY: dragTop - 11,
+      listCaption: { x: listX, y: dragTop - 11 },
+      dragArea: rect(14, dragTop, panelW, sideH),
+      list: rect(listX, dragTop, w - 14 - listX, sideH),
+    };
+  }
+  // Stacked: the drag area above the list.
+  const panelH = Math.max(80, Math.min(200, stackedH));
   const listTop = dragTop + panelH + gap;
   return {
     ...common,
@@ -301,18 +322,44 @@ export const NOTES = notesLayout(520);
 export const INPUT = inputLayout(INPUT_WIDE_W);
 export const ABOUT = aboutLayout(520);
 
+/**
+ * How `arrange` places the windows:
+ * - `cascade`: full-width windows cascading down, Notes on top (a phone in portrait).
+ * - `row`: Notes and Input side by side at their classic sizes, About below (wide screens).
+ * - `stack`: the three windows one above the other (tall, medium-width screens).
+ * - `columns`: Notes and Input in two equal columns, shortened to fit; About below Notes
+ *   when there is room, otherwise closed to the taskbar (landscape phones, small tablets).
+ */
+export type Arrangement = 'cascade' | 'row' | 'stack' | 'columns';
+
 export interface DesktopLayout {
   readonly notes: NotesLayout;
   readonly input: InputLayout;
   readonly about: AboutLayout;
+  readonly arrangement: Arrangement;
+  /** Top of the arranged windows. */
+  readonly top: number;
+  /** `columns` only: whether About has a place below Notes (else it starts closed). */
+  readonly aboutFits: boolean;
   /** Narrow taskbar: no "Demo" label, short button titles, a narrower clock. */
   readonly compactTaskbar: boolean;
 }
 
+/**
+ * The taskbar runs along the top of the desktop, so the app's own session toolbar (docked
+ * at the bottom of the screen) does not cover it.
+ */
+const WORK_TOP = TASKBAR_H;
 /** Top of the arranged windows, below the wallpaper heading. */
-const ARRANGE_TOP = 56;
+const ARRANGE_TOP = WORK_TOP + 56;
+/** Top of the arranged windows when the desktop is too short to keep the heading clear. */
+const ARRANGE_TOP_SHORT = WORK_TOP + 8;
+/** Gap kept below arranged windows. */
+const BOTTOM_GAP = 8;
 /** Vertical step between cascaded windows on a narrow desktop: one title bar and a gap. */
 const CASCADE_DY = TITLE_H + 4;
+/** Narrowest column for the `columns` arrangement (Input's rows need 288 px). */
+const MIN_COLUMN_W = 288;
 
 /** Whether windows are arranged as a full-width cascade (a phone in portrait). */
 export function isNarrowDesktop(width: number): boolean {
@@ -322,15 +369,57 @@ export function isNarrowDesktop(width: number): boolean {
 /** Window layouts for a desktop of `width` × `height` pixels. */
 export function desktopLayout(width: number, height: number): DesktopLayout {
   const avail = width - 2 * MARGIN;
-  // Narrow: every window must fit even in the lowest of the three cascade slots.
-  const maxH = isNarrowDesktop(width)
-    ? height - TASKBAR_H - 4 - (ARRANGE_TOP + 2 * CASCADE_DY)
-    : height - TASKBAR_H - 8;
+  const compactTaskbar = width < 96 + 3 * 124 + 108;
+  const cascade = (): DesktopLayout => {
+    // Every window must fit even in the lowest of the three cascade slots.
+    const maxH = height - BOTTOM_GAP / 2 - (ARRANGE_TOP + 2 * CASCADE_DY);
+    return {
+      notes: notesLayout(avail, maxH),
+      input: inputLayout(avail, maxH),
+      about: aboutLayout(avail),
+      arrangement: 'cascade',
+      top: ARRANGE_TOP,
+      aboutFits: true,
+      compactTaskbar,
+    };
+  };
+  if (isNarrowDesktop(width)) return cascade();
+
+  // Classic sizes.
+  const maxH = height - WORK_TOP - BOTTOM_GAP;
+  const notes = notesLayout(Math.min(NOTES.w, avail), maxH);
+  const input = inputLayout(Math.min(INPUT_WIDE_W, avail), maxH);
+  const about = aboutLayout(Math.min(ABOUT.w, avail));
+  const classic = { notes, input, about, top: ARRANGE_TOP, aboutFits: true, compactTaskbar };
+  if (width >= notes.w + input.w + 3 * MARGIN) return { ...classic, arrangement: 'row' };
+  const stackH = notes.h + input.h + about.h + 2 * MARGIN;
+  if (ARRANGE_TOP + stackH <= height - BOTTOM_GAP) return { ...classic, arrangement: 'stack' };
+
+  // Short for its width (a landscape phone) or a small tablet: two columns.
+  const colW = Math.floor((width - 3 * MARGIN) / 2);
+  if (colW < MIN_COLUMN_W) return cascade();
+  const colMaxH = height - ARRANGE_TOP_SHORT - BOTTOM_GAP;
+  const colInput = inputLayout(Math.min(INPUT_WIDE_W, colW), colMaxH);
+  let colNotes = notesLayout(Math.min(NOTES.w, colW), colMaxH);
+  let colAbout = aboutLayout(Math.min(ABOUT.w, colW));
+  const tallest = Math.max(colNotes.h, colInput.h);
+  const top = ARRANGE_TOP + tallest <= height - BOTTOM_GAP ? ARRANGE_TOP : ARRANGE_TOP_SHORT;
+  // About goes below Notes if Notes can shrink enough to make room for it.
+  const notesRoom = height - BOTTOM_GAP - top - colAbout.h - MARGIN;
+  const shortNotes = notesLayout(Math.min(NOTES.w, colW), notesRoom);
+  const aboutFits = shortNotes.h <= notesRoom;
+  if (aboutFits) colNotes = shortNotes;
+  // Otherwise About starts closed and opens over the columns, so it can use the wide (and
+  // much shorter) layout.
+  else colAbout = aboutLayout(Math.min(ABOUT.w, avail));
   return {
-    notes: notesLayout(Math.min(NOTES.w, avail), maxH),
-    input: inputLayout(Math.min(INPUT_WIDE_W, avail), maxH),
-    about: aboutLayout(Math.min(ABOUT.w, avail)),
-    compactTaskbar: width < 96 + 3 * 124 + 108,
+    notes: colNotes,
+    input: colInput,
+    about: colAbout,
+    arrangement: 'columns',
+    top,
+    aboutFits,
+    compactTaskbar,
   };
 }
 
@@ -433,6 +522,8 @@ export class DemoDesktop {
 
   cursor: CursorShape = 'arrow';
 
+  /** About was closed by `arrange` for lack of room (see `Arrangement`). */
+  private aboutParked = false;
   private drag: Drag | null = null;
   private lastLeft: { t: number; x: number; y: number } | null = null;
   private damage = new Map<SurfaceId, Rect[]>();
@@ -578,39 +669,63 @@ export class DemoDesktop {
   /** Places the windows in their default layout for the current size. */
   arrange(): void {
     const m = MARGIN;
-    const top = ARRANGE_TOP;
-    const bottom = this.height - TASKBAR_H;
+    const { arrangement, top, aboutFits } = this.layout;
+    const bottom = this.height;
     const { notes, input, about } = this.windows;
-    if (isNarrowDesktop(this.width)) {
-      // Narrow (a phone in portrait): full-width windows cascade straight down, Notes on top
-      // and lowest, so every title bar shows and each window fits on screen when raised.
-      // (`desktopLayout` sizes them for this; only very short desktops need the clamp.)
-      for (const [i, w] of [about, input, notes].entries()) {
-        w.x = m;
-        w.y = Math.max(0, Math.min(top + i * CASCADE_DY, bottom - w.h - 4));
+    // About is closed when the `columns` arrangement has no room for it, and comes back by
+    // itself once a later arrangement has room (unless the user opened it in between).
+    const parkAbout = arrangement === 'columns' && !aboutFits;
+    if (parkAbout && about.visible) {
+      this.hide('about');
+      this.aboutParked = true;
+    } else if (!parkAbout && this.aboutParked) {
+      // Reopen without raising it, so focus stays where it was.
+      this.aboutParked = false;
+      about.visible = true;
+      this.invalidate('desktop', this.taskbarRect());
+    }
+    switch (arrangement) {
+      case 'cascade':
+        // A phone in portrait: full-width windows cascade straight down, Notes on top and
+        // lowest, so every title bar shows and each window fits on screen when raised.
+        // (`desktopLayout` sizes them for this; only very short desktops need the clamp.)
+        for (const [i, w] of [about, input, notes].entries()) {
+          w.x = m;
+          w.y = Math.max(WORK_TOP, Math.min(top + i * CASCADE_DY, bottom - w.h - 4));
+        }
+        this.stack.splice(0, this.stack.length, 'about', 'input', 'notes');
+        break;
+      case 'row':
+        notes.x = m;
+        notes.y = top;
+        input.x = Math.min(notes.x + notes.w + m * 2, this.width - input.w - m);
+        input.y = top;
+        about.x = m;
+        about.y = notes.y + notes.h + m;
+        if (about.y + about.h > bottom - BOTTOM_GAP) {
+          about.x = input.x;
+          about.y = Math.max(top, bottom - about.h - m);
+        }
+        break;
+      case 'stack': {
+        let y = top;
+        for (const w of [notes, input, about]) {
+          w.x = m;
+          w.y = y;
+          y += w.h + m;
+        }
+        break;
       }
-      this.stack.splice(0, this.stack.length, 'about', 'input', 'notes');
-    } else if (this.width >= notes.w + input.w + 3 * m) {
-      notes.x = m;
-      notes.y = top;
-      input.x = Math.min(notes.x + notes.w + m * 2, this.width - input.w - m);
-      input.y = top;
-      about.x = m;
-      about.y = notes.y + notes.h + m;
-      if (about.y + about.h > bottom) {
-        about.x = input.x;
-        about.y = Math.max(top, bottom - about.h - m);
-      }
-    } else {
-      let y = top;
-      const fits = notes.h + input.h + about.h + 2 * m + top <= bottom;
-      for (const [i, w] of [notes, input, about].entries()) {
-        w.x = fits ? m : m + i * 32;
-        w.y = fits ? y : Math.max(0, Math.min(top + i * 40, bottom - w.h - 4));
-        y += w.h + m;
-      }
-      // Stack in cascade order so every title bar stays visible.
-      if (!fits) this.stack.splice(0, this.stack.length, 'notes', 'input', 'about');
+      case 'columns':
+        // Notes left, Input right, About below Notes (or, when closed, ready to open over
+        // the Input column). Nothing overlaps.
+        notes.x = m;
+        notes.y = top;
+        input.x = this.width - input.w - m;
+        input.y = top;
+        about.x = aboutFits ? m : this.width - about.w - m;
+        about.y = aboutFits ? notes.y + notes.h + m : top;
+        break;
     }
     for (const w of [notes, input, about]) this.clampWindow(w);
   }
@@ -804,7 +919,7 @@ export class DemoDesktop {
         return { kind: 'window', win, lx: x - win.x, ly: y - win.y };
       }
     }
-    if (y >= this.height - TASKBAR_H) {
+    if (y < TASKBAR_H) {
       for (const [i, id] of TASKBAR_ORDER.entries()) {
         if (contains(this.taskbarButtonRect(i), x, y)) return { kind: 'taskbar', button: id };
       }
@@ -866,6 +981,7 @@ export class DemoDesktop {
 
   show(id: WindowId): void {
     const w = this.windows[id];
+    if (id === 'about') this.aboutParked = false;
     if (!w.visible) {
       w.visible = true;
       this.clampWindow(w);
@@ -883,7 +999,7 @@ export class DemoDesktop {
 
   openMenu(x: number, y: number): void {
     this.menuX = Math.max(0, Math.min(this.width - MENU.w, x));
-    this.menuY = Math.max(0, Math.min(this.height - TASKBAR_H - MENU_H, y));
+    this.menuY = Math.max(WORK_TOP, Math.min(this.height - MENU_H, y));
     this.menuOpen = true;
     this.menuHover = null;
     this.updateMenuHover();
@@ -911,8 +1027,10 @@ export class DemoDesktop {
         this.arrange();
         break;
       case 'Show all windows':
-        for (const id of ['about', 'notes', 'input'] as const) this.show(id);
+        // Arrange first: in the `columns` arrangement it may close About, which the user
+        // has just asked to see.
         this.arrange();
+        for (const id of ['about', 'notes', 'input'] as const) this.show(id);
         break;
       case 'Change wallpaper':
         this.wallpaper = (this.wallpaper + 1) % WALLPAPER_COUNT;
@@ -930,7 +1048,7 @@ export class DemoDesktop {
   private clampWindow(w: DemoWindow): void {
     const keep = 80;
     w.x = Math.round(Math.max(keep - w.w, Math.min(this.width - keep, w.x)));
-    w.y = Math.round(Math.max(0, Math.min(this.height - TASKBAR_H - TITLE_H, w.y)));
+    w.y = Math.round(Math.max(WORK_TOP, Math.min(this.height - TITLE_H, w.y)));
   }
 
   // ---- Keyboard -----------------------------------------------------------------------
@@ -1137,21 +1255,23 @@ export class DemoDesktop {
   }
 
   taskbarRect(): Rect {
-    return rect(0, this.height - TASKBAR_H, this.width, TASKBAR_H);
+    return rect(0, 0, this.width, TASKBAR_H);
   }
 
   taskbarButtonRect(i: number): Rect {
-    const y = this.height - TASKBAR_H + 5;
+    const y = 5;
     if (!this.layout.compactTaskbar) return rect(96 + i * 124, y, 116, TASKBAR_H - 10);
-    // Narrow: buttons share the space between the logo and the clock.
-    const left = 40;
+    // Narrow: buttons share the space between the logo and the clock. They start right of
+    // where the app's "Demo" badge sits (top-left of the session screen), so it does not
+    // cover the first button.
+    const left = 72;
     const step = Math.floor((this.width - left - this.clockRect().w) / TASKBAR_ORDER.length);
     return rect(left + i * step, y, step - 6, TASKBAR_H - 10);
   }
 
   clockRect(): Rect {
     const w = this.layout.compactTaskbar ? 80 : 100;
-    return rect(this.width - w, this.height - TASKBAR_H, w, TASKBAR_H);
+    return rect(this.width - w, 0, w, TASKBAR_H);
   }
 
   ellipsize(text: string, maxWidth: number, font: FontSpec): string {

@@ -62,12 +62,29 @@ A gradient wallpaper, a taskbar with window buttons and a clock, and three windo
 Windows drag by their title bar and close with ×; the taskbar reopens them. Right-click the
 wallpaper for a menu, which closes on the next click.
 
-Window layouts adapt to the desktop size (`desktopLayout` in `desktop.ts`). Below 592
-logical pixels wide (a phone in portrait, e.g. 375 × 812), windows take the full width,
-their contents reflow (Input test stacks its drag area above the list, About puts the
-detail target under the text, the taskbar shortens its labels) and they cascade straight
-down with Notes on top, so each fits on screen and every title bar shows. On short desktops
-the Notes text area and the Input test panels shrink to fit.
+The taskbar runs along the **top** of the desktop, so the app's session toolbar (docked at
+the bottom of the screen) never covers it.
+
+Window layouts adapt to the desktop size (`desktopLayout` and `Arrangement` in
+`desktop.ts`):
+
+- **cascade**, below 592 logical pixels wide (a phone in portrait, e.g. 375 × 812): windows
+  take the full width, their contents reflow (Input test stacks its drag area above the
+  list, About puts the detail target under the text, the taskbar shortens its labels) and
+  they cascade straight down with Notes on top, so each fits on screen and every title bar
+  shows.
+- **row**, from 1128 wide (e.g. 1280 × 800, 1366 × 1024): Notes and Input test side by side
+  at their classic sizes, About below Notes.
+- **stack**, medium width and tall enough (e.g. 800 × 1200): the three windows one above
+  the other.
+- **columns**, medium width but too short to stack (landscape phones such as 640 × 360, 667 × 375,
+  812 × 375, 932 × 430, and tablets such as 1024 × 768): Notes and Input test in two equal
+  columns, shortened to fit, with Input test's drag area and list side by side. Nothing
+  overlaps. About goes below Notes when Notes can shrink enough; otherwise it starts closed
+  and opens from the taskbar over the columns in its wide, short layout. It comes back by
+  itself when a later size has room for it.
+
+On short desktops the Notes text area and the Input test panels shrink to fit.
 
 ## Developer harness
 

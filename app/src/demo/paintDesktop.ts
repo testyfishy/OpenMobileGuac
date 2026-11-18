@@ -115,20 +115,20 @@ function paintDesktop(d: DemoDesktop, p: Painter): void {
     'rgba(255,255,255,0.05)',
   );
 
-  p.text('OpenMobileGuac demo desktop', 18, 22, { size: 14, bold: true }, '#ffffff');
+  // Heading below the taskbar (both are on layer 0).
+  p.text('OpenMobileGuac demo desktop', 18, TASKBAR_H + 22, { size: 14, bold: true }, '#ffffff');
   p.text(
     'Simulated on this device · no network · no personal data',
     18,
-    40,
+    TASKBAR_H + 40,
     SMALL,
     'rgba(255,255,255,0.82)',
   );
 
-  // Taskbar
-  const top = H - TASKBAR_H;
-  const cy = top + TASKBAR_H / 2;
-  p.fillRect(0, top, W, TASKBAR_H, COLORS.taskbar);
-  p.fillRect(0, top, W, 1, '#2a303b');
+  // Taskbar, along the top so the app's bottom session toolbar does not cover it.
+  const cy = TASKBAR_H / 2;
+  p.fillRect(0, 0, W, TASKBAR_H, COLORS.taskbar);
+  p.fillRect(0, TASKBAR_H - 1, W, 1, '#2a303b');
   const compact = d.layout.compactTaskbar;
   p.fillCircle(22, cy, 9, COLORS.mint);
   p.fillCircle(22, cy, 4, COLORS.taskbar);
@@ -323,9 +323,16 @@ function paintInput(d: DemoDesktop, p: Painter): void {
   );
 
   // Captions
-  p.text('Drag the box with the left button', 14, INPUT.dragCaptionY, SMALL, COLORS.muted);
+  const dragCaption = d.ellipsize('Drag the box with the left button', INPUT.dragArea.w, SMALL);
+  p.text(dragCaption, 14, INPUT.dragCaptionY, SMALL, COLORS.muted);
   const lc = INPUT.listCaption;
-  p.text('Scroll with the wheel', lc.x, lc.y, SMALL, COLORS.muted);
+  p.text(
+    d.ellipsize('Scroll with the wheel', INPUT.list.w, SMALL),
+    lc.x,
+    lc.y,
+    SMALL,
+    COLORS.muted,
+  );
 
   // Drag area
   const a = INPUT.dragArea;
