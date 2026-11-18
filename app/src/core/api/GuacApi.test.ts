@@ -1,0 +1,360 @@
+import { describe, expect, it } from 'vitest';
+import { HttpTransportError, type HttpRequest } from '../http/HttpClient.ts';
+import type { AuthSession } from '../models/AuthSession.ts';
+import { FakeHttpClient, jsonResponse, textResponse } from '../testing/FakeHttpClient.ts';
+import {
+  BASE_URL,
+  authResultJson,
+  invalidCredentialsJson,
+  languagesJson,
+  notFoundJson,
+  permissionDeniedJson,
+  sharedTreeJson,
+  totpEnrollJson,
+  totpRequiredJson,
+  totpWrongCodeJson,
+  treeJson,
+} from '../testing/fixtures.ts';
+import { GuacApiError, isGuacApiError, type GuacErrorInfo } from './errors.ts';
+import { GuacApi, TOKEN_HEADER } from './GuacApi.ts';
+
+const profile = { baseUrl: BASE_URL };
+const creds = { username: 'testuser', password: 'pw & =?' };
+const TOKENS = `${BASE_URL}/api/tokens`;
+
+const session: AuthSession = {
+  baseUrl: BASE_URL,
+  token: authResultJson.authToken,
+  username: 'testuser',
+  primaryDataSource: 'postgresql',
+  dataSources: ['postgresql', 'postgresql-shared'],
+};
+
+async function errorInfo(p: Promise<unknown>): Promise<GuacErrorInfo> {
+  try {
+    await p;
+  } catch (err) {
+    if (err instanceof GuacApiError) return err.info;
+    throw err;
+  }
+  throw new Error('expected rejection');
+}
+
+function formFields(req: HttpRequest | undefined): Record<string, unknown> {
+  if (req?.body?.kind !== 'form') throw new Error('expected a form body');
+  return { ...req.body.fields };
+}
+
+describe('GuacApi.login', () => {
+  it('posts a form to api/tokens and returns the session', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    const result = await new GuacApi(http).login(profile, creds);
+
+    expect(result).toEqual(session);
+    expect(http.requests).toHaveLength(1);
+    expect(http.requests[0]?.method).toBe('POST');
+    expect(formFields(http.requests[0])).toEqual({ username: 'testuser', password: 'pw & =?' });
+    expect(http.requests[0]?.headers?.[TOKEN_HEADER]).toBeUndefined();
+  });
+
+  it('maps INVALID_CREDENTIALS (403) to invalid-credentials', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () =>
+      jsonResponse(403, invalidCredentialsJson),
+    );
+    const info = await errorInfo(new GuacApi(http).login(profile, creds));
+    expect(info).toMatchObject({
+      kind: 'invalid-credentials',
+      status: 403,
+      translatableMessage: { key: 'APP.TEXT_UNTRANSLATED' },
+    });
+  });
+
+  it('supports the TOTP flow: additional credentials, then resubmission with all fields', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, (req) => {
+      const fields = formFields(req);
+      if (fields['guac-totp'] === undefined) return jsonResponse(403, totpRequiredJson);
+      if (fields['guac-totp'] !== '123456') return jsonResponse(400, totpWrongCodeJson);
+      return jsonResponse(200, authResultJson);
+    });
+    const api = new GuacApi(http);
+
+    const first = await errorInfo(api.login(profile, creds));
+    expect(first.kind).toBe('additional-credentials-required');
+    if (first.kind !== 'additional-credentials-required') return;
+    expect(first.expected.map((f) => [f.name, f.type])).toEqual([['guac-totp', 'GUAC_TOTP_CODE']]);
+    expect(first.translatableMessage?.key).toBe('TOTP.INFO_CODE_REQUIRED');
+
+    const wrong = await errorInfo(api.login(profile, creds, { 'guac-totp': '000000' }));
+    expect(wrong).toMatchObject({ kind: 'server-error', type: 'BAD_REQUEST', status: 400 });
+
+    const ok = await api.login(profile, creds, { 'guac-totp': '123456' });
+    expect(ok.token).toBe(authResultJson.authToken);
+    expect(formFields(http.requests[2])).toEqual({
+      'guac-totp': '123456',
+      username: 'testuser',
+      password: 'pw & =?',
+    });
+  });
+
+  it('passes TOTP enrolment details through', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(403, totpEnrollJson));
+    const info = await errorInfo(new GuacApi(http).login(profile, creds));
+    expect(
+      info.kind === 'additional-credentials-required' && info.expected[0]?.extra['qrCode'],
+    ).toBe('data:image/png;base64,AAAA');
+  });
+
+  it('does not let extra fields override the credentials', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    await new GuacApi(http).login(profile, creds, { username: 'other' });
+    expect(formFields(http.requests[0])['username']).toBe('testuser');
+  });
+
+  it('reports a non-Guacamole answer as not-guacamole', async () => {
+    const html = new FakeHttpClient().on('POST', TOKENS, () =>
+      textResponse(200, '<html>login</html>'),
+    );
+    expect((await errorInfo(new GuacApi(html).login(profile, creds))).kind).toBe('not-guacamole');
+
+    const notFound = new FakeHttpClient().on('POST', TOKENS, () => textResponse(404, 'Not Found'));
+    expect(await errorInfo(new GuacApi(notFound).login(profile, creds))).toEqual({
+      kind: 'not-guacamole',
+      url: BASE_URL,
+      status: 404,
+    });
+
+    const wrongJson = new FakeHttpClient().on('POST', TOKENS, () =>
+      jsonResponse(200, { ok: true }),
+    );
+    expect((await errorInfo(new GuacApi(wrongJson).login(profile, creds))).kind).toBe(
+      'not-guacamole',
+    );
+  });
+
+  it('maps transport errors to unreachable / tls', async () => {
+    const down = new FakeHttpClient().on('POST', TOKENS, (req) => {
+      throw new HttpTransportError('unreachable', req.url, 'Failed to fetch');
+    });
+    expect(await errorInfo(new GuacApi(down).login(profile, creds))).toEqual({
+      kind: 'unreachable',
+      url: TOKENS,
+      timedOut: false,
+    });
+
+    const slow = new FakeHttpClient().on('POST', TOKENS, (req) => {
+      throw new HttpTransportError('timeout', req.url, 'timeout');
+    });
+    expect(await errorInfo(new GuacApi(slow).login(profile, creds))).toMatchObject({
+      timedOut: true,
+    });
+
+    const tls = new FakeHttpClient().on('POST', TOKENS, (req) => {
+      throw new HttpTransportError('tls', req.url, 'certificate not trusted');
+    });
+    expect((await errorInfo(new GuacApi(tls).login(profile, creds))).kind).toBe('tls');
+  });
+
+  it('passes the configured timeout', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    await new GuacApi(http, { timeoutMs: 1234 }).login(profile, creds);
+    expect(http.requests[0]?.timeoutMs).toBe(1234);
+  });
+
+  it('maps INTERNAL_ERROR to server-error', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () =>
+      jsonResponse(500, { type: 'INTERNAL_ERROR', message: 'Unexpected internal error' }),
+    );
+    expect(await errorInfo(new GuacApi(http).login(profile, creds))).toMatchObject({
+      kind: 'server-error',
+      type: 'INTERNAL_ERROR',
+      message: 'Unexpected internal error',
+    });
+  });
+});
+
+describe('GuacApi.resumeSession', () => {
+  it('re-validates a stored token', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    const s = await new GuacApi(http).resumeSession(profile, authResultJson.authToken);
+    expect(s.token).toBe(authResultJson.authToken);
+    expect(formFields(http.requests[0])).toEqual({ token: authResultJson.authToken });
+  });
+
+  it('reports an expired token as session-expired', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () =>
+      jsonResponse(403, invalidCredentialsJson),
+    );
+    expect((await errorInfo(new GuacApi(http).resumeSession(profile, 'stale'))).kind).toBe(
+      'session-expired',
+    );
+  });
+
+  it('treats a different (for example anonymous) token as session-expired and revokes it', async () => {
+    const http = new FakeHttpClient()
+      .on('POST', TOKENS, () =>
+        jsonResponse(200, { ...authResultJson, authToken: 'NEW', username: '' }),
+      )
+      .on('DELETE', `${BASE_URL}/api/session`, () => ({ status: 204, headers: {}, body: null }));
+    expect((await errorInfo(new GuacApi(http).resumeSession(profile, 'stale'))).kind).toBe(
+      'session-expired',
+    );
+    expect(http.requests[1]?.headers?.[TOKEN_HEADER]).toBe('NEW');
+  });
+});
+
+describe('GuacApi.getConnectionTree', () => {
+  const treeUrl = (ds: string): string =>
+    `${BASE_URL}/api/session/data/${ds}/connectionGroups/ROOT/tree`;
+
+  it('fetches every data source with the token header, in session order', async () => {
+    const http = new FakeHttpClient()
+      .on('GET', treeUrl('postgresql'), () => jsonResponse(200, treeJson))
+      .on('GET', treeUrl('postgresql-shared'), () => jsonResponse(200, sharedTreeJson));
+    const tree = await new GuacApi(http).getConnectionTree(session);
+
+    expect(tree.dataSources.map((d) => d.dataSource)).toEqual(['postgresql', 'postgresql-shared']);
+    expect(tree.dataSources[1]?.root.childConnections[0]?.dataSource).toBe('postgresql-shared');
+    for (const req of http.requests) {
+      expect(req.headers?.[TOKEN_HEADER]).toBe(authResultJson.authToken);
+      expect(req.url).not.toContain('token=');
+    }
+  });
+
+  it('URL-encodes data source names', async () => {
+    const http = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      () => jsonResponse(200, sharedTreeJson),
+    );
+    await new GuacApi(http).getConnectionTree({ ...session, dataSources: ['a b/c'] });
+    expect(http.requests[0]?.url).toBe(
+      `${BASE_URL}/api/session/data/a%20b%2Fc/connectionGroups/ROOT/tree`,
+    );
+  });
+
+  it('skips a data source that answers NOT_FOUND', async () => {
+    const http = new FakeHttpClient()
+      .on('GET', treeUrl('postgresql'), () => jsonResponse(200, treeJson))
+      .on('GET', treeUrl('postgresql-shared'), () => jsonResponse(404, notFoundJson));
+    const tree = await new GuacApi(http).getConnectionTree(session);
+    expect(tree.dataSources.map((d) => d.dataSource)).toEqual(['postgresql']);
+  });
+
+  it('reports an expired token (PERMISSION_DENIED) as session-expired', async () => {
+    const http = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      () => jsonResponse(403, permissionDeniedJson),
+    );
+    const err = await new GuacApi(http).getConnectionTree(session).catch((e: unknown) => e);
+    expect(isGuacApiError(err, 'session-expired')).toBe(true);
+  });
+
+  it('reports a malformed tree as invalid-response with the field path', async () => {
+    const http = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      () => jsonResponse(200, { identifier: 'ROOT', childConnections: [{ name: 'x' }] }),
+    );
+    const info = await errorInfo(new GuacApi(http).getConnectionTree(session));
+    expect(info.kind).toBe('invalid-response');
+    expect(info.kind === 'invalid-response' && info.detail).toContain(
+      'childConnections[0].identifier',
+    );
+  });
+});
+
+describe('GuacApi.logout / isSessionValid', () => {
+  const sessionUrl = `${BASE_URL}/api/session`;
+
+  it('DELETEs api/session with the token header', async () => {
+    const http = new FakeHttpClient().on('DELETE', sessionUrl, () => ({
+      status: 204,
+      headers: {},
+      body: null,
+    }));
+    await new GuacApi(http).logout(session);
+    expect(http.requests[0]?.headers?.[TOKEN_HEADER]).toBe(session.token);
+  });
+
+  it('treats an already-invalid token as logged out', async () => {
+    const http = new FakeHttpClient().on('DELETE', sessionUrl, () =>
+      jsonResponse(403, permissionDeniedJson),
+    );
+    await expect(new GuacApi(http).logout(session)).resolves.toBeUndefined();
+  });
+
+  it('checks validity with HEAD api/session', async () => {
+    let valid = true;
+    const http = new FakeHttpClient().on('HEAD', sessionUrl, () => ({
+      status: valid ? 204 : 403,
+      headers: {},
+      body: null,
+    }));
+    const api = new GuacApi(http);
+    expect(await api.isSessionValid(session)).toBe(true);
+    valid = false;
+    expect(await api.isSessionValid(session)).toBe(false);
+  });
+});
+
+describe('GuacApi.probe', () => {
+  it('returns the first candidate that serves api/languages, without sending credentials', async () => {
+    const http = new FakeHttpClient()
+      .on(
+        'GET',
+        () => true,
+        () => textResponse(404, 'Not Found'),
+      )
+      .on('GET', 'https://guac.example/api/languages', () => jsonResponse(200, languagesJson));
+    const found = await new GuacApi(http).probe('guac.example');
+    expect(found).toEqual({ baseUrl: 'https://guac.example', secure: true });
+    expect(http.requests.map((r) => r.url)).toEqual([
+      'https://guac.example/guacamole/api/languages',
+      'https://guac.example/api/languages',
+    ]);
+    expect(http.requests.every((r) => r.method === 'GET' && r.body === undefined)).toBe(true);
+  });
+
+  it('prefers tls over not-guacamole over unreachable when all candidates fail', async () => {
+    const http = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      (req) => {
+        if (req.url.startsWith('https://'))
+          throw new HttpTransportError('tls', req.url, 'handshake');
+        if (req.url.includes('/guacamole/')) return textResponse(200, '<html></html>');
+        throw new HttpTransportError('unreachable', req.url, 'refused');
+      },
+    );
+    expect((await errorInfo(new GuacApi(http).probe('guac.example'))).kind).toBe('tls');
+
+    const http2 = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      (req) => {
+        if (req.url.includes('/guacamole/')) return textResponse(200, '<html></html>');
+        throw new HttpTransportError('unreachable', req.url, 'refused');
+      },
+    );
+    expect((await errorInfo(new GuacApi(http2).probe('guac.example'))).kind).toBe('not-guacamole');
+
+    const http3 = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      (req) => {
+        throw new HttpTransportError('unreachable', req.url, 'refused');
+      },
+    );
+    expect((await errorInfo(new GuacApi(http3).probe('guac.example'))).kind).toBe('unreachable');
+  });
+
+  it('rejects unusable input without any request', async () => {
+    const http = new FakeHttpClient();
+    expect(await errorInfo(new GuacApi(http).probe(''))).toEqual({
+      kind: 'invalid-url',
+      reason: 'empty',
+    });
+    expect(http.requests).toHaveLength(0);
+  });
+});
