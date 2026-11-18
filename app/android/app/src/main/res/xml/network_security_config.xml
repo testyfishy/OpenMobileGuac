@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OpenMobileGuac connects to user-specified, self-hosted Guacamole servers that commonly
+  live on private networks (Tailscale 100.x addresses, MagicDNS names, LAN hosts) and are
+  served over plain http:// and ws://. The hosts are not known at build time, so cleartext
+  is permitted for all destinations. HTTPS connections still use the system trust store.
+  See docs/release.md ("Network configuration").
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

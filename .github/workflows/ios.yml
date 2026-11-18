@@ -1,0 +1,143 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: Upload to TestFlight (needs signing secrets)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Simulator build (+ TestFlight when signing is configured)
+    # Capacitor 8 requires Xcode 26+. The macos-26 image's default Xcode is 26.x;
+    # macos-15's default is still 16.4, so don't use that label.
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      # Secrets can't be used directly in `if:`; expose a flag instead.
+      HAS_SIGNING: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID != '' && secrets.APP_STORE_CONNECT_API_ISSUER_ID != '' && secrets.APP_STORE_CONNECT_API_KEY_P8 != '' && secrets.APPLE_TEAM_ID != '' }}
+      WANT_UPLOAD: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.testflight) }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Toolchain versions
+        run: |
+          xcodebuild -version
+          major=$(xcodebuild -version | awk '/^Xcode/{split($2,v,"."); print v[1]}')
+          if [ "$major" -lt 26 ]; then echo "::error::Capacitor 8 needs Xcode 26+, got $major"; exit 1; fi
+          plutil -lint ios/App/App/Info.plist
+
+      - name: Web build and Capacitor sync
+        run: |
+          npm ci
+          npm run build
+          npx cap sync ios
+
+      - name: List schemes
+        working-directory: app/ios/App
+        run: xcodebuild -list -project App.xcodeproj
+
+      - name: Unsigned simulator build
+        working-directory: app/ios/App
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd-sim" \
+            CODE_SIGNING_ALLOWED=NO
+
+      # ---- Signed TestFlight path (runs only when all four secrets are set) ----
+
+      - name: Signing not configured
+        if: env.HAS_SIGNING != 'true'
+        run: echo "::notice::App Store Connect secrets not set; skipping archive and TestFlight upload. See docs/release.md."
+
+      - name: Write App Store Connect API key
+        if: env.HAS_SIGNING == 'true' && env.WANT_UPLOAD == 'true'
+        env:
+          ASC_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc_api_key.p8"
+          chmod 600 "$RUNNER_TEMP/asc_api_key.p8"
+
+      # The archive is built without signing; -exportArchive below signs it with a
+      # cloud-managed Apple Distribution certificate via automatic signing and the API key,
+      # so no certificate or provisioning profile has to be created on a Mac.
+      - name: Archive
+        if: env.HAS_SIGNING == 'true' && env.WANT_UPLOAD == 'true'
+        working-directory: app/ios/App
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/dd-archive" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Sign and upload to TestFlight
+        if: env.HAS_SIGNING == 'true' && env.WANT_UPLOAD == 'true'
+        working-directory: app/ios/App
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc_api_key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Remove API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc_api_key.p8"
