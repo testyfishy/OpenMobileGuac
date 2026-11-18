@@ -1,0 +1,6 @@
+dist
+coverage
+android
+ios
+src/vendor
+package-lock.json

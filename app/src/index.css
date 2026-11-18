@@ -1,0 +1,54 @@
+:root {
+  --text: #3d3a44;
+  --text-h: #08060d;
+  --bg: #ffffff;
+  --muted: #6b6375;
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  font: 16px/1.5 var(--sans);
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #d6d3dc;
+    --text-h: #ffffff;
+    --bg: #16141a;
+    --muted: #9a94a3;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+  box-sizing: border-box;
+}
+
+.placeholder {
+  text-align: center;
+  padding: 1rem;
+}
+
+.placeholder h1 {
+  color: var(--text-h);
+  margin: 0 0 0.5rem;
+}
+
+.placeholder p {
+  color: var(--muted);
+  margin: 0;
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">OpenMobileGuac</string>
+    <string name="title_activity_main">OpenMobileGuac</string>
+    <string name="package_name">app.openmobileguac.client</string>
+    <string name="custom_url_scheme">app.openmobileguac.client</string>
+</resources>
