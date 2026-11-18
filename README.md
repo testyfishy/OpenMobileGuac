@@ -85,7 +85,7 @@ npm run build && npx cap sync android
 npx cap open android
 ```
 
-The iOS project has not been generated yet; it needs a Mac or a macOS CI runner.
+The iOS project has not been generated yet (PLAN task T0.6); building it requires macOS.
 
 ## Contributing
 
