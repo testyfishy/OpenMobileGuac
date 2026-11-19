@@ -93,14 +93,6 @@ export default function App({
     [profilesVersion],
   );
 
-  // Session DOM containers, for thumbnails.
-  const slots = useRef(new Map<string, HTMLElement>());
-  const slotFor = useCallback((id: string) => slots.current.get(id) ?? null, []);
-  const registerSlot = useCallback((id: string, el: HTMLElement | null) => {
-    if (el) slots.current.set(id, el);
-    else slots.current.delete(id);
-  }, []);
-
   // CON-5: connection to open once its server is signed in.
   const pending = useRef<PendingLaunch | undefined>(undefined);
   const [launchVersion, setLaunchVersion] = useState(0);
@@ -129,9 +121,9 @@ export default function App({
         <ProfilesVersionContext.Provider value={versionValue}>
           <ToastProvider>
             <LaunchContext.Provider value={launch}>
-              <SessionsProvider slotFor={slotFor}>
+              <SessionsProvider>
                 <NavWithSessions native={services.native}>
-                  <Shell registerSlot={registerSlot} />
+                  <Shell />
                 </NavWithSessions>
               </SessionsProvider>
             </LaunchContext.Provider>
@@ -181,7 +173,7 @@ function renderRoute(route: Route) {
  * Open sessions are drawn above the stack by `SessionLayer`; while one is visible the app
  * chrome underneath is inert.
  */
-function Shell({ registerSlot }: { registerSlot: (id: string, el: HTMLElement | null) => void }) {
+function Shell() {
   const { state } = useNav();
   const sessions = useSessions();
   const wide = useWide();
@@ -214,7 +206,7 @@ function Shell({ registerSlot }: { registerSlot: (id: string, el: HTMLElement | 
           </div>
         ) : null}
       </div>
-      <SessionLayer registerSlot={registerSlot} />
+      <SessionLayer />
       <DeepLinks />
       <FirstRun />
       <LockGate />

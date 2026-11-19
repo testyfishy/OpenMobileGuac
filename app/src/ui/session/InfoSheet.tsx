@@ -4,7 +4,8 @@ import { humanizeParamName } from '../../session/credentials/requiredParams.ts';
 import type { MutableArgument } from './argv.ts';
 import { ChromeButton } from './ChromeButton.tsx';
 import type { SessionInfo } from './SessionController.ts';
-import { FIT_MODE_LABELS, type ResolvedSessionSettings } from './settings.ts';
+import { sessionStrings } from './sessionStrings.ts';
+import type { ResolvedSessionSettings } from './settings.ts';
 import { Sheet } from './Sheet.tsx';
 
 export interface InfoSheetProps {
@@ -28,7 +29,7 @@ function duration(ms: number): string {
 }
 
 const fmt = (v: number | null, digits = 0, unit = '') =>
-  v === null ? 'not known yet' : `${v.toFixed(digits)}${unit}`;
+  v === null ? sessionStrings.info.notKnownYet : `${v.toFixed(digits)}${unit}`;
 
 /** Session info: what is connected, how, and how it is performing. */
 export function InfoSheet(props: InfoSheetProps) {
@@ -39,31 +40,41 @@ export function InfoSheet(props: InfoSheetProps) {
     return () => clearInterval(t);
   }, [getInfo]);
 
+  const t = sessionStrings.info;
   const rows: [string, string][] = [
-    ['Connection', props.title],
-    ['Protocol', (props.protocol ?? 'unknown').toUpperCase()],
+    [t.connection, props.title],
+    [t.protocol, props.protocol ? props.protocol.toUpperCase() : t.unknownProtocol],
     [
-      'Remote resolution',
+      t.remoteResolution,
       info.remoteSize.width > 0 ? `${info.remoteSize.width} × ${info.remoteSize.height}` : '–',
     ],
-    ['View', `${FIT_MODE_LABELS[props.settings.fitMode]} · ${Math.round(info.scale * 100)} %`],
-    ['Tunnel', props.isDemo ? 'In-app demo' : info.tunnelType],
-    ['Tunnel state', info.tunnelState],
-    ['Connected for', info.connectedForMs === null ? '–' : duration(info.connectedForMs)],
-    ['Received', `${formatBytes(info.receivedBytes)} · ${info.receivedInstructions} instructions`],
-    ['Sent', `${formatBytes(info.sentBytes)} · ${info.sentInstructions} instructions`],
-    ['Frames', String(info.frames)],
-    ['Frame processing lag', fmt(info.processingLagMs, 0, ' ms')],
-    ['Frame rate (client / server)', `${fmt(info.clientFps, 1)} / ${fmt(info.serverFps, 1)} fps`],
-    ['Remote desktop frame rate', fmt(info.desktopFps, 1, ' fps')],
-    ['Frames dropped by the server', fmt(info.dropRate, 1, ' per s')],
-    ['Audio', `${props.settings.audioMuted ? 'muted' : 'on'} · output ${info.audioContext}`],
-    ['Keep screen on', props.keepAwake],
-    ['Network', info.online ? 'online' : 'offline'],
+    [
+      t.view,
+      `${sessionStrings.fitModes.labels[props.settings.fitMode]} · ${Math.round(info.scale * 100)} %`,
+    ],
+    [t.tunnel, props.isDemo ? t.tunnelTypes.demo : info.tunnelType],
+    [t.tunnelState, info.tunnelState],
+    [t.connectedFor, info.connectedForMs === null ? '–' : duration(info.connectedForMs)],
+    [
+      t.received,
+      `${formatBytes(info.receivedBytes)} · ${t.instructions(info.receivedInstructions)}`,
+    ],
+    [t.sent, `${formatBytes(info.sentBytes)} · ${t.instructions(info.sentInstructions)}`],
+    [t.frames, String(info.frames)],
+    [t.processingLag, fmt(info.processingLagMs, 0, ' ms')],
+    [t.frameRate, `${fmt(info.clientFps, 1)} / ${fmt(info.serverFps, 1)} fps`],
+    [t.desktopFrameRate, fmt(info.desktopFps, 1, ' fps')],
+    [t.dropped, fmt(info.dropRate, 1, ` ${t.perSecond}`)],
+    [
+      t.audio,
+      `${props.settings.audioMuted ? t.audioMuted : t.audioOn} · ${t.audioOutput(t.audioStates[info.audioContext] ?? info.audioContext)}`,
+    ],
+    [t.keepScreenOn, props.keepAwake],
+    [t.network, info.online ? t.online : t.offline],
   ];
 
   return (
-    <Sheet title="Session info" onClose={props.onClose}>
+    <Sheet title={t.title} onClose={props.onClose}>
       <dl className="omg-info">
         {rows.map(([k, v]) => (
           <div key={k} className="omg-info__row">
@@ -72,14 +83,11 @@ export function InfoSheet(props: InfoSheetProps) {
           </div>
         ))}
       </dl>
-      <p className="omg-muted">
-        Frame figures come from the library&apos;s sync timing. Network round-trip time is not
-        available: the tunnel does not expose its ping replies.
-      </p>
+      <p className="omg-muted">{t.footnote}</p>
       {props.mutableArguments.length > 0 && (
         <section className="omg-section" aria-labelledby="omg-info-args">
           <h3 id="omg-info-args" className="omg-section__title">
-            Connection settings
+            {t.connectionSettings}
           </h3>
           {props.mutableArguments.map((a) => (
             <ArgumentRow key={a.name} arg={a} onSet={props.onSetArgument} />
@@ -119,7 +127,7 @@ function ArgumentRow({
           disabled={value === arg.value}
           onClick={() => onSet(arg.name, value)}
         >
-          Apply
+          {sessionStrings.info.apply}
         </ChromeButton>
       </div>
     </div>

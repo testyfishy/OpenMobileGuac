@@ -14,6 +14,7 @@ import {
   IconZoomIn,
   IconZoomOut,
 } from './icons.tsx';
+import { sessionStrings } from './sessionStrings.ts';
 
 export interface ToolbarProps {
   readonly expanded: boolean;
@@ -52,13 +53,14 @@ export function Toolbar(props: ToolbarProps) {
   const { expanded, onExpandedChange, pointerMode, keyboardActive, onActivity } = props;
   const pressStart = useRef<number | null>(null);
   const longPressed = useRef(false);
+  const t = sessionStrings.toolbar;
 
   if (!expanded) {
     return (
       <div className="omg-toolbar omg-toolbar--collapsed">
         <ChromeButton
           className={props.immersive ? 'omg-handle omg-handle--grip' : 'omg-handle'}
-          aria-label="Show session toolbar"
+          aria-label={t.show}
           aria-expanded={false}
           onClick={() => onExpandedChange(true)}
         >
@@ -71,13 +73,17 @@ export function Toolbar(props: ToolbarProps) {
 
   const trackpad = pointerMode === 'trackpad';
   const touch = pointerMode === 'touch';
-  const modeLabel = trackpad ? 'Trackpad' : touch ? 'Multi-touch' : 'Touch';
+  const modeLabel = trackpad
+    ? sessionStrings.common.trackpad
+    : touch
+      ? t.modeMultiTouch
+      : t.modeTouch;
   const badge = props.moreBadge ?? 0;
   return (
     <div
       className="omg-toolbar"
       role="toolbar"
-      aria-label="Session"
+      aria-label={t.label}
       onPointerDownCapture={onActivity}
       onKeyDownCapture={onActivity}
     >
@@ -86,7 +92,7 @@ export function Toolbar(props: ToolbarProps) {
           className={
             trackpad ? 'omg-tool omg-tool--mode-trackpad' : 'omg-tool omg-tool--mode-direct'
           }
-          aria-label={`Pointer: ${modeLabel}. Switch pointer mode`}
+          aria-label={t.pointer(modeLabel)}
           onClick={props.onTogglePointerMode}
         >
           {trackpad ? <IconTrackpad /> : touch ? <IconMultiTouch /> : <IconTouch />}
@@ -94,17 +100,17 @@ export function Toolbar(props: ToolbarProps) {
         </ChromeButton>
         <ChromeButton
           className={keyboardActive ? 'omg-tool omg-tool--on' : 'omg-tool'}
-          aria-label={keyboardActive ? 'Hide keyboard' : 'Show keyboard'}
+          aria-label={keyboardActive ? t.hideKeyboard : t.showKeyboard}
           aria-pressed={keyboardActive}
           onClick={props.onToggleKeyboard}
         >
           <IconKeyboard />
-          <span className="omg-tool__label">Keyboard</span>
+          <span className="omg-tool__label">{t.keyboard}</span>
         </ChromeButton>
         {props.showPaste !== false && (
           <ChromeButton
             className="omg-tool"
-            aria-label={`${props.pasteHint ?? 'Paste device clipboard to the remote'}. Long press to type it instead`}
+            aria-label={t.pasteLongPress(props.pasteHint ?? sessionStrings.screen.pasteHint)}
             onPointerDown={() => {
               pressStart.current = performance.now();
               longPressed.current = false;
@@ -130,50 +136,46 @@ export function Toolbar(props: ToolbarProps) {
             }}
           >
             <IconPaste />
-            <span className="omg-tool__label">Paste</span>
+            <span className="omg-tool__label">{t.paste}</span>
           </ChromeButton>
         )}
         {touch && props.onZoom && (
           <>
             <ChromeButton
               className="omg-tool"
-              aria-label="Zoom in"
+              aria-label={t.zoomIn}
               onClick={() => props.onZoom?.(1.25)}
             >
               <IconZoomIn />
-              <span className="omg-tool__label">Zoom</span>
+              <span className="omg-tool__label">{t.zoomInShort}</span>
             </ChromeButton>
             <ChromeButton
               className="omg-tool"
-              aria-label="Zoom out"
+              aria-label={t.zoomOut}
               onClick={() => props.onZoom?.(0.8)}
             >
               <IconZoomOut />
-              <span className="omg-tool__label">Out</span>
+              <span className="omg-tool__label">{t.zoomOutShort}</span>
             </ChromeButton>
           </>
         )}
         <ChromeButton
           className="omg-tool"
-          aria-label="View mode and zoom"
+          aria-label={t.viewLabel}
           aria-haspopup="dialog"
           onClick={props.onOpenView}
         >
           <IconView />
-          <span className="omg-tool__label">View</span>
+          <span className="omg-tool__label">{t.view}</span>
         </ChromeButton>
         <ChromeButton
           className="omg-tool"
-          aria-label={
-            badge > 0
-              ? `More actions (${badge} transfer${badge === 1 ? '' : 's'} running)`
-              : 'More actions'
-          }
+          aria-label={badge > 0 ? t.moreActionsRunning(badge) : t.moreActions}
           aria-haspopup="dialog"
           onClick={props.onOpenMore}
         >
           <IconMore />
-          <span className="omg-tool__label">More</span>
+          <span className="omg-tool__label">{t.more}</span>
           {badge > 0 && (
             <span className="omg-tool__badge" aria-hidden="true">
               {badge}
@@ -183,7 +185,7 @@ export function Toolbar(props: ToolbarProps) {
       </div>
       <ChromeButton
         className="omg-tool omg-tool--collapse"
-        aria-label="Hide session toolbar"
+        aria-label={t.hide}
         aria-expanded={true}
         onClick={() => onExpandedChange(false)}
       >

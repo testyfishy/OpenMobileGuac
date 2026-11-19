@@ -241,15 +241,4 @@ export function gestureConfigFromSettings(s: SessionSettings): Partial<GestureCo
   };
 }
 
-export const FIT_MODE_LABELS: Readonly<Record<FitMode, string>> = {
-  'fit-screen': 'Fit screen',
-  'fit-width': 'Fit width',
-  'fit-height': 'Fit height',
-  'one-to-one': '1:1 pixels',
-};
-
-export const POINTER_MODE_LABELS: Readonly<Record<PointerMode, string>> = {
-  direct: 'Direct touch',
-  trackpad: 'Trackpad',
-  touch: 'Touch pass-through',
-};
+// Labels for fit and pointer modes live in the session string table (`sessionStrings.ts`).

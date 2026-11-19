@@ -4,7 +4,10 @@
  * error / disconnected) including the auto-reconnect policy.
  *
  * Status codes are the values of `Guacamole.Status.Code` in the vendored `Status.js`.
+ * Texts come from the active session table, read when each function runs.
  */
+
+import { sessionStrings } from './sessionStrings.ts';
 
 export const STATUS = {
   SUCCESS: 0x0000,
@@ -30,28 +33,54 @@ export const STATUS = {
   CLIENT_TOO_MANY: 0x031d,
 } as const;
 
-const MESSAGES: Readonly<Record<number, string>> = {
-  [STATUS.UNSUPPORTED]: 'The server does not support this operation.',
-  [STATUS.SERVER_ERROR]: 'The Guacamole server hit an internal error.',
-  [STATUS.SERVER_BUSY]: 'The server is busy. Try again in a moment.',
-  [STATUS.UPSTREAM_TIMEOUT]: 'The remote computer is not responding.',
-  [STATUS.UPSTREAM_ERROR]: 'The remote computer reported an error.',
-  [STATUS.RESOURCE_NOT_FOUND]: 'This connection no longer exists.',
-  [STATUS.RESOURCE_CONFLICT]: 'This connection is already in use and does not allow sharing.',
-  [STATUS.RESOURCE_CLOSED]: 'The connection was closed.',
-  [STATUS.UPSTREAM_NOT_FOUND]: 'The remote computer could not be found.',
-  [STATUS.UPSTREAM_UNAVAILABLE]: 'The remote computer is unavailable (it may be off or refusing).',
-  [STATUS.SESSION_CONFLICT]: 'Another session took over this connection.',
-  [STATUS.SESSION_TIMEOUT]: 'The session timed out.',
-  [STATUS.SESSION_CLOSED]: 'The session was closed by the remote computer or an administrator.',
-  [STATUS.CLIENT_BAD_REQUEST]: 'The server rejected the connection parameters.',
-  [STATUS.CLIENT_UNAUTHORIZED]: 'Not signed in, or the login expired. Sign in again.',
-  [STATUS.CLIENT_FORBIDDEN]: 'You do not have permission to use this connection.',
-  [STATUS.CLIENT_TIMEOUT]: 'The connection to the server timed out.',
-  [STATUS.CLIENT_OVERRUN]: 'Too much data was sent to the server.',
-  [STATUS.CLIENT_BAD_TYPE]: 'The server refused data of an unsupported type.',
-  [STATUS.CLIENT_TOO_MANY]: 'Too many sessions are open for this account or connection.',
-};
+/** Readable message for each known status code (looked up at call time, see `statusMessage`). */
+function knownMessage(code: number): string | undefined {
+  const m = sessionStrings.status.codes;
+  switch (code) {
+    case STATUS.UNSUPPORTED:
+      return m.unsupported;
+    case STATUS.SERVER_ERROR:
+      return m.serverError;
+    case STATUS.SERVER_BUSY:
+      return m.serverBusy;
+    case STATUS.UPSTREAM_TIMEOUT:
+      return m.upstreamTimeout;
+    case STATUS.UPSTREAM_ERROR:
+      return m.upstreamError;
+    case STATUS.RESOURCE_NOT_FOUND:
+      return m.resourceNotFound;
+    case STATUS.RESOURCE_CONFLICT:
+      return m.resourceConflict;
+    case STATUS.RESOURCE_CLOSED:
+      return m.resourceClosed;
+    case STATUS.UPSTREAM_NOT_FOUND:
+      return m.upstreamNotFound;
+    case STATUS.UPSTREAM_UNAVAILABLE:
+      return m.upstreamUnavailable;
+    case STATUS.SESSION_CONFLICT:
+      return m.sessionConflict;
+    case STATUS.SESSION_TIMEOUT:
+      return m.sessionTimeout;
+    case STATUS.SESSION_CLOSED:
+      return m.sessionClosed;
+    case STATUS.CLIENT_BAD_REQUEST:
+      return m.clientBadRequest;
+    case STATUS.CLIENT_UNAUTHORIZED:
+      return m.clientUnauthorized;
+    case STATUS.CLIENT_FORBIDDEN:
+      return m.clientForbidden;
+    case STATUS.CLIENT_TIMEOUT:
+      return m.clientTimeout;
+    case STATUS.CLIENT_OVERRUN:
+      return m.clientOverrun;
+    case STATUS.CLIENT_BAD_TYPE:
+      return m.clientBadType;
+    case STATUS.CLIENT_TOO_MANY:
+      return m.clientTooMany;
+    default:
+      return undefined;
+  }
+}
 
 /** Where an error status came from: guacd (`error` instruction) or the tunnel itself. */
 export type StatusSource = 'client' | 'tunnel';
@@ -64,17 +93,17 @@ export type StatusSource = 'client' | 'tunnel';
  */
 export function statusMessage(code: number, serverMessage?: string, source?: StatusSource): string {
   if (code === STATUS.CLIENT_UNAUTHORIZED && source === 'client') {
-    return 'The remote computer rejected the sign-in. Check the username and password and try again.';
+    return sessionStrings.status.remoteRejectedSignIn;
   }
   if (code === STATUS.CLIENT_FORBIDDEN && source === 'client') {
-    return 'The remote computer denied access to this account.';
+    return sessionStrings.status.remoteDeniedAccess;
   }
-  const known = MESSAGES[code];
+  const known = knownMessage(code);
   if (known) return known;
   const text = serverMessage?.trim();
   if (text) return text;
-  if (code >= 0x0300 && code <= 0x03ff) return `The request was refused (code 0x${hex(code)}).`;
-  return `The connection failed (code 0x${hex(code)}).`;
+  if (code >= 0x0300 && code <= 0x03ff) return sessionStrings.status.refused(hex(code));
+  return sessionStrings.status.failed(hex(code));
 }
 
 function hex(code: number): string {
@@ -154,25 +183,26 @@ export function classifyStatus(code: number, serverMessage?: string): EndReason 
 
 /** Overlay heading for an ended session. */
 export function endHeading(reason: EndReason, everConnected: boolean): string {
+  const h = sessionStrings.status.headings;
   switch (reason) {
     case 'kicked':
-      return 'Signed in elsewhere';
+      return h.kicked;
     case 'idle':
-      return 'Session timed out';
+      return h.idle;
     case 'logged-off':
-      return 'Signed out';
+      return h.loggedOff;
     case 'server-closed':
-      return 'Disconnected by the server';
+      return h.serverClosed;
     case 'auth':
-      return 'Sign-in failed';
+      return h.auth;
     case 'forbidden':
-      return 'Access denied';
+      return h.forbidden;
     case 'busy':
-      return 'Connection busy';
+      return h.busy;
     case 'network':
-      return everConnected ? 'Connection lost' : 'Could not connect';
+      return everConnected ? h.lost : h.couldNotConnect;
     default:
-      return everConnected ? 'Connection ended' : 'Could not connect';
+      return everConnected ? h.ended : h.couldNotConnect;
   }
 }
 
@@ -195,6 +225,8 @@ export type SessionPhase =
       readonly message: string;
       readonly reason?: EndReason;
       readonly heading?: string;
+      /** Who reported the error: guacd (`client`) or the tunnel / web app (`tunnel`). */
+      readonly source?: StatusSource;
     }
   | {
       readonly kind: 'disconnected';
@@ -256,6 +288,7 @@ export interface SessionMachine {
     readonly code: number;
     readonly text: string;
     readonly reason: EndReason;
+    readonly source?: StatusSource;
   } | null;
   /** The device reported that it is offline. */
   readonly offline?: boolean;
@@ -312,7 +345,12 @@ export function reduceSession(
         e.source === 'tunnel' && e.code === STATUS.UPSTREAM_UNAVAILABLE
           ? 'network'
           : classifyStatus(e.code, e.message);
-      return { ...m, lastError: { code: e.code, text, reason } };
+      return {
+        ...m,
+        lastError: e.source
+          ? { code: e.code, text, reason, source: e.source }
+          : { code: e.code, text, reason },
+      };
     }
     case 'user-disconnect':
       return { ...m, phase: { kind: 'disconnected' } };
@@ -339,7 +377,7 @@ export function reduceSession(
             attempt,
             maxAttempts: policy.maxAttempts,
             delayMs: reconnectDelay(attempt, policy),
-            reason: err ? err.text : 'The connection was lost.',
+            reason: err ? err.text : sessionStrings.status.lost,
             waitingForNetwork: m.offline === true,
           },
         };
@@ -353,6 +391,7 @@ export function reduceSession(
             message: err.text,
             reason: err.reason,
             heading: endHeading(err.reason, m.everConnected),
+            ...(err.source ? { source: err.source } : {}),
           },
         };
       }
@@ -368,14 +407,28 @@ export function reduceSession(
           kind: 'error',
           code: null,
           message: m.everConnected
-            ? 'The connection was lost and could not be restored.'
+            ? sessionStrings.status.lostNotRestored
             : m.offline
-              ? 'This device is offline.'
-              : 'Could not reach the server.',
+              ? sessionStrings.status.offline
+              : sessionStrings.status.unreachable,
         },
       };
     }
   }
+}
+
+/**
+ * Whether a session ended because the Guacamole sign-in (auth token) is no longer accepted:
+ * CLIENT_UNAUTHORIZED / CLIENT_FORBIDDEN reported by the tunnel, typically when a reconnect
+ * after a dropped connection presents an expired token. The same codes from guacd (`client`)
+ * mean the remote computer refused its own credentials, which a new token cannot fix.
+ */
+export function isSignInFailure(phase: SessionPhase): boolean {
+  return (
+    phase.kind === 'error' &&
+    phase.source === 'tunnel' &&
+    (phase.reason === 'auth' || phase.reason === 'forbidden')
+  );
 }
 
 /**
@@ -384,7 +437,7 @@ export function reduceSession(
  * UPSTREAM_NOT_FOUND, which would otherwise read as "remote computer not found".
  */
 export function tunnelErrorMessage(code: number, serverMessage?: string): string {
-  if (code === STATUS.UPSTREAM_NOT_FOUND) return 'Could not reach the server (network error).';
-  if (code === STATUS.UPSTREAM_UNAVAILABLE) return 'The server closed the connection.';
+  if (code === STATUS.UPSTREAM_NOT_FOUND) return sessionStrings.status.tunnelUnreachable;
+  if (code === STATUS.UPSTREAM_UNAVAILABLE) return sessionStrings.status.tunnelClosed;
   return statusMessage(code, serverMessage);
 }

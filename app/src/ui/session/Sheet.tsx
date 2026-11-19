@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { ChromeButton } from './ChromeButton.tsx';
 import { IconClose } from './icons.tsx';
+import { sessionStrings } from './sessionStrings.ts';
 
 /**
  * A bottom sheet / popover for session menus. Escape, the close button or (when
@@ -11,7 +12,7 @@ export function Sheet({
   onClose,
   children,
   dismissible = true,
-  closeLabel = 'Close',
+  closeLabel = sessionStrings.common.close,
   className,
 }: {
   title: string;

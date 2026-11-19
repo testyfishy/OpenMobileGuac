@@ -351,8 +351,13 @@ export const en = {
     invalid: 'That is not a Guacamole share link.',
     open: 'Open',
     signingIn: 'Opening…',
-    noServer: (host: string) =>
-      `No saved server matches ${host}. It will be added to your server list.`,
+    separate:
+      'It opens as a separate, temporary session: nothing is saved, and your own sign-in to this server is not changed.',
+    serverName: (name: string) => `${name} (shared link)`,
+    badge: 'Shared',
+    subtitle: (host: string) => `Temporary share-link session · ${host}`,
+    ended: 'This share-link session has ended. Open the link again to continue.',
+    end: (name: string) => `Close ${name}`,
     failed: 'The server did not accept that share link. It may have expired.',
   },
 
@@ -373,7 +378,6 @@ export const en = {
     keepOpen: 'Keep open',
     loading: 'Preparing session…',
     switcherTitle: 'Open sessions',
-    switcherButton: (n: number) => `Sessions, ${n} open`,
     indicator: (n: number) => `${n} ${plural(n, 'session', 'sessions')} open`,
     show: 'Show',
     switchTo: (name: string) => `Switch to ${name}`,
@@ -391,7 +395,6 @@ export const en = {
     reconnecting: 'Reconnecting…',
     signInAgain: 'Sign in again',
     reloginFailed: 'The session expired and the app could not sign in again on its own.',
-    minimise: 'Back to connections, keep session open',
   },
 
   lock: {

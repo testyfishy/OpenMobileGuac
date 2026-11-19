@@ -4,6 +4,7 @@
  */
 
 import { COMBO_PRESETS, formatCombo, parseCombo, type Combo } from '../../session/keys/KeyModel.ts';
+import { sessionStrings } from './sessionStrings.ts';
 
 export const MAX_CUSTOM_COMBOS = 30;
 
@@ -32,10 +33,14 @@ export function reduceComboList(list: readonly string[], action: ComboListAction
       const v = validateCombo(action.text);
       if (!v.ok) return { ok: false, error: v.error, list: current };
       if (current.some((c) => sameCombo(c, v.canonical))) {
-        return { ok: false, error: 'That combo is already in the list', list: current };
+        return { ok: false, error: sessionStrings.combos.duplicate, list: current };
       }
       if (current.length >= MAX_CUSTOM_COMBOS) {
-        return { ok: false, error: `At most ${MAX_CUSTOM_COMBOS} combos`, list: current };
+        return {
+          ok: false,
+          error: sessionStrings.combos.tooMany(MAX_CUSTOM_COMBOS),
+          list: current,
+        };
       }
       return { ok: true, list: [...current, v.canonical] };
     }

@@ -11,6 +11,7 @@ import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Keyboard } from '@capacitor/keyboard';
 import { StatusBar } from '@capacitor/status-bar';
 import type { HapticHint } from '../../session/pointer/PointerModel.ts';
+import { sessionStrings } from './sessionStrings.ts';
 
 export function isNative(): boolean {
   try {
@@ -52,21 +53,21 @@ export async function readDeviceClipboard(): Promise<ClipboardReadResult> {
     try {
       const r = await Clipboard.read();
       if (r.type && !r.type.startsWith('text')) {
-        return { ok: false, reason: 'The clipboard does not contain text.' };
+        return { ok: false, reason: sessionStrings.deviceClipboard.notText };
       }
       return { ok: true, text: r.value ?? '' };
     } catch {
-      return { ok: false, reason: 'The clipboard could not be read.' };
+      return { ok: false, reason: sessionStrings.deviceClipboard.readFailed };
     }
   }
   const clip = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
   if (!clip || typeof clip.readText !== 'function') {
-    return { ok: false, reason: 'This browser does not allow reading the clipboard.' };
+    return { ok: false, reason: sessionStrings.deviceClipboard.browserUnsupported };
   }
   try {
     return { ok: true, text: await clip.readText() };
   } catch {
-    return { ok: false, reason: 'Clipboard access was denied by the browser.' };
+    return { ok: false, reason: sessionStrings.deviceClipboard.browserDenied };
   }
 }
 
@@ -161,10 +162,10 @@ export function onForeground(cb: () => void): Disposable {
 // docs/checklists/session-device.md); MDN's compatibility data only "mirrors" the browser
 // entries for the WebViews, and iOS before 16.4 has no Wake Lock at all.
 //
-// Recommended native implementation, not installed (package.json is owned by the shell):
-// `@capacitor-community/keep-awake` 8.0.1 (MIT, peer `@capacitor/core >=8.0.0`), wired as
-//   setKeepAwakeImpl({ acquire: async () => { await KeepAwake.keepAwake(); return 'native'; },
-//                      release: async () => { await KeepAwake.allowSleep(); } })
+// On native platforms the shell installs `@capacitor-community/keep-awake` through
+// `setKeepAwakeImpl` (see `ui/launch/keepAwake.ts`). That implementation is one shared,
+// process-wide switch, so `keepScreenAwake` counts its holders and only releases it when
+// the last one is disposed (switching sessions must not let the screen sleep).
 
 /** How the screen is being kept on, or why it is not. */
 export type KeepAwakeState = 'native' | 'wake-lock' | 'unsupported' | 'denied' | 'released';
@@ -204,10 +205,16 @@ export function webKeepAwake(): KeepAwakeImpl {
 }
 
 let keepAwakeImpl: KeepAwakeImpl | null = null;
+/** Live `keepScreenAwake` handles using the shared (`setKeepAwakeImpl`) implementation. */
+const sharedHolders = new Set<object>();
 
-/** Replace the keep-awake implementation (e.g. with a native plugin). */
+/**
+ * Replace the keep-awake implementation (e.g. with a native plugin). The implementation is
+ * shared by every session: it is released only when no session holds it any more.
+ */
 export function setKeepAwakeImpl(impl: KeepAwakeImpl | null): void {
   keepAwakeImpl = impl;
+  sharedHolders.clear();
 }
 
 /**
@@ -215,15 +222,18 @@ export function setKeepAwakeImpl(impl: KeepAwakeImpl | null): void {
  * so the UI or log can tell whether it actually worked.
  */
 export function keepScreenAwake(onState?: (state: KeepAwakeState) => void): Disposable {
-  const impl = keepAwakeImpl ?? webKeepAwake();
+  const shared = keepAwakeImpl;
+  const impl = shared ?? webKeepAwake();
+  const token = {};
+  if (shared) sharedHolders.add(token);
   let disposed = false;
   const acquire = () => {
     if (disposed || document.visibilityState !== 'visible') return;
     impl
       .acquire()
       .then((s) => {
-        if (disposed) impl.release().catch(() => undefined);
-        else onState?.(s);
+        if (!disposed) onState?.(s);
+        else if (!shared || sharedHolders.size === 0) impl.release().catch(() => undefined);
       })
       .catch(() => onState?.('denied'));
   };
@@ -237,7 +247,8 @@ export function keepScreenAwake(onState?: (state: KeepAwakeState) => void): Disp
       if (disposed) return;
       disposed = true;
       document.removeEventListener('visibilitychange', onVisible);
-      impl.release().catch(() => undefined);
+      if (shared) sharedHolders.delete(token);
+      if (!shared || sharedHolders.size === 0) impl.release().catch(() => undefined);
       onState?.('released');
     },
   };

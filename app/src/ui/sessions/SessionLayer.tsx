@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, type RefCallback } from 'react';
+import { Suspense, lazy, useEffect, useRef } from 'react';
 import { Dialog } from '../components/Dialog.tsx';
 import { Spinner } from '../components/Feedback.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -16,16 +16,12 @@ const SessionHost = lazy(() => import('../launch/SessionHost.tsx'));
  * Renders every open session (MUL-1). All stay mounted; only the active one is visible.
  *
  * Hidden sessions are `visibility: hidden` (not `display: none`, so their size, and the
- * remote resolution, do not change), `inert` and `aria-hidden`. `SessionScreen` listens for
- * hardware keys on `document`, so `inert` alone does not stop them: until it accepts an
- * `active` prop, `useInactiveKeyGuard` parks a hidden `role="dialog"` marker in each
- * hidden session's chrome, which its key handler already treats as "do not forward".
+ * remote resolution, do not change), `inert` and `aria-hidden`, and get `active={false}`:
+ * `SessionScreen` then ignores hardware keys (it listens on `document`, which `inert` does
+ * not cover), releases held input and drops the wake lock. The visible session returns to
+ * the list from its More sheet (`onMinimize`); the indicator below opens the switcher.
  */
-export function SessionLayer({
-  registerSlot,
-}: {
-  registerSlot: (id: string, el: HTMLElement | null) => void;
-}) {
+export function SessionLayer() {
   const sessions = useSessions();
   const { sessions: list, activeId } = sessions.state;
   const limit = sessions.limit;
@@ -54,26 +50,10 @@ export function SessionLayer({
       {limitDialog}
       <div className="session-layer" data-active={active ? 'true' : 'false'}>
         {list.map((s) => (
-          <SessionSlot
-            key={s.id}
-            session={s}
-            active={s.id === activeId}
-            slotRef={(el) => registerSlot(s.id, el)}
-          />
+          <SessionSlot key={s.id} session={s} active={s.id === activeId} />
         ))}
       </div>
-      {active ? (
-        <button
-          type="button"
-          className="session-pill"
-          onClick={() => sessions.setSwitcherOpen(true)}
-          aria-label={strings.session.switcherButton(list.length)}
-          title={strings.session.switcherButton(list.length)}
-        >
-          <Icon name="layers" size="1.125rem" />
-          <span aria-hidden="true">{list.length}</span>
-        </button>
-      ) : (
+      {active ? null : (
         <button
           type="button"
           className="sessions-indicator"
@@ -89,25 +69,11 @@ export function SessionLayer({
   );
 }
 
-function SessionSlot({
-  session,
-  active,
-  slotRef,
-}: {
-  session: OpenSession;
-  active: boolean;
-  slotRef: RefCallback<HTMLDivElement>;
-}) {
+function SessionSlot({ session, active }: { session: OpenSession; active: boolean }) {
   const sessions = useSessions();
   const nav = useNav();
-  const el = useRef<HTMLDivElement | null>(null);
-  useInactiveKeyGuard(el, active);
   return (
     <div
-      ref={(node) => {
-        el.current = node;
-        slotRef(node);
-      }}
       className={active ? 'session-slot session-slot-active' : 'session-slot session-slot-hidden'}
       inert={!active}
       aria-hidden={!active}
@@ -127,6 +93,7 @@ function SessionSlot({
             active={active}
             onHide={sessions.hide}
             onExit={() => sessions.close(session.id)}
+            onSignInExpired={() => sessions.recoverSignIn(session.id)}
             onNeedsSignIn={() => {
               sessions.hide();
               nav.open({ name: 'connections', serverId: session.serverId });
@@ -138,33 +105,6 @@ function SessionSlot({
       )}
     </div>
   );
-}
-
-/** Shell-side stand-in for an `active` prop on SessionScreen; see `SessionLayer`. */
-function useInactiveKeyGuard(ref: { current: HTMLElement | null }, active: boolean) {
-  useEffect(() => {
-    if (active) return undefined;
-    let marker: HTMLElement | null = null;
-    let frame = 0;
-    const place = () => {
-      const chrome = ref.current?.querySelector('.omg-chrome');
-      if (!chrome) {
-        frame = requestAnimationFrame(place);
-        return;
-      }
-      marker = document.createElement('div');
-      marker.setAttribute('role', 'dialog');
-      marker.setAttribute('aria-hidden', 'true');
-      marker.hidden = true;
-      marker.dataset['omgInactiveGuard'] = '';
-      chrome.appendChild(marker);
-    };
-    place();
-    return () => {
-      cancelAnimationFrame(frame);
-      marker?.remove();
-    };
-  }, [ref, active]);
 }
 
 function SuspendedSession({ session, active }: { session: OpenSession; active: boolean }) {

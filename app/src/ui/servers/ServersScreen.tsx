@@ -7,16 +7,22 @@ import { useNav } from '../nav/NavContext.ts';
 import { selectedServerId } from '../nav/navigation.ts';
 import { useServices } from '../services/context.ts';
 import { strings } from '../strings.ts';
+import { useSessions } from '../sessions/SessionsContext.ts';
 import { QuickConnect } from './QuickConnect.tsx';
 import { hostOf, isInsecureUrl } from './serverForm.ts';
 import { ShareLinkDialog } from './ShareLinkDialog.tsx';
-import { DEMO_SERVER_ID, useSavedProfiles } from './useServers.ts';
+import { DEMO_SERVER_ID, useSavedProfiles, useShareProfiles } from './useServers.ts';
 
-/** Server list (SRV-1): Demo, the dev server (dev builds), then saved servers in user order. */
+/**
+ * Server list (SRV-1): Demo, the dev server (dev builds), share-link sessions opened in this
+ * run (CON-6, memory only), then saved servers in user order.
+ */
 export function ServersScreen() {
   const nav = useNav();
   const services = useServices();
   const { profiles, reload } = useSavedProfiles();
+  const shares = useShareProfiles();
+  const sessions = useSessions();
   const [reordering, setReordering] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const selected = selectedServerId(nav.state);
@@ -88,6 +94,33 @@ export function ServersScreen() {
             />
           </li>
         ) : null}
+        {shares.map((p) => (
+          <li key={p.id}>
+            <ServerRow
+              id={p.id}
+              name={p.name}
+              subtitle={strings.shareLink.subtitle(hostOf(p.baseUrl))}
+              badge={strings.shareLink.badge}
+              badgeKind="shared"
+              icon="link"
+              selected={selected === p.id}
+              onOpen={() => openServer(p.id)}
+              trailing={
+                <IconButton
+                  icon="close"
+                  label={strings.shareLink.end(p.name)}
+                  onClick={() => {
+                    // Ends the share session: its tunnels, its key session, its entry.
+                    sessions.closeServer(p.id);
+                    void services.auth.logout(p.id);
+                    services.shares.remove(p.id);
+                    if (selected === p.id) nav.back();
+                  }}
+                />
+              }
+            />
+          </li>
+        ))}
         {(profiles ?? []).map((p, i, all) => (
           <li key={p.id}>
             <ServerRow
@@ -161,8 +194,8 @@ function ServerRow({
   subtitle: string;
   badge?: string;
   badgeLabel?: string;
-  badgeKind: 'demo' | 'dev' | 'insecure';
-  icon: 'play' | 'beaker' | 'server';
+  badgeKind: 'demo' | 'dev' | 'shared' | 'insecure';
+  icon: 'play' | 'beaker' | 'server' | 'link';
   selected: boolean;
   onOpen: () => void;
   trailing?: React.ReactNode;

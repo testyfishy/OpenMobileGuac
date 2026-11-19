@@ -9,6 +9,7 @@ import {
   visibleRows,
   type KeyBarLayout,
 } from './keyBarLayout.ts';
+import { sessionStrings } from './sessionStrings.ts';
 
 export interface KeyBarProps {
   readonly modifiers: Readonly<Record<Modifier, ModifierState>>;
@@ -19,12 +20,6 @@ export interface KeyBarProps {
   /** Omit to hide the collapse chevron (split layout keeps the bar). */
   readonly onCollapse?: () => void;
 }
-
-const MOD_STATE_TEXT: Record<ModifierState, string> = {
-  off: 'off',
-  once: 'on for the next key',
-  locked: 'locked',
-};
 
 const ARROWS: Readonly<Record<string, 'left' | 'up' | 'down' | 'right'>> = {
   Left: 'left',
@@ -44,8 +39,9 @@ export function KeyBar({ modifiers, layout, onKey, onModifier, onCombo, onCollap
   const [fnOn, setFnOn] = useState(false);
   const rows = visibleRows(layout, fnOn);
   const lastIndex = rows.length - 1;
+  const s = sessionStrings.keyBar;
   return (
-    <div className="omg-keybar" role="toolbar" aria-label="Extra keys">
+    <div className="omg-keybar" role="toolbar" aria-label={s.label}>
       {rows.map((row, ri) => (
         <div
           key={`${ri}:${row.join(',')}`}
@@ -61,7 +57,7 @@ export function KeyBar({ modifiers, layout, onKey, onModifier, onCombo, onCollap
                 <ChromeButton
                   key={key}
                   className={`omg-key omg-key--mod omg-key--${state}`}
-                  aria-label={`${tokenSpokenLabel(token)}, ${MOD_STATE_TEXT[state]}`}
+                  aria-label={s.modifier(tokenSpokenLabel(token), s.modifierStates[state])}
                   aria-pressed={state === 'off' ? false : state === 'locked' ? true : 'mixed'}
                   onClick={() => onModifier(t.mod)}
                 >
@@ -110,7 +106,7 @@ export function KeyBar({ modifiers, layout, onKey, onModifier, onCombo, onCollap
             );
           })}
           {ri === lastIndex && onCollapse && (
-            <ChromeButton className="omg-key" aria-label="Hide extra keys" onClick={onCollapse}>
+            <ChromeButton className="omg-key" aria-label={s.hide} onClick={onCollapse}>
               <IconChevronDown />
             </ChromeButton>
           )}

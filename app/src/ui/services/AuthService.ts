@@ -13,6 +13,7 @@ import {
   waitForFreshCode,
   type TotpParams,
 } from '../../core/totp/totp.ts';
+import { isShareServerId } from './shareSessions.ts';
 
 /**
  * Session tokens and saved credentials per server (SRV-3, SRV-4, SRV-6, SRV-9). Keeps the
@@ -99,6 +100,9 @@ export class AuthService {
   }
 
   async loadToken(profileId: string): Promise<string | null> {
+    // Share-link sessions are memory only (CON-6): their "stored" token is the live one, so
+    // the sign-in flow resumes it instead of showing a password form.
+    if (isShareServerId(profileId)) return this.sessions.get(profileId)?.token ?? null;
     return this.secure.get(secretKeys.authToken(profileId)).catch(() => null);
   }
 
@@ -167,7 +171,10 @@ export class AuthService {
     return session;
   }
 
-  /** Signs in with parameters only: an SSO result or a share-link `key` (SRV-7, CON-6). */
+  /**
+   * Signs in with parameters only: an SSO result or a share-link `key` (SRV-7, CON-6).
+   * For a share-link profile (`isShareServerId`) the session stays in memory only.
+   */
   async loginWithParameters(
     profile: ServerProfile,
     parameters: Readonly<Record<string, string>>,
@@ -180,6 +187,11 @@ export class AuthService {
   private async adopt(profileId: string, session: AuthSession): Promise<void> {
     this.sessions.set(profileId, session);
     this.log?.info('auth', `signed in (${session.dataSources.length} data source(s))`);
+    if (isShareServerId(profileId)) {
+      // A share key's session is never persisted (CON-6).
+      this.emit(profileId);
+      return;
+    }
     // Storage failures must not turn a successful sign-in into an error: the session is
     // live in memory either way.
     await this.secure.set(secretKeys.authToken(profileId), session.token).catch(() => undefined);
@@ -189,6 +201,10 @@ export class AuthService {
   /** Drops a token the server no longer accepts. */
   async forgetToken(profileId: string): Promise<void> {
     const had = this.sessions.delete(profileId);
+    if (isShareServerId(profileId)) {
+      if (had) this.emit(profileId);
+      return;
+    }
     await this.secure.remove(secretKeys.authToken(profileId)).catch(() => undefined);
     if (had) this.emit(profileId);
   }
@@ -288,6 +304,11 @@ export class AuthService {
   ): Promise<RevalidateResult> {
     const live = this.sessions.get(profile.id);
     if (live && (await this.api.isSessionValid(live))) return 'ok';
+    if (isShareServerId(profile.id)) {
+      // A share key cannot be replayed silently; the user opens the link again.
+      if (live) await this.forgetToken(profile.id);
+      return 'needs-sign-in';
+    }
     if (!live) {
       const token = await this.loadToken(profile.id);
       if (token) {

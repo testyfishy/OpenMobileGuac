@@ -75,7 +75,8 @@ Non-goals
 - Bundling a VPN or Tailscale. The app needs a network path the OS already provides.
 - Speaking RDP/VNC/SSH directly. Guacamole's server does that.
 - Server administration (users, permissions, connection editing) in v1.
-- Session recording playback, printing, and microphone input in v1.
+- Session recording playback in v1. (Printing was a v1 non-goal and is now built as FIL-2;
+  microphone input moved to AUD-2, P3; see §6.8.)
 
 ## 5. Users and scenarios
 
@@ -183,6 +184,32 @@ because the modes below need behaviours those do not offer.
 | A11Y-1 | P1 | App chrome (everything except the remote canvas) works with VoiceOver/TalkBack, dynamic type, and sufficient contrast. |
 | DIAG-1 | P2 | Local-only diagnostics screen and shareable log with secrets redacted. |
 
+### 6.8 Additions (2026-11)
+
+Proposed in `docs/FEATURES.md` §5 and accepted here because they are built (code and unit
+tests; **not yet tested on a device or a real server**) or planned. Status as of 2026-11-19.
+
+| ID | Pri | Requirement | AC | Status |
+|---|---|---|---|---|
+| SRV-11 | P1 | Handle the `required` instruction: prompt for the requested parameters (username, password, domain) and send them on `argv` streams. | An RDP connection with no stored credentials connects after the user types them in the prompt. | Built (prompt; remembering answers per connection not built) |
+| FIL-2 | P2 | RDP print jobs (`enable-printing`) arrive as a PDF and open in the OS share sheet / print dialog. | Printing a test page from Notepad offers the PDF on the phone. | Built |
+| MUL-2 | P3 | Open a Guacamole share link (sharing profile) and join the shared session, as a separate, memory-only session that does not replace a saved server's own sign-in. | Opening a share link from the web client joins the session in the app; the saved server is still signed in as its own user afterwards. | Built |
+| AUD-2 | P3 | RDP microphone input when the connection has `enable-audio-input`; permission requested on first use; mic indicator and toggle in the toolbar. | Speech recorded in a remote Windows app is audible on playback. | Planned |
+| CON-7 | P2 | Show a "waking the computer" state with a longer connect timeout for connections that use Wake-on-LAN. | A sleeping PC with WoL configured connects without a timeout error. | Planned |
+| KEY-8 | P2 | Swipe on the key bar (or hold Space and slide) to send arrow keys. | Caret moves by one character per step in Notepad. | Planned |
+| A11Y-2 | P2 | VoiceOver/TalkBack pass of every screen recorded in a device checklist before each release. | Checklist completed with no blocking issue. | Planned |
+
+Notes on earlier rows (the rows themselves are unchanged):
+
+- SRV-4: silent re-login also runs when a live session's tunnel refuses an expired token
+  (not only before reconnecting a suspended session).
+- SRV-8: until per-server fingerprint trust exists, a private CA installed on the device is
+  trusted (Android: user CAs in the network security config; iOS: enabled profile).
+- SRV-10: the backup may also carry passwords and TOTP seeds (opt-in), but only inside a passphrase-encrypted
+  export; a plain export has none.
+- CON-6: share links are covered by MUL-2.
+- I18N-1: Spanish ships alongside English, session screen included.
+
 ## 7. Non-functional requirements
 
 - **Performance.** Input-to-send latency under 16 ms on device; display at the server's frame
@@ -269,7 +296,7 @@ Rules:
 |---|---|---|
 | REST calls from the app origin are cross-origin and Guacamole sends no CORS headers. | Route REST through Capacitor's native HTTP so CORS does not apply. In browser dev mode, use a Vite dev proxy. | T0.6, G0 |
 | WebSocket from the WebView to `ws://` on a tailnet IP or MagicDNS name. | Android: allow cleartext and mixed content for the WebView. iOS: App Transport Security exception with a written justification for review. | T0.4, T0.6 |
-| Self-signed HTTPS. | WebView sockets cannot trust a custom cert, so SRV-8 needs the native tunnel bridge. | Phase 2 |
+| Self-signed HTTPS. | WebView sockets cannot be told to trust one server's certificate, so per-server trust (SRV-8) needs the native tunnel bridge. A CA the user installs on the device is trusted (Android: `<certificates src="user"/>` in the network security config; iOS: enabled profile); see docs/tls.md. | Phase 2 (bridge); user CA untested on device |
 | Server rejects the WebSocket origin (reverse proxies sometimes do). | Fall back to the native tunnel bridge, or to the HTTP tunnel. | T0.4 |
 
 The server interface is not a documented public API. Endpoints and parameters must be read

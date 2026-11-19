@@ -4,6 +4,7 @@ import {
   STATUS,
   classifyStatus,
   endHeading,
+  isSignInFailure,
   reduceSession,
   statusMessage,
   type SessionEvent,
@@ -83,5 +84,29 @@ describe('network awareness', () => {
       { type: 'closed', intentional: false },
     ]);
     expect(m.phase).toMatchObject({ kind: 'error', message: 'This device is offline.' });
+  });
+});
+
+describe('expired sign-in on reconnect', () => {
+  const dropThenRefused = (code: number, source: 'tunnel' | 'client') =>
+    run([
+      ...connected,
+      { type: 'closed', intentional: false }, // the network dropped: retry
+      { type: 'connect' },
+      { type: 'error', code, source },
+      { type: 'closed', intentional: false },
+    ]);
+
+  it('flags a tunnel refusal (expired or revoked token) for the shell', () => {
+    expect(isSignInFailure(dropThenRefused(STATUS.CLIENT_UNAUTHORIZED, 'tunnel').phase)).toBe(true);
+    expect(isSignInFailure(dropThenRefused(STATUS.CLIENT_FORBIDDEN, 'tunnel').phase)).toBe(true);
+  });
+
+  it('does not flag the remote computer refusing its own credentials', () => {
+    expect(isSignInFailure(dropThenRefused(STATUS.CLIENT_UNAUTHORIZED, 'client').phase)).toBe(
+      false,
+    );
+    expect(isSignInFailure(dropThenRefused(STATUS.UPSTREAM_NOT_FOUND, 'tunnel').phase)).toBe(false);
+    expect(isSignInFailure(run(connected).phase)).toBe(false);
   });
 });

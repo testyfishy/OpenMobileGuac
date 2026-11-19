@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { previewText, type ClipboardHistory } from '../../session/clipboard/ClipboardHistory.ts';
 import { ChromeButton } from './ChromeButton.tsx';
+import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
 export interface ClipboardSheetProps {
@@ -25,16 +26,17 @@ export function ClipboardSheet(props: ClipboardSheetProps) {
   const [draft, setDraft] = useState('');
   const [note, setNote] = useState<string | null>(null);
   const chars = [...draft].length;
+  const t = sessionStrings.clipboard;
 
   return (
-    <Sheet title="Clipboard" onClose={props.onClose}>
+    <Sheet title={t.title} onClose={props.onClose}>
       <section className="omg-section" aria-labelledby="omg-clip-remote">
         <h3 id="omg-clip-remote" className="omg-section__title">
-          From the remote
+          {t.fromRemote}
         </h3>
         {history.lastRemote !== null ? (
           <>
-            <pre className="omg-clip-preview" tabIndex={0} aria-label="Text copied on the remote">
+            <pre className="omg-clip-preview" tabIndex={0} aria-label={t.remoteText}>
               {history.lastRemote}
             </pre>
             <div className="omg-sheet__actions">
@@ -42,30 +44,27 @@ export function ClipboardSheet(props: ClipboardSheetProps) {
                 className="omg-btn--ghost"
                 onClick={() => props.onCopyToDevice(history.lastRemote ?? '')}
               >
-                Copy to device
+                {t.copyToDevice}
               </ChromeButton>
               <ChromeButton
                 className="omg-btn--ghost"
                 onClick={() => setDraft(history.lastRemote ?? '')}
               >
-                Edit below
+                {t.editBelow}
               </ChromeButton>
             </div>
           </>
         ) : (
-          <p className="omg-muted">
-            Nothing copied on the remote yet in this session. If copying there never shows up here,
-            the connection may have copying disabled.
-          </p>
+          <p className="omg-muted">{t.nothingYet}</p>
         )}
       </section>
 
       <section className="omg-section" aria-labelledby="omg-clip-send">
         <h3 id="omg-clip-send" className="omg-section__title">
-          Send to the remote
+          {t.sendTitle}
         </h3>
         <label className="omg-visually-hidden" htmlFor="omg-clip-draft">
-          Text to send to the remote
+          {t.draftLabel}
         </label>
         <textarea
           id="omg-clip-draft"
@@ -75,14 +74,14 @@ export function ClipboardSheet(props: ClipboardSheetProps) {
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
-          placeholder="Type or paste text here"
+          placeholder={t.placeholder}
           onChange={(e) => {
             setDraft(e.target.value);
             setNote(null);
           }}
         />
         <p className="omg-muted" aria-live="polite">
-          {note ?? `${chars} character${chars === 1 ? '' : 's'}`}
+          {note ?? t.characters(chars)}
         </p>
         <div className="omg-sheet__actions">
           <ChromeButton
@@ -92,24 +91,24 @@ export function ClipboardSheet(props: ClipboardSheetProps) {
               const ok = props.onSend(draft);
               setNote(
                 !ok
-                  ? 'Not connected.'
+                  ? sessionStrings.common.notConnectedSentence
                   : props.terminal
-                    ? 'Sent. Paste in the terminal with Ctrl+Shift+V or a right-click.'
-                    : 'Sent. Paste on the remote (Ctrl+V). If nothing arrives, the server may block pasting: use Type instead.',
+                    ? t.sentTerminal
+                    : t.sent,
               );
             }}
           >
-            Send
+            {sessionStrings.common.send}
           </ChromeButton>
           <ChromeButton
             className="omg-btn--ghost"
             disabled={draft === ''}
             onClick={() => {
               props.onType(draft);
-              setNote('Typed as keystrokes.');
+              setNote(t.typed);
             }}
           >
-            Type as keystrokes
+            {t.typeAsKeystrokes}
           </ChromeButton>
           <ChromeButton
             className="omg-btn--ghost"
@@ -119,24 +118,24 @@ export function ClipboardSheet(props: ClipboardSheetProps) {
               });
             }}
           >
-            From device
+            {t.fromDevice}
           </ChromeButton>
           <ChromeButton
             className="omg-btn--ghost"
             disabled={draft === ''}
             onClick={() => setDraft('')}
           >
-            Clear
+            {sessionStrings.common.clear}
           </ChromeButton>
         </div>
       </section>
 
       <section className="omg-section" aria-labelledby="omg-clip-history">
         <h3 id="omg-clip-history" className="omg-section__title">
-          This session
+          {t.historyTitle}
         </h3>
         {history.items.length === 0 ? (
-          <p className="omg-muted">No clipboard text yet. Kept in memory only, never saved.</p>
+          <p className="omg-muted">{t.historyEmpty}</p>
         ) : (
           <>
             <ul className="omg-list">
@@ -145,10 +144,14 @@ export function ClipboardSheet(props: ClipboardSheetProps) {
                   <ChromeButton
                     className="omg-list__item"
                     onClick={() => setDraft(item.text)}
-                    aria-label={`${item.direction === 'from-remote' ? 'From remote' : 'Sent'}: ${previewText(item.text, 60)}. Put in the box`}
+                    aria-label={
+                      item.direction === 'from-remote'
+                        ? t.itemFromRemote(previewText(item.text, 60))
+                        : t.itemSent(previewText(item.text, 60))
+                    }
                   >
                     <span className="omg-list__tag">
-                      {item.direction === 'from-remote' ? 'Remote' : 'Sent'}
+                      {item.direction === 'from-remote' ? t.tagRemote : t.tagSent}
                     </span>
                     <span className="omg-list__text">{previewText(item.text)}</span>
                   </ChromeButton>
@@ -157,7 +160,7 @@ export function ClipboardSheet(props: ClipboardSheetProps) {
             </ul>
             <div className="omg-sheet__actions">
               <ChromeButton className="omg-btn--ghost" onClick={props.onClear}>
-                Clear history
+                {t.clearHistory}
               </ChromeButton>
             </div>
           </>

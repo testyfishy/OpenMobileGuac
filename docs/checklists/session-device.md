@@ -264,8 +264,9 @@ only fakes the server side.
       remote; returning re-fits the desktop correctly after a rotation while hidden.
 - [ ] The connection list shows a recent thumbnail of the session.
 - [ ] Keep screen awake: the screen stays on for 3 minutes on iOS and Android. Session info
-      shows "Keep screen on: on (screen wake lock)" or "not supported in this WebView" /
-      "refused by the system": record which, with the OS and WebView version.
+      should show "on (native)" in the installed app (keep-awake plugin); in the mobile
+      browser "on (screen wake lock)", "not supported in this WebView" or "refused by the
+      system": record which, with the OS and WebView version.
 
 ### Toolbar
 

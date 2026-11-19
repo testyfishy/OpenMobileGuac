@@ -46,6 +46,7 @@ import {
 } from '../../session/transfer/TransferModel.ts';
 import { decodeUtf8Chunks } from './clipboardText.ts';
 import type { DeliverResult } from './fileSave.ts';
+import { sessionStrings } from './sessionStrings.ts';
 
 type GuacClient = InstanceType<typeof Guacamole.Client>;
 type GuacObject = InstanceType<typeof Guacamole.Object>;
@@ -179,7 +180,7 @@ export class TransferManager {
         type: 'fail',
         id,
         at: Date.now(),
-        message: 'The connection closed during the transfer.',
+        message: sessionStrings.files.connectionClosed,
       });
     }
     this.active.clear();
@@ -235,7 +236,11 @@ export class TransferManager {
       void this.opts.deliver(blob, filename, print).then((r) => {
         if (r.ok) {
           this.apply({ type: 'done', id, at: Date.now(), outcome: r.outcome });
-          this.opts.notify?.(`${print ? 'Print job' : 'Download'} ready: ${filename}`);
+          this.opts.notify?.(
+            print
+              ? sessionStrings.files.printReady(filename)
+              : sessionStrings.files.downloadReady(filename),
+          );
         } else {
           this.apply({ type: 'fail', id, at: Date.now(), message: r.error });
           this.opts.notify?.(r.error);
@@ -269,7 +274,7 @@ export class TransferManager {
       timer: null,
       view: {
         id,
-        name: name || 'Remote files',
+        name: name || sessionStrings.files.remoteFiles,
         cwd: ROOT_STREAM,
         entries: [],
         loading: false,
@@ -304,7 +309,7 @@ export class TransferManager {
     f.timer = setTimeout(() => {
       if (f.listGen !== gen) return;
       f.listGen++;
-      this.updateFs(fsId, { loading: false, error: 'The folder listing timed out.' });
+      this.updateFs(fsId, { loading: false, error: sessionStrings.files.listingTimedOut });
     }, REQUEST_TIMEOUT_MS);
     this.updateFs(fsId, { cwd: target, loading: true, error: null });
     f.object.requestInputStream(target, (stream, mimetype) => {
@@ -312,7 +317,7 @@ export class TransferManager {
         stream.sendAck('Unexpected mimetype', UNSUPPORTED);
         if (f.listGen === gen) {
           if (f.timer) clearTimeout(f.timer);
-          this.updateFs(fsId, { loading: false, error: 'This item is not a folder.' });
+          this.updateFs(fsId, { loading: false, error: sessionStrings.files.notAFolder });
         }
         return;
       }
@@ -356,7 +361,7 @@ export class TransferManager {
         type: 'fail',
         id,
         at: Date.now(),
-        message: 'The server did not send the file. Downloads may be disabled for this connection.',
+        message: sessionStrings.files.notSent,
       });
     }, REQUEST_TIMEOUT_MS);
     this.active.set(id, {
@@ -411,7 +416,8 @@ export class TransferManager {
         name: file.name,
         mimetype: file.type,
         size: file.size,
-        destination: f && folder !== null ? `${f.view.name} ${folder}` : 'Remote computer',
+        destination:
+          f && folder !== null ? `${f.view.name} ${folder}` : sessionStrings.files.remoteComputer,
         at: Date.now(),
       });
       this.opts.log('info', `Upload started (${file.size} bytes)`);
@@ -477,7 +483,7 @@ export class TransferManager {
       writer.onprogress = (_blob, offset) => {
         if (!done) this.apply({ type: 'progress', id, bytes: Math.min(file.size, offset) }, false);
       };
-      writer.onerror = () => fail(null, 'The file could not be read on this device.');
+      writer.onerror = () => fail(null, sessionStrings.files.unreadable);
       writer.oncomplete = () => {
         if (done) return;
         done = true;

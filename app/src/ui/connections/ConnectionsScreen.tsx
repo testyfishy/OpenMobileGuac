@@ -18,6 +18,7 @@ import { useAppSettings, useServices } from '../services/context.ts';
 import { haptic } from '../services/native.ts';
 import { hostOf, isInsecureUrl } from '../servers/serverForm.ts';
 import { useServerProfile } from '../servers/useServers.ts';
+import { isShareServerId } from '../services/shareSessions.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { seedPolicy } from '../servers/seedPolicy.ts';
 import type { BiometryAvailability } from '../services/native.ts';
@@ -36,14 +37,29 @@ import { EmptyState } from '../components/Feedback.tsx';
 
 export function ConnectionsScreen({ serverId }: { serverId: string }) {
   const nav = useNav();
+  const services = useServices();
   const lookup = useServerProfile(serverId);
+  const [, setAuthVersion] = useState(0);
+  useEffect(
+    () =>
+      isShareServerId(serverId)
+        ? services.auth.onSessionChange((id) => {
+            if (id === serverId) setAuthVersion((v) => v + 1);
+          })
+        : undefined,
+    [services.auth, serverId],
+  );
   if (lookup.status === 'demo') return <DemoConnections />;
-  if (lookup.status === 'ready')
+  // A share-link session (CON-6) cannot sign in again by itself: the link must be reopened.
+  const shareEnded = isShareServerId(serverId) && !services.auth.current(serverId);
+  if (lookup.status === 'ready' && !shareEnded)
     return <ServerConnections key={lookup.profile.id} profile={lookup.profile} />;
   return (
     <Screen title={strings.connections.title} onBack={nav.back}>
       {lookup.status === 'loading' ? (
         <Spinner label={strings.common.loading} />
+      ) : shareEnded ? (
+        <EmptyState icon="link" title={strings.shareLink.ended} />
       ) : (
         <EmptyState icon="server" title={strings.servers.selectPrompt} />
       )}

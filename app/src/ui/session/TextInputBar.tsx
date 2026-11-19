@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { ChromeButton } from './ChromeButton.tsx';
 import { IconClose } from './icons.tsx';
+import { sessionStrings } from './sessionStrings.ts';
 
 export interface TextInputBarProps {
   /** Type the text on the remote. */
@@ -16,6 +17,7 @@ export interface TextInputBarProps {
 export function TextInputBar({ onSend, onClose }: TextInputBarProps) {
   const [text, setText] = useState('');
   const id = useId();
+  const t = sessionStrings.textBar;
   const send = (enter: boolean) => {
     if (text === '' && !enter) return;
     onSend(text, enter);
@@ -30,32 +32,24 @@ export function TextInputBar({ onSend, onClose }: TextInputBarProps) {
       }}
     >
       <label htmlFor={id} className="omg-visually-hidden">
-        Text to type on the remote
+        {t.label}
       </label>
       <input
         id={id}
         className="omg-input omg-textbar__input"
         value={text}
-        placeholder="Type, dictate or paste, then Send"
+        placeholder={t.placeholder}
         autoComplete="off"
         enterKeyHint="send"
         onChange={(e) => setText(e.target.value)}
       />
       <ChromeButton className="omg-btn--primary" disabled={text === ''} onClick={() => send(false)}>
-        Send
+        {sessionStrings.common.send}
       </ChromeButton>
-      <ChromeButton
-        className="omg-btn--ghost"
-        aria-label="Send and press Enter"
-        onClick={() => send(true)}
-      >
+      <ChromeButton className="omg-btn--ghost" aria-label={t.sendEnter} onClick={() => send(true)}>
         ⏎
       </ChromeButton>
-      <ChromeButton
-        className="omg-btn--icon"
-        aria-label="Close the text input bar"
-        onClick={onClose}
-      >
+      <ChromeButton className="omg-btn--icon" aria-label={t.close} onClick={onClose}>
         <IconClose />
       </ChromeButton>
     </form>

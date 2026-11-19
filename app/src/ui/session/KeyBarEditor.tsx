@@ -11,6 +11,7 @@ import {
   type KeyBarEdit,
   type KeyBarLayout,
 } from './keyBarLayout.ts';
+import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
 export interface KeyBarEditorProps {
@@ -31,19 +32,17 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
   const activeRow = Math.min(row, rows.length - 1);
 
   const apply = (edit: KeyBarEdit) => onChange(editKeyBarLayout(layout, edit));
+  const t = sessionStrings.keyBarEditor;
 
   return (
-    <Sheet title="Edit key bar" onClose={onClose}>
-      <p className="omg-muted">
-        Tap a row to select it, tap a key to move or remove it. With Fn in the first row, the other
-        rows show when Fn is on.
-      </p>
+    <Sheet title={t.title} onClose={onClose}>
+      <p className="omg-muted">{t.intro}</p>
       <ol className="omg-kbe-rows">
         {rows.map((r, ri) => (
           <li
             key={ri}
             className={ri === activeRow ? 'omg-kbe-row omg-kbe-row--on' : 'omg-kbe-row'}
-            aria-label={`Row ${ri + 1}${ri === activeRow ? ', selected' : ''}`}
+            aria-label={ri === activeRow ? t.rowSelected(ri + 1) : t.row(ri + 1)}
           >
             <div className="omg-kbe-row__head">
               <ChromeButton
@@ -54,11 +53,11 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
                   setSelected(null);
                 }}
               >
-                Row {ri + 1}
+                {t.row(ri + 1)}
               </ChromeButton>
               <ChromeButton
                 className="omg-btn--icon"
-                aria-label={`Move row ${ri + 1} up`}
+                aria-label={t.moveRowUp(ri + 1)}
                 disabled={ri === 0}
                 onClick={() => {
                   apply({ type: 'move-row', row: ri, delta: -1 });
@@ -69,7 +68,7 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
               </ChromeButton>
               <ChromeButton
                 className="omg-btn--icon"
-                aria-label={`Move row ${ri + 1} down`}
+                aria-label={t.moveRowDown(ri + 1)}
                 disabled={ri === rows.length - 1}
                 onClick={() => {
                   apply({ type: 'move-row', row: ri, delta: 1 });
@@ -80,7 +79,7 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
               </ChromeButton>
               <ChromeButton
                 className="omg-btn--icon omg-btn--danger"
-                aria-label={`Delete row ${ri + 1}`}
+                aria-label={t.deleteRow(ri + 1)}
                 disabled={rows.length <= 1}
                 onClick={() => {
                   apply({ type: 'remove-row', row: ri });
@@ -92,14 +91,16 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
               </ChromeButton>
             </div>
             <div className="omg-kbe-keys">
-              {r.length === 0 && <span className="omg-muted">Empty row</span>}
+              {r.length === 0 && <span className="omg-muted">{t.emptyRow}</span>}
               {r.map((token, ki) => {
                 const isSel = ri === activeRow && selected === ki;
                 return (
                   <span key={`${ki}:${token}`} className="omg-kbe-key">
                     <ChromeButton
                       className={isSel ? 'omg-key omg-key--locked' : 'omg-key'}
-                      aria-label={`${tokenSpokenLabel(token)}${isSel ? ', selected' : ''}`}
+                      aria-label={
+                        isSel ? t.keySelected(tokenSpokenLabel(token)) : tokenSpokenLabel(token)
+                      }
                       aria-pressed={isSel}
                       onClick={() => {
                         setRow(ri);
@@ -112,7 +113,7 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
                       <span className="omg-kbe-key__actions">
                         <ChromeButton
                           className="omg-btn--icon"
-                          aria-label={`Move ${tokenSpokenLabel(token)} left`}
+                          aria-label={t.moveLeft(tokenSpokenLabel(token))}
                           disabled={ki === 0}
                           onClick={() => {
                             apply({ type: 'move', row: ri, index: ki, delta: -1 });
@@ -123,7 +124,7 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
                         </ChromeButton>
                         <ChromeButton
                           className="omg-btn--icon"
-                          aria-label={`Move ${tokenSpokenLabel(token)} right`}
+                          aria-label={t.moveRight(tokenSpokenLabel(token))}
                           disabled={ki === r.length - 1}
                           onClick={() => {
                             apply({ type: 'move', row: ri, index: ki, delta: 1 });
@@ -134,7 +135,7 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
                         </ChromeButton>
                         <ChromeButton
                           className="omg-btn--icon omg-btn--danger"
-                          aria-label={`Remove ${tokenSpokenLabel(token)}`}
+                          aria-label={t.remove(tokenSpokenLabel(token))}
                           onClick={() => {
                             apply({ type: 'remove', row: ri, index: ki });
                             setSelected(null);
@@ -159,7 +160,7 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
         }}
       >
         <label htmlFor={selectId} className="omg-label">
-          Add to row {activeRow + 1}
+          {t.addToRow(activeRow + 1)}
         </label>
         <div className="omg-combo-form__row">
           <select
@@ -168,14 +169,14 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
             value={toAdd}
             onChange={(e) => setToAdd(e.target.value)}
           >
-            {tokens.map((t) => (
-              <option key={t} value={t}>
-                {t.startsWith('combo:') ? `Combo: ${tokenLabel(t)}` : tokenSpokenLabel(t)}
+            {tokens.map((tok) => (
+              <option key={tok} value={tok}>
+                {tok.startsWith('combo:') ? t.comboOption(tokenLabel(tok)) : tokenSpokenLabel(tok)}
               </option>
             ))}
           </select>
           <button type="submit" className="omg-btn omg-btn--primary">
-            Add
+            {sessionStrings.common.add}
           </button>
         </div>
       </form>
@@ -189,7 +190,7 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
             setSelected(null);
           }}
         >
-          Add row
+          {t.addRow}
         </ChromeButton>
         <ChromeButton
           className="omg-btn--ghost"
@@ -199,10 +200,10 @@ export function KeyBarEditor({ layout, customCombos, onChange, onClose }: KeyBar
             setSelected(null);
           }}
         >
-          Reset to default
+          {t.reset}
         </ChromeButton>
         <ChromeButton className="omg-btn--primary" onClick={onClose}>
-          Done
+          {sessionStrings.common.done}
         </ChromeButton>
       </div>
     </Sheet>

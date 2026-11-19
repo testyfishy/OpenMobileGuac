@@ -22,6 +22,11 @@ export interface SessionsApi {
   readonly closeServer: (serverId: string) => void;
   /** Reconnects a suspended session (re-validating the sign-in first). */
   readonly reconnect: (id: string) => void;
+  /**
+   * A live session's tunnel refused the sign-in (expired token): re-validate silently and
+   * reconnect, or show "Sign in again" (T2.1).
+   */
+  readonly recoverSignIn: (id: string) => void;
   readonly switcherOpen: boolean;
   readonly setSwitcherOpen: (open: boolean) => void;
 }

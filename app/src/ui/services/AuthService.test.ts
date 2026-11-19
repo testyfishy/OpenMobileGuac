@@ -8,6 +8,7 @@ import { FakeHttpClient, jsonResponse } from '../../core/testing/FakeHttpClient.
 import { authResultJson, permissionDeniedJson } from '../../core/testing/fixtures.ts';
 import { makeConnectDataBuilder } from '../launch/connectData.ts';
 import { AuthService } from './AuthService.ts';
+import { isShareServerId, makeShareProfile, ShareProfiles } from './shareSessions.ts';
 
 const BASE = 'https://guac.example/guacamole';
 const TOKENS = `${BASE}/api/tokens`;
@@ -168,5 +169,62 @@ describe('makeConnectDataBuilder', () => {
     token = 'second';
     expect(build({ width: 1, height: 1, dpi: 96 })).toContain('token=second');
     expect(calls).toBe(2);
+  });
+});
+
+describe('share-link sessions (CON-6)', () => {
+  it('stay separate from a saved server and are never persisted', async () => {
+    const SHARE_TOKEN = '5HA4E0000000000000000000000000000000000000000000000000000000000';
+    let calls = 0;
+    const http = new FakeHttpClient().on('POST', TOKENS, () => {
+      calls++;
+      return jsonResponse(
+        200,
+        calls === 1
+          ? authResultJson
+          : { ...authResultJson, authToken: SHARE_TOKEN, username: 'share-user' },
+      );
+    });
+    const { auth, profile, secure, profiles } = await setup(http);
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: true, extra: {} });
+
+    const link = { baseUrl: BASE, key: 'k3y' };
+    const share = makeShareProfile(link, BASE, 'guac.example', 1000, 'abc');
+    expect(isShareServerId(share.id)).toBe(true);
+    expect(isShareServerId(profile.id)).toBe(false);
+    await auth.loginWithParameters(share, { key: link.key });
+
+    // The saved server keeps its own sign-in, in memory and in storage.
+    expect(auth.current(profile.id)?.token).toBe(authResultJson.authToken);
+    expect(await secure.get(secretKeys.authToken(profile.id))).toBe(authResultJson.authToken);
+    expect(await secure.get(secretKeys.password(profile.id))).toBe('pw');
+    // The share session is memory only and nothing is stored under its id.
+    expect(auth.current(share.id)?.token).toBe(SHARE_TOKEN);
+    for (const key of secretKeys.all(share.id)) expect(await secure.get(key)).toBeNull();
+    // The sign-in flow still finds it (from memory), so it does not ask for a password.
+    expect(await auth.loadToken(share.id)).toBe(SHARE_TOKEN);
+    await expect(auth.resume(share, SHARE_TOKEN)).resolves.toMatchObject({ token: SHARE_TOKEN });
+    expect(await profiles.list()).toHaveLength(1);
+  });
+
+  it('never tries a password when a share session expires', async () => {
+    const { auth } = await setup(new FakeHttpClient());
+    const share = makeShareProfile({ baseUrl: BASE, key: 'k' }, BASE, 'x', 1, 'r');
+    await expect(auth.revalidate(share, { httpAllowed: true, totpAutofill: true })).resolves.toBe(
+      'needs-sign-in',
+    );
+  });
+
+  it('keeps share profiles in memory only', () => {
+    const shares = new ShareProfiles();
+    const p = makeShareProfile({ baseUrl: BASE, key: 'k' }, BASE, 'x', 1, 'r');
+    let changes = 0;
+    shares.onChange(() => changes++);
+    shares.add(p);
+    expect(shares.get(p.id)).toEqual(p);
+    expect(() => shares.add({ ...p, id: 'not-a-share' })).toThrow();
+    shares.remove(p.id);
+    expect(shares.list()).toEqual([]);
+    expect(changes).toBe(2);
   });
 });

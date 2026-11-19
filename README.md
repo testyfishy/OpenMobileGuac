@@ -22,29 +22,29 @@ for the specification and [docs/PLAN.md](docs/PLAN.md) for the delivery plan.
 verified on a physical phone yet.** What exists has been exercised in unit tests and in a
 desktop browser (including phone-sized viewports) against the built-in Demo server.
 
-Implemented:
+Built (code and unit tests; untested on a phone or a real server). Full status per feature:
+[docs/FEATURES.md](docs/FEATURES.md).
 
-- Server list: add and edit Guacamole servers and log in, with a warning for plain
-  `http://` servers. Remembered passwords and tokens use the platform's secure storage in
-  the app.
-- Connection browser with search, favourites and recent connections.
-- Session screen: direct-touch and trackpad pointer modes (tap, long press, drag,
-  two-finger scroll), pinch zoom and pan with fit modes, a soft-keyboard bridge with a key
-  bar, sticky modifiers and key combos, clipboard in both directions (UTF-8 exact, emoji
-  included), and automatic reconnect.
-- Settings: theme, fit and pointer modes, pointer speed, natural scrolling, haptics, keep
-  awake, clipboard behaviour.
+- Servers: several profiles, secure storage for passwords and tokens, TOTP (optionally with
+  a stored seed), plain-`http` warning, silent re-login, biometric app lock, backup and
+  restore, share links, deep links, SSO (experimental).
+- Connections: tree with search, favourites, recents and thumbnails.
+- Session screen: fit modes, pinch zoom, direct-touch, trackpad and RDP multi-touch modes,
+  hardware mouse and keyboard, soft-keyboard bridge with an editable key bar and combos,
+  clipboard both ways with a history panel, file transfer and print jobs, audio mute,
+  split/tabletop layout, keep-awake, automatic reconnect.
+- Several sessions at once, background grace period, English and Spanish, local diagnostics.
 - A built-in **Demo server** that runs entirely on the device: a simulated desktop with a
   text editor, an input tester and a zoom target, so every control can be tried without a
   server. It contains no personal data and sends nothing over the network.
 
-Not yet verified:
-
-- Real-device behaviour: the soft keyboard on Android and iOS, OS paste prompts, real
-  multi-touch, rotation, and anything iOS-specific.
-- Sessions against a real Guacamole server: pending testing by the project owner (see
-  [docs/checklists/](docs/checklists/)).
-- The TestFlight and Android release-signing paths (see [docs/release.md](docs/release.md)).
+Not yet verified: everything on real devices (soft keyboards, OS paste prompts, real
+multi-touch, rotation, lock, keep-awake, anything iOS-specific), sessions against a real
+Guacamole server, and the TestFlight / Android release-signing paths
+([docs/release.md](docs/release.md)). Testing order for the owner:
+[docs/checklists/README.md](docs/checklists/README.md), then
+[phase0.md](docs/checklists/phase0.md), [session-device.md](docs/checklists/session-device.md)
+and [app-device.md](docs/checklists/app-device.md).
 
 ## Try it
 
@@ -59,7 +59,8 @@ Not yet verified:
 - [docs/SPEC.md](docs/SPEC.md): specification.
 - [docs/PLAN.md](docs/PLAN.md): delivery plan and task list.
 - [docs/release.md](docs/release.md): CI, nightly APK, signing and TestFlight.
-- [docs/checklists/](docs/checklists/): on-device test checklists.
+- [docs/FEATURES.md](docs/FEATURES.md): feature status and comparison with other clients.
+- [docs/checklists/](docs/checklists/README.md): on-device test checklists, in testing order.
 - [docs/protocol-notes.md](docs/protocol-notes.md): notes on the Guacamole protocol and web
   client.
 

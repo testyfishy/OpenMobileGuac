@@ -83,6 +83,7 @@ import { SessionAudio } from './audio.ts';
 import { readTextStream, writeTextStream } from './clipboardText.ts';
 import { deliverFile } from './fileSave.ts';
 import { isOnline, onAppResume, onNetworkChange } from './platform.ts';
+import { sessionStrings } from './sessionStrings.ts';
 import { TransferManager } from './transfers.ts';
 import { computeLayout, cursorDrawScale, visualViewportInset } from './layout.ts';
 import {
@@ -251,7 +252,8 @@ export class SessionController {
   private lastThumbAt = 0;
   private stats = emptyStats();
   private displayStats: InstanceType<typeof Guacamole.Display.Statistics> | null = null;
-  private tunnelType = 'none';
+  /** The current (or last) tunnel, described for the info sheet. */
+  private infoTunnel: TunnelLike | null = null;
 
   // Layout
   private stable: Size | null = null;
@@ -609,7 +611,7 @@ export class SessionController {
     const client = new Guacamole.Client(tunnel as unknown as InstanceType<typeof Guacamole.Tunnel>);
     this.tunnel = tunnel;
     this.client = client;
-    this.tunnelType = describeTunnel(tunnel);
+    this.infoTunnel = tunnel;
     const live = () => gen === this.generation && !this.disposed;
     this.countTraffic(tunnel, live);
 
@@ -864,7 +866,9 @@ export class SessionController {
     return {
       remoteSize: this.viewport.remote,
       scale: scaleOf(this.viewport),
-      tunnelType: this.tunnelType,
+      tunnelType: this.infoTunnel
+        ? describeTunnel(this.infoTunnel)
+        : sessionStrings.info.tunnelTypes.none,
       connectedForMs:
         this.machine.phase.kind === 'connected' && this.stats.connectedAt > 0
           ? Date.now() - this.stats.connectedAt
@@ -879,7 +883,7 @@ export class SessionController {
       clientFps: num(s?.clientFps),
       desktopFps: num(s?.desktopFps),
       dropRate: num(s?.dropRate),
-      tunnelState: t ? tunnelStateName(t.state) : 'closed',
+      tunnelState: tunnelStateName(t ? t.state : TunnelState.CLOSED),
       audioContext: this.audio.contextState(),
       online: isOnline(),
     };
@@ -1947,35 +1951,37 @@ function instructionLength(opcode: string, args: readonly string[]): number {
   return n;
 }
 
-/** Readable tunnel type for the info sheet. */
+/** Readable tunnel type for the info sheet (active session table). */
 function describeTunnel(tunnel: TunnelLike): string {
+  const types = sessionStrings.info.tunnelTypes;
   try {
-    if (tunnel instanceof Guacamole.ChainedTunnel) return 'Chained (WebSocket, then HTTP)';
+    if (tunnel instanceof Guacamole.ChainedTunnel) return types.chained;
     if (tunnel instanceof Guacamole.WebSocketTunnel) return 'WebSocket';
-    if (tunnel instanceof Guacamole.HTTPTunnel) return 'HTTP (long polling)';
+    if (tunnel instanceof Guacamole.HTTPTunnel) return types.http;
   } catch {
     // ignore
   }
   const name = (tunnel as { constructor?: { name?: string } }).constructor?.name ?? '';
-  if (/demo/i.test(name)) return 'In-app demo';
+  if (/demo/i.test(name)) return types.demo;
   if (/socket/i.test(name)) return 'WebSocket';
-  return name ? `Custom (${name})` : 'Custom';
+  return name ? types.customNamed(name) : types.custom;
 }
 
 function tunnelStateName(state: number): string {
+  const names = sessionStrings.info.tunnelStates;
   switch (state) {
     case TunnelState.CONNECTING:
-      return 'connecting';
+      return names.connecting;
     case TunnelState.OPEN:
-      return 'open';
+      return names.open;
     case TunnelState.UNSTABLE:
-      return 'unstable';
+      return names.unstable;
     default:
-      return 'closed';
+      return names.closed;
   }
 }
 
 function errorText(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
-  return 'The connection could not be started.';
+  return sessionStrings.status.startFailed;
 }

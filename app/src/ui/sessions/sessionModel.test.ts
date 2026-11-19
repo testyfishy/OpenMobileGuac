@@ -3,6 +3,7 @@ import type { SessionTarget } from '../nav/navigation.ts';
 import {
   INITIAL_SESSIONS,
   activeSession,
+  decideAuthRecovery,
   decideOpen,
   openTargetKeys,
   sessionsReducer,
@@ -110,5 +111,50 @@ describe('lifecycle timing', () => {
     expect(shouldLockOnResume(true, 30, 0, 29_000)).toBe(false);
     expect(shouldLockOnResume(true, 30, 0, 30_000)).toBe(true);
     expect(shouldLockOnResume(true, 30, null, 30_000)).toBe(false);
+  });
+});
+
+describe('expired sign-in during a live session', () => {
+  const now = 1_000_000;
+
+  it('reconnects after a silent re-login and asks the user when that is not possible', () => {
+    expect(decideAuthRecovery({ result: 'relogged', now })).toBe('reconnect');
+    expect(decideAuthRecovery({ result: 'needs-sign-in', now })).toBe('reauth');
+    expect(decideAuthRecovery({ result: 'failed', now })).toBe('keep-error');
+  });
+
+  it('leaves a real permission error alone when the token is still valid', () => {
+    expect(decideAuthRecovery({ result: 'ok', now })).toBe('keep-error');
+    // ... unless another session of the server just signed in again.
+    expect(decideAuthRecovery({ result: 'ok', now, serverReloggedAt: now - 5_000 })).toBe(
+      'reconnect',
+    );
+    expect(decideAuthRecovery({ result: 'ok', now, serverReloggedAt: now - 120_000 })).toBe(
+      'keep-error',
+    );
+  });
+
+  it('does not loop when the fresh sign-in is refused again', () => {
+    expect(decideAuthRecovery({ result: 'relogged', now, sessionRecoveredAt: now - 10_000 })).toBe(
+      'keep-error',
+    );
+    expect(decideAuthRecovery({ result: 'relogged', now, sessionRecoveredAt: now - 120_000 })).toBe(
+      'reconnect',
+    );
+    // Needing the user always wins.
+    expect(decideAuthRecovery({ result: 'needs-sign-in', now, sessionRecoveredAt: now - 1 })).toBe(
+      'reauth',
+    );
+  });
+
+  it('can reconnect a hidden session without showing it', () => {
+    const state: SessionsState = {
+      sessions: [session('a', 1), session('b', 2)],
+      activeId: 'a',
+    };
+    const next = sessionsReducer(state, { type: 'reconnect', id: 'b', now: 9, show: false });
+    expect(next.activeId).toBe('a');
+    expect(next.sessions[1]).toMatchObject({ epoch: 1, lastShownAt: 2, state: 'live' });
+    expect(sessionsReducer(state, { type: 'reconnect', id: 'b', now: 9 }).activeId).toBe('b');
   });
 });

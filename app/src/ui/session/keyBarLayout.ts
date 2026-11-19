@@ -20,6 +20,7 @@ import {
   parseCombo,
   type Modifier,
 } from '../../session/keys/KeyModel.ts';
+import { sessionStrings } from './sessionStrings.ts';
 
 export type KeyBarLayout = readonly (readonly string[])[];
 
@@ -99,17 +100,6 @@ const LABELS: Readonly<Record<string, string>> = {
   Comma: ',',
 };
 
-const SPOKEN: Readonly<Record<string, string>> = {
-  Super: 'Windows key',
-  PageUp: 'Page up',
-  PageDown: 'Page down',
-  Left: 'Left arrow',
-  Up: 'Up arrow',
-  Down: 'Down arrow',
-  Right: 'Right arrow',
-  Fn: 'Function key rows',
-};
-
 /** Short visible label for a token. */
 export function tokenLabel(token: string): string {
   const t = parseToken(token);
@@ -120,14 +110,18 @@ export function tokenLabel(token: string): string {
   return LABELS[name] ?? name;
 }
 
-/** Accessible name for a token. */
+/**
+ * Accessible name for a token (active session table: words for symbol caps such as arrows,
+ * otherwise the key name).
+ */
 export function tokenSpokenLabel(token: string): string {
   const t = parseToken(token);
   if (!t) return token;
-  if (t.kind === 'combo') return `Combo ${t.text}`;
-  if (t.kind === 'fn') return SPOKEN.Fn ?? 'Fn';
+  const s = sessionStrings.keyBar;
+  if (t.kind === 'combo') return s.combo(t.text);
+  if (t.kind === 'fn') return s.spoken['Fn'] ?? 'Fn';
   const name = t.kind === 'modifier' ? t.mod : t.name;
-  return SPOKEN[name] ?? name;
+  return s.spoken[name] ?? name;
 }
 
 /** Normalise a stored layout. Returns null for "use the built-in layout". */

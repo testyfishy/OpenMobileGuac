@@ -266,7 +266,9 @@ Checked against capacitorjs.com/docs/config and the Capacitor 8.6.2 source in
   blocks `ws://` (insecure) sockets opened from the `https://localhost` page.
 - Cleartext: Android blocks cleartext by default since API 28. The committed
   `AndroidManifest.xml` points to `res/xml/network_security_config.xml`, whose
-  `base-config` sets `cleartextTrafficPermitted="true"` (system CAs only for HTTPS). This
+  `base-config` sets `cleartextTrafficPermitted="true"` and, for HTTPS, trusts the system CAs
+  plus user-installed CAs (`<certificates src="user" />`, so a private home/company CA
+  installed on the device works; see docs/tls.md; untested on a device). This
   covers native HTTP (Capacitor's `HttpURLConnection`) and the WebView. The manifest also
   has `android:usesCleartextTraffic="true"` (ignored when a network security config is
   present, kept for clarity). `server.cleartext: true` is set too, but in Capacitor 8 it

@@ -13,6 +13,12 @@
  * bundles unless imported explicitly behind `import.meta.env.DEV`).
  */
 export { SessionScreen, type SessionLogEntry, type SessionScreenProps } from './SessionScreen.tsx';
+export {
+  sessionStrings,
+  sessionStringsEn,
+  setSessionStrings,
+  type SessionStrings,
+} from './sessionStrings.ts';
 export { setKeepAwakeImpl, type KeepAwakeImpl, type KeepAwakeState } from './platform.ts';
 export {
   DEFAULT_SESSION_SETTINGS,

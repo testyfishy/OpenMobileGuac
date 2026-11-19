@@ -30,6 +30,9 @@ Runtime dependencies bundled into the app (app/package.json "dependencies"):
   @aparajita/capacitor-secure-storage 8.x          MIT License
     Copyright 2020-present Aparajita Fishman.
     iOS Keychain / Android Keystore storage for saved passwords and session tokens.
+  @capacitor-community/keep-awake 8.x              MIT License
+    Copyright (c) 2019 The keep-awake developers.
+    Keeps the screen on during a remote session (native builds only).
   tslib (dependency of @capacitor/core)            0BSD License
     Copyright (c) Microsoft Corporation.
 
@@ -38,6 +41,20 @@ the app): Vite, @vitejs/plugin-react, TypeScript, Vitest, ESLint, typescript-esl
 eslint-plugin-react-hooks, eslint-plugin-react-refresh, eslint-config-prettier,
 globals, Prettier, @capacitor/cli, @types/*. Their licences are recorded in their
 own packages under app/node_modules.
+
+Native libraries pulled in by @capacitor/inappbrowser 4.1.0 (resolved by Gradle /
+CocoaPods / Swift Package Manager at build time, not stored in this repository):
+
+  io.ionic.libs:ioninappbrowser-android 2.1.0      MIT License
+    Copyright (c) 2022 OutSystems.
+    Source: https://github.com/OutSystems/OSInAppBrowserLib-Android (LICENSE;
+    the Maven POM points to the same file)
+  OSInAppBrowserLib (iOS) 3.0.0                    MIT License
+    Copyright (c) 2024 OutSystems.
+    Source: https://github.com/OutSystems/OSInAppBrowserLib-iOS (LICENSE;
+    CocoaPods spec "license": MIT)
+  com.google.code.gson:gson 2.13.2                 Apache License 2.0
+    Copyright Google LLC.
 
 The generated Android project (app/android) uses AndroidX libraries
 (Apache License 2.0) resolved by Gradle at build time.

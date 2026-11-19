@@ -43,13 +43,43 @@ Android SDK presence not yet checked. No Mac (assumed).
 
 ---
 
-## Progress (2026-11-18)
+## Progress (2026-11-19)
 
-Built and passing CI: T0.1–T0.3, T0.6 (TestFlight upload untested, needs owner secrets),
-T1.1–T1.9 in first form, and demo mode (T3.2). T0.4/T0.5 were replaced by building against
-the in-app demo server; **nothing has run against a real Guacamole server or on a physical
-phone yet**, so gates G0 and G1 are still open and no Phase 2 work should start before them.
-Checklists: `docs/checklists/phase0.md`, `docs/checklists/session-device.md`.
+**Nothing has run against a real Guacamole server or on a physical phone yet.** Gates G0 and
+G1 are still open. Everything below is code plus unit tests (`npm run check`), exercised at
+most in a desktop browser against the in-app demo server. Feature-by-feature status:
+`docs/FEATURES.md` §1.
+
+Built (untested on device):
+
+- Phase 0 tooling: T0.1–T0.3, T0.6 (TestFlight upload untested, needs owner secrets).
+  T0.4/T0.5 were replaced by building against the in-app demo server (T3.2).
+- Phase 1, T1.1–T1.9: servers and sign-in (TOTP, http warning), connection browser, session
+  screen (view modes, zoom, direct / trackpad / RDP touch modes, hardware mouse and
+  keyboard, key bar and its editor, combos, clipboard both ways with a history panel,
+  credential prompt, file browser, print jobs, audio mute, split/tabletop layout,
+  immersive mode, native keep-awake), status overlay with auto-reconnect.
+- App-level: several sessions with a switcher (minimise from the session's More sheet),
+  background grace period, silent re-login on reconnect and when a live session's tunnel
+  refuses an expired token (app-lock gate and plain-http consent respected), biometric app
+  lock and privacy screen, stored TOTP seed, backup/restore, deep links, share links as
+  separate memory-only sessions, thumbnails, diagnostics and connection test, English and
+  Spanish (including the session screen), SSO (experimental).
+- Android trusts user-installed CAs for HTTPS (private CA); cached download files are
+  deleted after sharing.
+
+Gated on owner testing (`docs/checklists/README.md` gives the order):
+
+- G0: install on the phones, reach the real server over the tailnet, open a session
+  (`docs/checklists/phase0.md`).
+- G1: the session screen on real touch, soft keyboards, IMEs and OS paste prompts
+  (`docs/checklists/session-device.md`).
+- App-level behaviour that needs the OS: lock, keep-awake, background/resume, share sheet,
+  deep links, SSO, private CA, token expiry (`docs/checklists/app-device.md`).
+
+Not built yet: per-server certificate pinning (native tunnel bridge), native home-screen
+shortcuts, tablet session-beside-list layout, live latency, streamed large downloads,
+microphone input; multi-monitor and image clipboard are not possible with Guacamole today.
 
 ## Owner tasks (U)
 

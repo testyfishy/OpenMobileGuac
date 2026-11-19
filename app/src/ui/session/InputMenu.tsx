@@ -3,11 +3,11 @@ import type { PointerMode } from '../../session/pointer/PointerModel.ts';
 import { ChromeButton } from './ChromeButton.tsx';
 import {
   INPUT_RANGES,
-  POINTER_MODE_LABELS,
   type NumericInputSetting,
   type ResolvedSessionSettings,
   type SessionSettings,
 } from './settings.ts';
+import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
 export interface InputMenuProps {
@@ -18,12 +18,6 @@ export interface InputMenuProps {
   readonly onEditKeyBar: () => void;
   readonly onClose: () => void;
 }
-
-const MODE_HINTS: Readonly<Record<PointerMode, string>> = {
-  direct: 'Tap where you want to click',
-  trackpad: 'The screen is a trackpad for the pointer',
-  touch: 'Raw multi-touch to the remote (RDP touch)',
-};
 
 function Switch({
   label,
@@ -142,10 +136,12 @@ export function InputMenu({
     touchSupport > 0 || s.pointerMode === 'touch'
       ? ['direct', 'trackpad', 'touch']
       : ['direct', 'trackpad'];
+  const t = sessionStrings.input;
+  const pm = sessionStrings.pointerModes;
   return (
-    <Sheet title="Input options" onClose={onClose}>
-      <Section title="Pointer">
-        <div className="omg-choice-list" role="radiogroup" aria-label="Pointer mode">
+    <Sheet title={t.title} onClose={onClose}>
+      <Section title={t.pointer}>
+        <div className="omg-choice-list" role="radiogroup" aria-label={t.pointerModeGroup}>
           {modes.map((m) => (
             <ChromeButton
               key={m}
@@ -154,151 +150,143 @@ export function InputMenu({
               className={m === s.pointerMode ? 'omg-choice omg-choice--on' : 'omg-choice'}
               onClick={() => onChange({ pointerMode: m })}
             >
-              <span className="omg-choice__label">{POINTER_MODE_LABELS[m]}</span>
+              <span className="omg-choice__label">{pm.labels[m]}</span>
               <span className="omg-choice__hint">
-                {m === 'touch' && touchSupport <= 0
-                  ? 'Not offered by this connection: acts as direct touch'
-                  : MODE_HINTS[m]}
+                {m === 'touch' && touchSupport <= 0 ? pm.touchNotOffered : pm.hints[m]}
               </span>
             </ChromeButton>
           ))}
         </div>
         <Slider
           setting="pointerSpeed"
-          label="Trackpad pointer speed"
+          label={t.pointerSpeed}
           value={s.pointerSpeed}
           format={times}
           onChange={(v) => onChange({ pointerSpeed: v })}
         />
         <Slider
           setting="pointerAcceleration"
-          label="Trackpad acceleration"
+          label={t.acceleration}
           value={s.pointerAcceleration}
-          format={(v) => (v === 0 ? 'Off' : times(v))}
+          format={(v) => (v === 0 ? t.off : times(v))}
           onChange={(v) => onChange({ pointerAcceleration: v })}
         />
         <Switch
-          label="Tap and a half to drag (trackpad)"
-          hint={
-            s.tapDrag
-              ? 'Tap, then touch again and move to drag. A tap’s button-up waits up to the double-tap time'
-              : 'Off: every tap is an instant complete click; drag with a long press'
-          }
+          label={t.tapDrag}
+          hint={s.tapDrag ? t.tapDragOn : t.tapDragOff}
           on={s.tapDrag}
           onToggle={(v) => onChange({ tapDrag: v })}
         />
         <Segmented
-          label="Direct touch: one-finger drag when zoomed in"
+          label={t.directOneFinger}
           value={s.directOneFinger}
           options={[
-            { value: 'pan', label: 'Pan the view' },
-            { value: 'drag', label: 'Drag on the remote' },
+            { value: 'pan', label: t.panView },
+            { value: 'drag', label: t.dragRemote },
           ]}
           onChange={(v) => onChange({ directOneFinger: v })}
         />
-        <p className="omg-muted">When the whole desktop fits, a one-finger drag always drags.</p>
+        <p className="omg-muted">{t.fitsAlwaysDrags}</p>
         <Switch
-          label="Pointer lock for a mouse (trackpad mode)"
-          hint="Desktops and tablets: capture the mouse for relative movement (Esc releases)"
+          label={t.pointerLock}
+          hint={t.pointerLockHint}
           on={s.pointerLock}
           onToggle={(v) => onChange({ pointerLock: v })}
         />
         <Switch
-          label="Large cursor"
-          hint="Bigger, high-contrast pointer"
+          label={t.largeCursor}
+          hint={t.largeCursorHint}
           on={s.largeCursor}
           onToggle={(v) => onChange({ largeCursor: v })}
         />
       </Section>
 
-      <Section title="Scrolling">
+      <Section title={t.scrolling}>
         <Segmented
-          label="Two-finger drag"
+          label={t.twoFingerDrag}
           value={s.twoFingerDrag}
           options={[
-            { value: 'scroll', label: 'Scroll the remote' },
-            { value: 'pan', label: 'Pan the view' },
+            { value: 'scroll', label: t.scrollRemote },
+            { value: 'pan', label: t.panView },
           ]}
           onChange={(v) => onChange({ twoFingerDrag: v })}
         />
         <Switch
-          label="Natural scrolling"
-          hint="Content follows the fingers"
+          label={t.naturalScroll}
+          hint={t.naturalScrollHint}
           on={s.naturalScroll}
           onToggle={(v) => onChange({ naturalScroll: v })}
         />
         <Switch
-          label="Horizontal scrolling"
-          hint="Sideways two-finger drag sends Shift + wheel"
+          label={t.horizontalScroll}
+          hint={t.horizontalScrollHint}
           on={s.horizontalScroll}
           onToggle={(v) => onChange({ horizontalScroll: v })}
         />
       </Section>
 
-      <Section title="Timing">
+      <Section title={t.timing}>
         <Slider
           setting="longPressMs"
-          label="Long press"
+          label={t.longPress}
           value={s.longPressMs}
           format={ms}
           onChange={(v) => onChange({ longPressMs: v })}
         />
         <Slider
           setting="doubleTapWindowMs"
-          label="Double tap"
+          label={t.doubleTap}
           value={s.doubleTapWindowMs}
           format={ms}
           onChange={(v) => onChange({ doubleTapWindowMs: v })}
         />
         <Slider
           setting="tapSlopPx"
-          label="Tap tolerance"
+          label={t.tapTolerance}
           value={s.tapSlopPx}
           format={(v) => `${Math.round(v)} px`}
           onChange={(v) => onChange({ tapSlopPx: v })}
         />
       </Section>
 
-      <Section title="Keyboard">
+      <Section title={t.keyboard}>
         <Segmented
-          label="Soft keyboard text"
+          label={t.softKeyboardText}
           value={s.textInputMode}
           options={[
-            { value: 'live', label: 'Live' },
-            { value: 'word', label: 'Commit on word' },
+            { value: 'live', label: t.live },
+            { value: 'word', label: t.commitOnWord },
           ]}
           onChange={(v) => onChange({ textInputMode: v })}
         />
-        <p className="omg-muted">
-          If letters arrive wrong with your keyboard app, try Commit on word or the text input bar.
-        </p>
+        <p className="omg-muted">{t.keyboardTip}</p>
         <Switch
-          label="Text input bar"
-          hint="A visible field above the keyboard: type, dictate or paste, then Send"
+          label={t.textInputBar}
+          hint={t.textInputBarHint}
           on={s.textInputBar}
           onToggle={(v) => onChange({ textInputBar: v })}
         />
         <div className="omg-sheet__actions">
           <ChromeButton className="omg-btn--ghost" onClick={onEditKeyBar}>
-            Edit key bar…
+            {t.editKeyBar}
           </ChromeButton>
         </div>
       </Section>
 
-      <Section title="Screen">
+      <Section title={t.screen}>
         <Segmented
-          label="Split layout (display above a trackpad)"
+          label={t.splitLayout}
           value={s.splitLayout}
           options={[
-            { value: 'auto', label: 'When folded' },
-            { value: 'on', label: 'On' },
-            { value: 'off', label: 'Off' },
+            { value: 'auto', label: t.whenFolded },
+            { value: 'on', label: t.on },
+            { value: 'off', label: t.off },
           ]}
           onChange={(v) => onChange({ splitLayout: v })}
         />
         <Switch
-          label="Immersive full screen"
-          hint="Hide the system bars; the toolbar shrinks to an edge grip"
+          label={t.immersive}
+          hint={t.immersiveHint}
           on={s.immersive}
           onToggle={(v) => onChange({ immersive: v })}
         />

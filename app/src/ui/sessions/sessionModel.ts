@@ -41,7 +41,13 @@ export type SessionsAction =
   | { readonly type: 'close'; readonly id: string }
   | { readonly type: 'close-server'; readonly serverId: string }
   | { readonly type: 'suspend-all' }
-  | { readonly type: 'reconnect'; readonly id: string; readonly now: number }
+  /** Remount with a fresh tunnel; shows it unless `show` is false (background recovery). */
+  | {
+      readonly type: 'reconnect';
+      readonly id: string;
+      readonly now: number;
+      readonly show?: boolean;
+    }
   | { readonly type: 'reauth'; readonly id: string };
 
 export function sameTarget(a: SessionTarget, b: SessionTarget): boolean {
@@ -84,15 +90,23 @@ export function sessionsReducer(state: SessionsState, action: SessionsAction): S
           s.state === 'live' ? { ...s, state: 'suspended' } : s,
         ),
       };
-    case 'reconnect':
+    case 'reconnect': {
+      const show = action.show !== false;
       return {
         sessions: state.sessions.map((s) =>
           s.id === action.id
-            ? { ...s, state: 'live', epoch: s.epoch + 1, lastShownAt: action.now }
+            ? {
+                ...s,
+                state: 'live',
+                epoch: s.epoch + 1,
+                lastShownAt: show ? action.now : s.lastShownAt,
+              }
             : s,
         ),
-        activeId: state.sessions.some((s) => s.id === action.id) ? action.id : state.activeId,
+        activeId:
+          show && state.sessions.some((s) => s.id === action.id) ? action.id : state.activeId,
       };
+    }
     case 'reauth':
       return {
         ...state,
@@ -159,4 +173,46 @@ export function shouldLockOnResume(
 ): boolean {
   if (!enabled || backgroundedAt === null) return false;
   return now - backgroundedAt >= afterSeconds * 1000;
+}
+
+// ---- expired sign-in during a live session (T2.1) ---------------------------------------
+
+/** How long an automatic re-login counts as "just happened". */
+export const AUTH_RECOVERY_WINDOW_MS = 60_000;
+
+export type AuthRecovery =
+  /** Signed in again: remount the session with a fresh tunnel and the new token. */
+  | 'reconnect'
+  /** Silent re-login is not possible: show "Sign in again". */
+  | 'reauth'
+  /** Leave the session's own error showing (network trouble, or a real permission error). */
+  | 'keep-error';
+
+/**
+ * What to do when a live session's tunnel refused the sign-in (`isSignInFailure`), given
+ * the outcome of re-validating the server's sign-in (`AuthService.revalidate`, which uses
+ * the saved password only through the app-lock credential gate and only with plain-http
+ * consent; `'failed'` = it threw, e.g. offline). Pure.
+ *
+ * Loop guard: a session that was already recovered within the window and is refused again
+ * has a fresh token, so the refusal is a permission problem and reconnecting would loop.
+ * `'ok'` (the token is valid) only reconnects when the server was re-signed-in within the
+ * window, e.g. by another of its sessions; otherwise the refusal is real.
+ */
+export function decideAuthRecovery(input: {
+  readonly result: 'ok' | 'relogged' | 'needs-sign-in' | 'failed';
+  readonly now: number;
+  /** When this session last reconnected through this path. */
+  readonly sessionRecoveredAt?: number | undefined;
+  /** When the server last re-signed-in silently. */
+  readonly serverReloggedAt?: number | undefined;
+  readonly windowMs?: number;
+}): AuthRecovery {
+  const windowMs = input.windowMs ?? AUTH_RECOVERY_WINDOW_MS;
+  const recent = (t: number | undefined) => t !== undefined && input.now - t < windowMs;
+  if (input.result === 'needs-sign-in') return 'reauth';
+  if (input.result === 'failed') return 'keep-error';
+  if (recent(input.sessionRecoveredAt)) return 'keep-error';
+  if (input.result === 'relogged') return 'reconnect';
+  return recent(input.serverReloggedAt) ? 'reconnect' : 'keep-error';
 }

@@ -4,7 +4,7 @@
 
 | Path | Trust used | Custom CA on the device | Self-signed, not installed |
 |---|---|---|---|
-| REST API (`api/tokens`, tree) — native HTTP (`CapacitorHttp`) | OS trust store | Android: only if the app trusts user CAs (see below). iOS: yes, once the profile is installed **and** enabled in Settings › General › About › Certificate Trust Settings | Fails (reported as a certificate error) |
+| REST API (`api/tokens`, tree) — native HTTP (`CapacitorHttp`) | OS trust store | Android: yes, the app opts in to user-installed CAs (see below; untested on a device). iOS: yes, once the profile is installed **and** enabled in Settings › General › About › Certificate Trust Settings | Fails (reported as a certificate error) |
 | Session tunnel — WebSocket from the WebView | WebView/OS trust store | Same as above | Fails; the WebView gives the page no way to accept it |
 
 The app **never** offers "ignore TLS errors", globally or per server.
@@ -25,10 +25,16 @@ WebSocket does not, which on HTTPS usually means the WebView does not trust the 
 ### Android and user-installed CAs
 
 Since Android 7, apps ignore user-installed CAs unless their network security config opts in.
-`app/android/app/src/main/res/xml/network_security_config.xml` is owned by the release work; to
-support home CAs it needs `<certificates src="user" />` inside `<trust-anchors>` of the base
-config. That trusts every user-installed CA for this app only, which is the documented,
-OS-level way to do it (unlike disabling validation). Not changed here; listed as a follow-up.
+`app/android/app/src/main/res/xml/network_security_config.xml` now does: its `base-config`
+lists `<certificates src="system" />` **and** `<certificates src="user" />` in
+`<trust-anchors>` (there is no `domain-config` overriding it). That trusts the CAs the user
+installed on the device (Settings › Security › Encryption & credentials › Install a
+certificate › CA certificate), for this app only. It is the documented, OS-level way to do
+it, unlike disabling validation; a self-signed certificate that is not installed still fails.
+
+**Untested on a device**: in particular that the WebView's WebSocket (the session tunnel)
+honours the app's network security config the same way native HTTP does. Checklist:
+docs/checklists/app-device.md.
 
 ## Follow-up: a native tunnel bridge for per-server pinning
 

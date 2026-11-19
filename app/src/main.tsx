@@ -4,6 +4,8 @@ import './index.css';
 import App from './App.tsx';
 import { detectImageMimetypes } from './ui/launch/imageSupport.ts';
 import { createAppServices } from './ui/services/AppServices.ts';
+// By file path, not through ui/session/index.ts, so the session screen stays code-split.
+import { sweepDownloadCache } from './ui/session/downloadCache.ts';
 import { applyTheme } from './ui/theme/applyTheme.ts';
 
 const rootEl = document.getElementById('root');
@@ -35,6 +37,8 @@ async function boot(): Promise<void> {
   }
 
   void detectImageMimetypes();
+  // Files received in an earlier run and handed to the share sheet (downloads, print jobs).
+  void sweepDownloadCache();
   const services = createAppServices();
   // DIAG-1: uncaught errors go to the local log (message only; no stack, no data).
   window.addEventListener('error', (e) => services.log.error('app', e.message || 'error'));

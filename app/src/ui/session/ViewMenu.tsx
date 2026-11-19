@@ -1,6 +1,6 @@
 import { FIT_MODES, type FitMode } from '../../session/viewport/Viewport.ts';
 import { ChromeButton } from './ChromeButton.tsx';
-import { FIT_MODE_LABELS } from './settings.ts';
+import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
 export interface ViewMenuProps {
@@ -14,13 +14,6 @@ export interface ViewMenuProps {
   readonly onClose: () => void;
 }
 
-const DESCRIPTIONS: Record<FitMode, string> = {
-  'fit-screen': 'Whole desktop visible',
-  'fit-width': 'Fill the width, scroll down',
-  'fit-height': 'Fill the height, scroll sideways',
-  'one-to-one': 'One remote pixel per screen pixel',
-};
-
 /** DSP-1 view modes, reset zoom (DSP-2) and "match device size" (DSP-4). */
 export function ViewMenu({
   fitMode,
@@ -32,9 +25,11 @@ export function ViewMenu({
   onMatchDeviceSize,
   onClose,
 }: ViewMenuProps) {
+  const t = sessionStrings.view;
+  const fit = sessionStrings.fitModes;
   return (
-    <Sheet title="View" onClose={onClose}>
-      <div className="omg-choice-list" role="radiogroup" aria-label="View mode">
+    <Sheet title={t.title} onClose={onClose}>
+      <div className="omg-choice-list" role="radiogroup" aria-label={t.modeGroup}>
         {FIT_MODES.map((m) => (
           <ChromeButton
             key={m}
@@ -43,23 +38,31 @@ export function ViewMenu({
             className={m === fitMode ? 'omg-choice omg-choice--on' : 'omg-choice'}
             onClick={() => onFitMode(m)}
           >
-            <span className="omg-choice__label">{FIT_MODE_LABELS[m]}</span>
-            <span className="omg-choice__hint">{DESCRIPTIONS[m]}</span>
+            <span className="omg-choice__label">{fit.labels[m]}</span>
+            <span className="omg-choice__hint">{fit.hints[m]}</span>
           </ChromeButton>
         ))}
       </div>
       <div className="omg-sheet__actions">
-        <ChromeButton className="omg-btn--ghost" onClick={() => onZoom(0.8)} aria-label="Zoom out">
-          Zoom −
+        <ChromeButton
+          className="omg-btn--ghost"
+          onClick={() => onZoom(0.8)}
+          aria-label={sessionStrings.toolbar.zoomOut}
+        >
+          {t.zoomOutButton}
         </ChromeButton>
-        <ChromeButton className="omg-btn--ghost" onClick={() => onZoom(1.25)} aria-label="Zoom in">
-          Zoom +
+        <ChromeButton
+          className="omg-btn--ghost"
+          onClick={() => onZoom(1.25)}
+          aria-label={sessionStrings.toolbar.zoomIn}
+        >
+          {t.zoomInButton}
         </ChromeButton>
         <ChromeButton className="omg-btn--ghost" onClick={onResetZoom}>
-          Reset zoom
+          {t.resetZoom}
         </ChromeButton>
       </div>
-      <p className="omg-muted">Tip: a three-finger double tap also resets the zoom.</p>
+      <p className="omg-muted">{t.tip}</p>
       <ChromeButton
         role="switch"
         aria-checked={matchDeviceSize}
@@ -67,11 +70,9 @@ export function ViewMenu({
         onClick={() => onMatchDeviceSize(!matchDeviceSize)}
       >
         <span>
-          <span className="omg-choice__label">Match device size</span>
+          <span className="omg-choice__label">{t.matchDevice}</span>
           <span className="omg-choice__hint">
-            {protocol === 'vnc'
-              ? 'Most VNC servers cannot resize; the request may be ignored'
-              : 'Ask the remote to resize to this screen (RDP with display update, SSH)'}
+            {protocol === 'vnc' ? t.matchHintVnc : t.matchHint}
           </span>
         </span>
         <span

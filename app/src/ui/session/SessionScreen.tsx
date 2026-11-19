@@ -44,7 +44,9 @@ import {
   type KeepAwakeState,
 } from './platform.ts';
 import { SessionController, type SessionLogLevel } from './SessionController.ts';
-import { POINTER_MODE_LABELS, normalizeSessionSettings, type SessionSettings } from './settings.ts';
+import { sessionStrings } from './sessionStrings.ts';
+import { normalizeSessionSettings, type SessionSettings } from './settings.ts';
+import { isSignInFailure } from './status.ts';
 import { TextInputBar } from './TextInputBar.tsx';
 import { StatusOverlay } from './StatusOverlay.tsx';
 import { Toolbar } from './Toolbar.tsx';
@@ -82,6 +84,12 @@ export interface SessionScreenProps {
   onLog?: (entry: SessionLogEntry) => void;
   /** Back to the connection list, keeping the session open (shown in the More sheet). */
   onMinimize?: () => void;
+  /**
+   * The tunnel refused the Guacamole sign-in (`isSignInFailure`: an expired or revoked
+   * token, typically on a reconnect after the connection dropped). Called once per ended
+   * connection; the shell can sign in again and remount the session with a fresh tunnel.
+   */
+  onSignInExpired?: () => void;
 }
 
 /** Longest clipboard text typed as keystrokes (each character is two key events). */
@@ -93,25 +101,13 @@ const TERMINAL_PROTOCOLS = new Set(['ssh', 'telnet', 'kubernetes']);
 type Menu = 'view' | 'combos' | 'input' | 'keybar' | 'more' | 'files' | 'clipboard' | 'info' | null;
 type KeyBarMode = 'auto' | 'shown' | 'hidden';
 
-const POINTER_MODE_HINT: Readonly<Record<PointerMode, string>> = {
-  direct: 'Tap to click, two-finger tap or long-press for right click',
-  trackpad: 'Drag to move the pointer, tap to click, two-finger tap for right click',
-  touch: 'Touches go to the remote; zoom with the toolbar',
-};
-
-const KEEP_AWAKE_TEXT: Readonly<Record<KeepAwakeState, string>> = {
-  native: 'on (native)',
-  'wake-lock': 'on (screen wake lock)',
-  unsupported: 'not supported in this WebView',
-  denied: 'refused by the system',
-  released: 'off',
-};
-
 /** Default split: the display gets this share of the height. */
 const SPLIT_DISPLAY_SHARE = 0.58;
 
 export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const { title, onExit, isDemo, protocol, onMinimize } = props;
+  // Read at render time: the table follows the app language (see sessionStrings.ts).
+  const t = sessionStrings;
   const active = props.active !== false;
   const proto = (protocol ?? '').toLowerCase();
   const terminal = TERMINAL_PROTOCOLS.has(proto);
@@ -172,7 +168,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
         clipDispatch({ type: 'add', text, direction: 'from-remote', at: Date.now() });
         if (!latest.current.settings.clipboardRemoteToDevice) return;
         void writeDeviceClipboard(text).then((ok) => {
-          if (ok) setToast({ id: Date.now(), text: 'Remote clipboard copied to this device' });
+          if (ok) setToast({ id: Date.now(), text: sessionStrings.toasts.remoteClipboardCopied });
         });
       },
       onLog: (entry) => latest.current.onLog?.(entry),
@@ -222,6 +218,12 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   useEffect(() => {
     controller.updateSettings(settings);
   }, [controller, settings]);
+
+  // ---- Expired sign-in: hand over to the shell (once per ended connection)
+  const signInFailed = isSignInFailure(snap.phase);
+  useEffect(() => {
+    if (signInFailed) latest.current.onSignInExpired?.();
+  }, [signInFailed]);
 
   // ---- Shown / hidden (the shell keeps hidden sessions mounted)
   useEffect(() => {
@@ -310,7 +312,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
         if (controller.sendClipboard(r.text)) {
           lastAutoSent.current = r.text;
           clipDispatch({ type: 'add', text: r.text, direction: 'to-remote', at: Date.now() });
-          setToast({ id: Date.now(), text: 'Device clipboard sent to the remote' });
+          setToast({ id: Date.now(), text: sessionStrings.toasts.deviceClipboardSent });
         }
       });
     });
@@ -332,7 +334,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     const i = cycle.indexOf(settings.pointerMode);
     const next = cycle[(i + 1) % cycle.length] ?? 'direct';
     onSettingsChange({ pointerMode: next });
-    showToast(`${POINTER_MODE_LABELS[next]}: ${POINTER_MODE_HINT[next]}`);
+    showToast(t.toasts.pointerMode(t.pointerModes.labels[next], t.pointerModes.toastHints[next]));
   };
 
   const runComboText = (text: string) => {
@@ -367,42 +369,39 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const paste = () => {
     void readDeviceClipboard().then((r) => {
       if (!r.ok) return showToast(r.reason);
-      if (r.text === '') return showToast('The device clipboard is empty');
+      const s = sessionStrings.toasts;
+      if (r.text === '') return showToast(s.clipboardEmpty);
       if (sendToRemote(r.text)) {
         const n = [...r.text].length;
-        showToast(
-          terminal
-            ? `Clipboard sent (${n} characters). Paste with Ctrl+Shift+V or a right-click.`
-            : `Clipboard sent (${n} characters). Paste on the remote.`,
-        );
+        showToast(terminal ? s.clipboardSentTerminal(n) : s.clipboardSent(n));
       } else {
-        showToast('Not connected');
+        showToast(sessionStrings.common.notConnected);
       }
     });
   };
 
   const typeText = (text: string) => {
-    if (!controller.isConnected()) return showToast('Not connected');
+    if (!controller.isConnected()) return showToast(sessionStrings.common.notConnected);
     const chars = [...text];
     controller.typeText(chars.slice(0, MAX_TYPED_CHARS).join(''));
     showToast(
       chars.length > MAX_TYPED_CHARS
-        ? `Typed the first ${MAX_TYPED_CHARS} characters`
-        : `Typed ${chars.length} characters`,
+        ? sessionStrings.toasts.typedFirst(MAX_TYPED_CHARS)
+        : sessionStrings.toasts.typed(chars.length),
     );
   };
 
   const typeClipboard = () => {
     void readDeviceClipboard().then((r) => {
       if (!r.ok) return showToast(r.reason);
-      if (r.text === '') return showToast('The device clipboard is empty');
+      if (r.text === '') return showToast(sessionStrings.toasts.clipboardEmpty);
       typeText(r.text);
     });
   };
 
   const runCombo = (combo: Combo, label: string) => {
     controller.runCombo(combo);
-    showToast(`Sent ${label}`);
+    showToast(sessionStrings.toasts.sentCombo(label));
   };
 
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -444,8 +443,8 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
           ref={gestureRef}
           className="omg-gesture"
           role="application"
-          aria-label={`Remote desktop: ${title}`}
-          aria-roledescription="remote desktop"
+          aria-label={t.screen.remoteDesktop(title)}
+          aria-roledescription={t.screen.remoteDesktopRole}
         />
       </div>
       {split && (
@@ -453,11 +452,11 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
           ref={surfaceRef}
           className="omg-trackpad"
           role="application"
-          aria-label="Trackpad for the remote pointer"
-          aria-roledescription="trackpad"
+          aria-label={t.screen.trackpadSurface}
+          aria-roledescription={t.screen.trackpadRole}
         >
           <span className="omg-trackpad__hint" aria-hidden="true">
-            Trackpad
+            {t.common.trackpad}
           </span>
         </div>
       )}
@@ -465,7 +464,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       <textarea
         ref={fieldRef}
         className="omg-text-input"
-        aria-label="Keyboard input for the remote desktop"
+        aria-label={t.screen.keyboardInput}
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
@@ -481,7 +480,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       <div ref={chromeRef} className="omg-chrome" hidden={!active}>
         {active && (
           <>
-            {isDemo && <div className="omg-badge">Demo</div>}
+            {isDemo && <div className="omg-badge">{t.common.demo}</div>}
             <div className="omg-dock">
               <Toolbar
                 expanded={toolbarExpanded}
@@ -496,11 +495,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 immersive={settings.immersive}
                 keyboardActive={snap.keyboardActive}
                 onToggleKeyboard={toggleKeyboard}
-                pasteHint={
-                  terminal
-                    ? 'Send the device clipboard to the terminal (then Ctrl+Shift+V)'
-                    : 'Paste device clipboard to the remote'
-                }
+                pasteHint={terminal ? t.screen.pasteHintTerminal : t.screen.pasteHint}
                 onPaste={paste}
                 onTypeClipboard={typeClipboard}
                 onOpenMore={() => setMenu('more')}
@@ -543,7 +538,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 onToggleAudio={() => {
                   const muted = !settings.audioMuted;
                   onSettingsChange({ audioMuted: muted });
-                  showToast(muted ? 'Sound off' : 'Sound on');
+                  showToast(muted ? t.toasts.soundOff : t.toasts.soundOn);
                 }}
                 onToggleKeyBar={() => {
                   setKeyBarMode(keyBarVisible ? 'hidden' : 'shown');
@@ -553,7 +548,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 onCombos={() => setMenu('combos')}
                 onCtrlAltDel={() => {
                   runComboText('Ctrl+Alt+Del');
-                  showToast('Sent Ctrl+Alt+Del');
+                  showToast(t.toasts.sentCombo('Ctrl+Alt+Del'));
                   setMenu(null);
                 }}
                 onTypeClipboard={() => {
@@ -589,7 +584,9 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 onType={typeText}
                 onCopyToDevice={(text) => {
                   void writeDeviceClipboard(text).then((ok) =>
-                    showToast(ok ? 'Copied to this device' : 'Could not copy to this device'),
+                    showToast(
+                      ok ? sessionStrings.toasts.copiedToDevice : sessionStrings.toasts.copyFailed,
+                    ),
                   );
                 }}
                 onReadDevice={async () => {
@@ -611,12 +608,16 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 isDemo={isDemo}
                 settings={settings}
                 getInfo={controller.getInfo}
-                keepAwake={settings.keepAwake ? KEEP_AWAKE_TEXT[keepAwakeState] : 'off in settings'}
+                keepAwake={
+                  settings.keepAwake
+                    ? t.info.keepAwake[keepAwakeState]
+                    : t.info.keepAwakeOffInSettings
+                }
                 mutableArguments={snap.mutableArguments}
                 onSetArgument={(name, value) => {
                   const ok = controller.setArgument(name, value);
                   showToast(
-                    ok ? 'Setting sent to the server' : 'This setting can no longer be changed',
+                    ok ? sessionStrings.toasts.argumentSent : sessionStrings.toasts.argumentLocked,
                   );
                   return ok;
                 }}
@@ -630,17 +631,21 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 protocol={protocol}
                 onFitMode={(m) => {
                   onSettingsChange({ fitMode: m });
-                  showToast(`View: ${m === settings.fitMode ? 'reset' : m.replace(/-/g, ' ')}`);
+                  showToast(
+                    m === settings.fitMode
+                      ? t.toasts.viewReset
+                      : t.toasts.view(t.fitModes.labels[m].toLowerCase()),
+                  );
                   if (m === settings.fitMode) controller.resetZoom();
                 }}
                 onResetZoom={() => {
                   controller.resetZoom();
-                  showToast('Zoom reset');
+                  showToast(t.toasts.zoomReset);
                 }}
                 onZoom={(f) => controller.zoomBy(f)}
                 onMatchDeviceSize={(on) => {
                   onSettingsChange({ matchDeviceSize: on });
-                  showToast(on ? 'Matching the remote to this screen' : 'Remote size left as is');
+                  showToast(on ? t.toasts.matchOn : t.toasts.matchOff);
                 }}
                 onClose={closeMenu}
               />

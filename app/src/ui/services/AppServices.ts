@@ -15,6 +15,7 @@ import type { SecureStore } from '../../core/storage/SecureStore.ts';
 import { AuthService } from './AuthService.ts';
 import { getDevServer, type DevServer } from './devServer.ts';
 import { SettingsStore } from './SettingsStore.ts';
+import { isShareServerId, ShareProfiles } from './shareSessions.ts';
 import { strings } from '../strings.ts';
 
 /** How secrets are kept on this platform, for the UI to say so honestly (SRV-3). */
@@ -34,6 +35,8 @@ export interface AppServices {
   readonly auth: AuthService;
   readonly settings: SettingsStore;
   readonly devServer: DevServer | undefined;
+  /** Share-link sessions opened in this run: memory-only virtual servers (CON-6). */
+  readonly shares: ShareProfiles;
   /** Local-only diagnostics log (DIAG-1). */
   readonly log: Logger;
   /** Biometric / device-credential app lock (SRV-6). */
@@ -51,7 +54,7 @@ export function createAppServices(): AppServices {
     : secure.persistent
       ? 'insecure-dev'
       : 'memory';
-  const profiles = new ProfileStore(kv, { secureStore: secure });
+  const profiles = new ProfileStore(kv, { secureStore: secure, isEphemeral: isShareServerId });
   const api = new GuacApi(http, { timeoutMs: 20_000 });
   const probeApi = new GuacApi(http, { timeoutMs: 6_000 });
   const auth = new AuthService(api, secure, profiles, log);
@@ -76,6 +79,7 @@ export function createAppServices(): AppServices {
     auth,
     settings: new SettingsStore(kv),
     devServer,
+    shares: new ShareProfiles(),
     log,
     lock,
   };

@@ -13,6 +13,7 @@ import {
   IconSliders,
   IconVolume,
 } from './icons.tsx';
+import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
 export interface MoreSheetProps {
@@ -85,69 +86,70 @@ export function MoreSheet(p: MoreSheetProps) {
     const t = setTimeout(() => setConfirmExit(false), CONFIRM_MS);
     return () => clearTimeout(t);
   }, [confirmExit]);
+  const t = sessionStrings.more;
 
   return (
-    <Sheet title="More" onClose={p.onClose}>
+    <Sheet title={t.title} onClose={p.onClose}>
       <div className="omg-tiles">
         <Tile
           icon={<IconFolder />}
-          label="Files"
+          label={t.files}
           hint={
             p.activeTransfers > 0
-              ? `${p.activeTransfers} running`
+              ? t.running(p.activeTransfers)
               : p.hasFilesystem
-                ? 'Browse remote'
-                : 'Send or receive'
+                ? t.browseRemote
+                : t.sendOrReceive
           }
           onClick={p.onFiles}
         />
         <Tile
           icon={<IconClipboard />}
-          label="Clipboard"
-          hint="View, edit, send"
+          label={t.clipboard}
+          hint={t.clipboardHint}
           onClick={p.onClipboard}
         />
         <Tile
           icon={<IconVolume muted={p.audioMuted} />}
-          label={p.audioMuted ? 'Sound off' : 'Sound on'}
-          hint={p.audioActive ? undefined : 'No audio yet'}
+          label={p.audioMuted ? sessionStrings.toasts.soundOff : sessionStrings.toasts.soundOn}
+          hint={p.audioActive ? undefined : t.noAudio}
           pressed={!p.audioMuted}
           onClick={p.onToggleAudio}
         />
         <Tile
           icon={<IconKeys />}
-          label="Extra keys"
+          label={t.extraKeys}
           pressed={p.keyBarOpen}
           onClick={p.onToggleKeyBar}
         />
-        <Tile icon={<IconCombo />} label="Key combos" onClick={p.onCombos} />
+        <Tile icon={<IconCombo />} label={t.keyCombos} onClick={p.onCombos} />
         {p.showCtrlAltDel && (
           <Tile
             icon={<IconShield />}
             label="Ctrl+Alt+Del"
-            hint="Send now"
+            hint={t.sendNow}
             onClick={p.onCtrlAltDel}
           />
         )}
         <Tile
           icon={<IconPaste />}
-          label="Type clipboard"
-          hint="As keystrokes"
+          label={t.typeClipboard}
+          hint={t.asKeystrokes}
           onClick={p.onTypeClipboard}
         />
-        <Tile icon={<IconSliders />} label="Input options" onClick={p.onInput} />
-        <Tile icon={<IconInfo />} label="Session info" onClick={p.onInfo} />
+        <Tile icon={<IconSliders />} label={t.inputOptions} onClick={p.onInput} />
+        <Tile icon={<IconInfo />} label={t.sessionInfo} onClick={p.onInfo} />
         {p.onMinimize && (
           <Tile
             icon={<IconBack />}
-            label="Back to connections"
-            hint="Keep session open"
+            label={t.backToConnections}
+            hint={t.keepOpen}
             onClick={p.onMinimize}
           />
         )}
         <Tile
           icon={<IconPower />}
-          label={confirmExit ? 'Tap again to disconnect' : 'Disconnect'}
+          label={confirmExit ? t.tapAgain : t.disconnect}
           danger
           pressed={confirmExit}
           onClick={() => {

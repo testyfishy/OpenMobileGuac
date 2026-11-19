@@ -10,6 +10,7 @@ import { DEMO_AUTH_SESSION, DEMO_PROFILE_ID, DemoTunnel } from '../integration/d
 import {
   DEFAULT_SESSION_SETTINGS,
   SessionScreen,
+  type SessionLogEntry,
   type SessionSettings,
 } from '../integration/session.ts';
 import { useBackInterceptor } from '../nav/NavContext.ts';
@@ -24,14 +25,8 @@ import {
 } from '../settings/settingsModel.ts';
 import { strings } from '../strings.ts';
 import { deviceTimezone, makeConnectDataBuilder } from './connectData.ts';
+import { installKeepAwake } from './keepAwake.ts';
 import { currentMediaSupport } from './mediaSupport.ts';
-
-/** Optional `SessionScreen` props agreed with the session work (see SessionLayer). */
-interface ShellSessionProps {
-  readonly active: boolean;
-  readonly onThumbnail: (dataUrl: string) => void;
-  readonly onLog: (entry: { level: 'debug' | 'info' | 'warn' | 'error'; message: string }) => void;
-}
 
 export interface SessionHostProps {
   readonly session: OpenSession;
@@ -43,7 +38,11 @@ export interface SessionHostProps {
   readonly onExit: () => void;
   /** The server no longer has a valid sign-in for this session. */
   readonly onNeedsSignIn: () => void;
+  /** The tunnel refused the sign-in during the session (expired token). */
+  readonly onSignInExpired: () => void;
 }
+
+installKeepAwake();
 
 /**
  * Launches `SessionScreen` for one open session: a fresh tunnel per (re)connect, the
@@ -57,6 +56,7 @@ export default function SessionHost({
   onHide,
   onExit,
   onNeedsSignIn,
+  onSignInExpired,
 }: SessionHostProps) {
   const services = useServices();
   const { settings: app } = useAppSettings();
@@ -123,7 +123,10 @@ export default function SessionHost({
     [isDemo, services.auth, serverId, target.dataSource, target.identifier, target.type],
   );
 
-  const signedIn = isDemo || services.auth.current(serverId) !== undefined;
+  // Checked once per mount (each reconnect remounts). Later sign-in changes are the
+  // provider's call: during a silent re-login the token is briefly gone, and a re-render in
+  // that window must not tear the session down.
+  const [signedIn] = useState(() => isDemo || services.auth.current(serverId) !== undefined);
   // Hardware back in the visible session asks: keep open, disconnect, or cancel.
   useBackInterceptor(active && signedIn && stored !== undefined && !confirmExit, () =>
     setConfirmExit(true),
@@ -136,22 +139,21 @@ export default function SessionHost({
     onNeedsSignIn();
   }, [signedIn, onNeedsSignIn]);
 
-  // Agreed optional SessionScreen props (active, onThumbnail, onLog). Passed through a spread
-  // so this compiles both before and after they land in SessionScreenProps.
+  // CON-4 thumbnails come from the session screen itself (≤ 320 px JPEG).
   const thumbnailsOn = app.thumbnails;
-  const extras: ShellSessionProps = useMemo(
-    () => ({
-      active,
-      onThumbnail: (dataUrl: string) => {
-        if (!thumbnailsOn || !dataUrl.startsWith('data:image/')) return;
-        void services.profiles
-          .setThumbnail(serverId, ref, { dataUrl, at: Date.now() })
-          .catch(() => undefined);
-      },
-      onLog: (entry: { level: 'debug' | 'info' | 'warn' | 'error'; message: string }) =>
-        services.log.log(entry.level, 'session', entry.message),
-    }),
-    [active, thumbnailsOn, services.profiles, services.log, serverId, ref],
+  const onThumbnail = useCallback(
+    (dataUrl: string) => {
+      if (!thumbnailsOn || !dataUrl.startsWith('data:image/')) return;
+      void services.profiles
+        .setThumbnail(serverId, ref, { dataUrl, at: Date.now() })
+        .catch(() => undefined);
+    },
+    [thumbnailsOn, services.profiles, serverId, ref],
+  );
+  // DIAG-1: the session's lifecycle log goes to the local diagnostics log.
+  const onLog = useCallback(
+    (entry: SessionLogEntry) => services.log.log(entry.level, 'session', entry.message),
+    [services.log],
   );
 
   const exit = useCallback(() => {
@@ -178,7 +180,11 @@ export default function SessionHost({
         onSettingsChange={onSettingsChange}
         onExit={exit}
         isDemo={isDemo}
-        {...(extras as object)}
+        active={active}
+        onThumbnail={onThumbnail}
+        onLog={onLog}
+        onMinimize={onHide}
+        {...(isDemo ? {} : { onSignInExpired })}
       />
       {confirmExit && active ? (
         <Dialog

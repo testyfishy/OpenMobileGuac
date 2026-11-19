@@ -1,14 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import { useProfilesVersion, useServices } from '../services/context.ts';
 import { DEMO_PROFILE_ID } from '../integration/demoProfile.ts';
 import { DEV_SERVER_ID } from '../services/devServer.ts';
+import { isShareServerId } from '../services/shareSessions.ts';
 
 /** The built-in Demo server is virtual: never in `ProfileStore`, never touches the network. */
 export const DEMO_SERVER_ID = DEMO_PROFILE_ID;
 
 export function isVirtualServerId(id: string): boolean {
-  return id === DEMO_SERVER_ID || id === DEV_SERVER_ID;
+  return id === DEMO_SERVER_ID || id === DEV_SERVER_ID || isShareServerId(id);
+}
+
+/** Share-link sessions opened in this run (CON-6); re-renders when one is added or removed. */
+export function useShareProfiles(): readonly ServerProfile[] {
+  const { shares } = useServices();
+  return useSyncExternalStore(shares.onChange, () => shares.list());
 }
 
 /** Saved profiles in user order; reloads when the list changes. */
@@ -34,13 +41,16 @@ export type ProfileLookup =
   | { readonly status: 'demo' }
   | { readonly status: 'ready'; readonly profile: ServerProfile; readonly virtual: boolean };
 
-/** Resolves a server id (saved, dev or demo) to its profile. */
+/** Resolves a server id (saved, dev, share link or demo) to its profile. */
 export function useServerProfile(id: string | undefined): ProfileLookup {
   const services = useServices();
   const { version } = useProfilesVersion();
   const [saved, setSaved] = useState<{ id: string; profile: ServerProfile | undefined }>();
   const dev = services.devServer;
-  const needsLookup = id !== undefined && id !== DEMO_SERVER_ID && id !== dev?.profile.id;
+  const shares = useShareProfiles();
+  const share = id !== undefined ? shares.find((p) => p.id === id) : undefined;
+  const needsLookup =
+    id !== undefined && id !== DEMO_SERVER_ID && id !== dev?.profile.id && !isShareServerId(id);
   useEffect(() => {
     if (!needsLookup || id === undefined) return undefined;
     let live = true;
@@ -55,6 +65,9 @@ export function useServerProfile(id: string | undefined): ProfileLookup {
   if (id === undefined) return { status: 'missing' };
   if (id === DEMO_SERVER_ID) return { status: 'demo' };
   if (dev && id === dev.profile.id) return { status: 'ready', profile: dev.profile, virtual: true };
+  if (isShareServerId(id)) {
+    return share ? { status: 'ready', profile: share, virtual: true } : { status: 'missing' };
+  }
   if (!saved || saved.id !== id) return { status: 'loading' };
   return saved.profile
     ? { status: 'ready', profile: saved.profile, virtual: false }

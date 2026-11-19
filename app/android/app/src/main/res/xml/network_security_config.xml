@@ -3,13 +3,17 @@
   OpenMobileGuac connects to user-specified, self-hosted Guacamole servers that commonly
   live on private networks (Tailscale 100.x addresses, MagicDNS names, LAN hosts) and are
   served over plain http:// and ws://. The hosts are not known at build time, so cleartext
-  is permitted for all destinations. HTTPS connections still use the system trust store.
-  See docs/release.md ("Network configuration").
+  is permitted for all destinations.
+  HTTPS trusts the system CAs plus CAs the user installed on the device themselves
+  (Settings > Security > Encryption & credentials), so a home or company private CA works
+  (SRV-8). Certificate validation is never disabled. See docs/release.md ("Network
+  configuration") and docs/tls.md.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
+            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>

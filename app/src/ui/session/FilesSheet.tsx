@@ -12,6 +12,7 @@ import {
 } from '../../session/transfer/TransferModel.ts';
 import { ChromeButton } from './ChromeButton.tsx';
 import { IconBack, IconDownload, IconFile, IconFolder, IconPrint, IconUpload } from './icons.tsx';
+import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 import type { TransferManager } from './transfers.ts';
 
@@ -41,17 +42,18 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
   }, [fs, tab, transfers]);
 
   const pick = () => fileInput.current?.click();
+  const t = sessionStrings.files;
 
   return (
-    <Sheet title="Files" onClose={onClose} className="omg-sheet--tall">
-      <div className="omg-segmented" role="tablist" aria-label="Files view">
+    <Sheet title={t.title} onClose={onClose} className="omg-sheet--tall">
+      <div className="omg-segmented" role="tablist" aria-label={t.tabs}>
         <ChromeButton
           role="tab"
           aria-selected={tab === 'files'}
           className={tab === 'files' ? 'omg-seg omg-seg--on' : 'omg-seg'}
           onClick={() => setTab('files')}
         >
-          Remote files
+          {t.remoteFiles}
         </ChromeButton>
         <ChromeButton
           role="tab"
@@ -59,7 +61,7 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
           className={tab === 'transfers' ? 'omg-seg omg-seg--on' : 'omg-seg'}
           onClick={() => setTab('transfers')}
         >
-          Transfers{running > 0 ? ` (${running})` : ''}
+          {running > 0 ? t.transfersRunning(running) : t.transfers}
         </ChromeButton>
       </div>
 
@@ -80,19 +82,15 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
       />
 
       {tab === 'files' && (
-        <div role="tabpanel" aria-label="Remote files" className="omg-section">
-          {!connected && <p className="omg-muted">Not connected.</p>}
+        <div role="tabpanel" aria-label={t.remoteFiles} className="omg-section">
+          {!connected && <p className="omg-muted">{sessionStrings.common.notConnectedSentence}</p>}
           {connected && !fs && (
             <>
-              <p className="omg-muted">
-                This connection does not expose a file browser. You can still send files: the server
-                puts them where the connection is configured to (for RDP, usually the shared drive).
-                If file transfer is disabled, the server refuses them.
-              </p>
+              <p className="omg-muted">{t.noBrowser}</p>
               <div className="omg-sheet__actions">
                 <ChromeButton className="omg-btn--primary" onClick={pick}>
                   <IconUpload />
-                  Send file to remote
+                  {t.sendFile}
                 </ChromeButton>
               </div>
             </>
@@ -100,7 +98,7 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
           {connected && fs && (
             <>
               {snap.filesystems.length > 1 && (
-                <div className="omg-segmented" aria-label="Filesystem">
+                <div className="omg-segmented" aria-label={t.filesystem}>
                   {snap.filesystems.map((f) => (
                     <ChromeButton
                       key={f.id}
@@ -113,11 +111,11 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
                   ))}
                 </div>
               )}
-              <nav className="omg-crumbs" aria-label="Folder path">
+              <nav className="omg-crumbs" aria-label={t.folderPath}>
                 {fs.cwd !== ROOT_STREAM && (
                   <ChromeButton
                     className="omg-btn--icon"
-                    aria-label="Up one folder"
+                    aria-label={t.upOneFolder}
                     onClick={() => transfers.list(fs.id, parentStreamName(fs.cwd))}
                   >
                     <IconBack />
@@ -137,10 +135,10 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
               <div className="omg-sheet__actions">
                 <ChromeButton className="omg-btn--primary" onClick={pick}>
                   <IconUpload />
-                  Upload here
+                  {t.uploadHere}
                 </ChromeButton>
                 <ChromeButton className="omg-btn--ghost" onClick={() => transfers.list(fs.id)}>
-                  Refresh
+                  {sessionStrings.common.refresh}
                 </ChromeButton>
               </div>
               {fs.error && (
@@ -150,17 +148,17 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
               )}
               {fs.loading ? (
                 <p className="omg-muted" aria-live="polite">
-                  Loading…
+                  {sessionStrings.common.loading}
                 </p>
               ) : fs.entries.length === 0 && !fs.error ? (
-                <p className="omg-muted">This folder is empty.</p>
+                <p className="omg-muted">{t.emptyFolder}</p>
               ) : (
-                <ul className="omg-list" aria-label={`Contents of ${fs.cwd}`}>
+                <ul className="omg-list" aria-label={t.contents(fs.cwd)}>
                   {fs.entries.map((e) => (
                     <li key={e.streamName}>
                       <ChromeButton
                         className="omg-list__item"
-                        aria-label={e.isDirectory ? `Open folder ${e.name}` : `Download ${e.name}`}
+                        aria-label={e.isDirectory ? t.openFolder(e.name) : t.download(e.name)}
                         onClick={() => {
                           if (e.isDirectory) transfers.list(fs.id, e.streamName);
                           else {
@@ -189,11 +187,9 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
       )}
 
       {tab === 'transfers' && (
-        <div role="tabpanel" aria-label="Transfers" className="omg-section">
+        <div role="tabpanel" aria-label={t.transfers} className="omg-section">
           {snap.transfers.length === 0 ? (
-            <p className="omg-muted">
-              No transfers yet. Files the remote sends (including RDP print jobs) appear here.
-            </p>
+            <p className="omg-muted">{t.noTransfers}</p>
           ) : (
             <ul className="omg-list">
               {[...snap.transfers].reverse().map((t) => (
@@ -204,12 +200,12 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
           <div className="omg-sheet__actions">
             {connected && !fs && (
               <ChromeButton className="omg-btn--ghost" onClick={pick}>
-                Send file to remote
+                {t.sendFile}
               </ChromeButton>
             )}
             {snap.transfers.some(isFinished) && (
               <ChromeButton className="omg-btn--ghost" onClick={() => transfers.clearFinished()}>
-                Clear finished
+                {t.clearFinished}
               </ChromeButton>
             )}
           </div>
@@ -220,27 +216,29 @@ export function FilesSheet({ transfers, connected, initialTab, onClose }: FilesS
 }
 
 function TransferRow({ t, onCancel }: { t: Transfer; onCancel: () => void }) {
+  const s = sessionStrings.files;
   const frac = progressFraction(t);
-  const label = t.kind === 'print' ? 'Print job' : t.direction === 'upload' ? 'Upload' : 'Download';
+  const label =
+    t.kind === 'print' ? s.kindPrint : t.direction === 'upload' ? s.kindUpload : s.kindDownload;
   let status: string;
   switch (t.state) {
     case 'waiting':
-      status = 'Waiting for the server…';
+      status = s.waiting;
       break;
     case 'active':
       status =
         t.size !== null
-          ? `${formatBytes(t.bytes)} of ${formatBytes(t.size)}`
-          : `${formatBytes(t.bytes)} received`;
+          ? s.progressOf(formatBytes(t.bytes), formatBytes(t.size))
+          : s.received(formatBytes(t.bytes));
       break;
     case 'done':
-      status = `Done · ${formatBytes(t.bytes)}${t.outcome ? ` · ${t.outcome}` : ''}`;
+      status = `${s.done(formatBytes(t.bytes))}${t.outcome ? ` · ${t.outcome}` : ''}`;
       break;
     case 'cancelled':
-      status = 'Cancelled';
+      status = s.cancelled;
       break;
     case 'error':
-      status = t.error ?? 'Failed';
+      status = t.error ?? s.failed;
       break;
   }
   return (
@@ -259,7 +257,7 @@ function TransferRow({ t, onCancel }: { t: Transfer; onCancel: () => void }) {
           {label}: {t.name}
         </span>
         {t.destination && t.direction === 'upload' && (
-          <span className="omg-choice__hint">To {t.destination}</span>
+          <span className="omg-choice__hint">{s.to(t.destination)}</span>
         )}
         <span
           className={
@@ -273,7 +271,7 @@ function TransferRow({ t, onCancel }: { t: Transfer; onCancel: () => void }) {
           <span
             className="omg-progress"
             role="progressbar"
-            aria-label={`${label} progress`}
+            aria-label={s.progress(label)}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={frac === null ? undefined : Math.round(frac * 100)}
@@ -285,7 +283,7 @@ function TransferRow({ t, onCancel }: { t: Transfer; onCancel: () => void }) {
       </span>
       {!isFinished(t) && (
         <ChromeButton className="omg-btn--ghost omg-btn--small" onClick={onCancel}>
-          Cancel
+          {sessionStrings.common.cancel}
         </ChromeButton>
       )}
     </li>

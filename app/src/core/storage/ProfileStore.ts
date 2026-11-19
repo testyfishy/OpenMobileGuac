@@ -86,6 +86,11 @@ export interface ProfileStoreOptions {
   readonly now?: () => number;
   /** Maximum number of recents kept per profile. Default 20. */
   readonly maxRecents?: number;
+  /**
+   * Ids of memory-only (virtual) servers whose per-server data must never be written, such
+   * as share-link sessions (CON-6). Writes for them are silently skipped.
+   */
+  readonly isEphemeral?: (profileId: string) => boolean;
 }
 
 const PROFILES_KEY = 'profiles';
@@ -125,6 +130,7 @@ export class ProfileStore {
   private readonly generateId: () => string;
   private readonly now: () => number;
   private readonly maxRecents: number;
+  private readonly isEphemeral: (profileId: string) => boolean;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(kv: KeyValueStore, options: ProfileStoreOptions = {}) {
@@ -133,6 +139,7 @@ export class ProfileStore {
     this.generateId = options.generateId ?? (() => globalThis.crypto.randomUUID());
     this.now = options.now ?? (() => Date.now());
     this.maxRecents = options.maxRecents ?? 20;
+    this.isEphemeral = options.isEphemeral ?? (() => false);
   }
 
   // ---- profiles -------------------------------------------------------------------------
@@ -307,6 +314,7 @@ export class ProfileStore {
 
   /** Replaces the per-server options. `undefined` clears them. */
   setOptions(profileId: string, options: ConnectionSettings | undefined): Promise<void> {
+    if (this.isEphemeral(profileId)) return Promise.resolve();
     return this.serialized(async () => {
       if (options === undefined) await this.kv.remove(profileKey(profileId, 'options'));
       else await this.kv.set(profileKey(profileId, 'options'), JSON.stringify(options));
@@ -325,6 +333,7 @@ export class ProfileStore {
   }
 
   async setThumbnail(profileId: string, ref: ConnectionRef, thumb: Thumbnail): Promise<void> {
+    if (this.isEphemeral(profileId)) return;
     await this.kv.set(thumbPrefix(profileId) + connectionRefKey(ref), JSON.stringify(thumb));
   }
 
@@ -373,6 +382,7 @@ export class ProfileStore {
   }
 
   setFavourite(profileId: string, ref: ConnectionRef, favourite: boolean): Promise<void> {
+    if (this.isEphemeral(profileId)) return Promise.resolve();
     return this.serialized(async () => {
       const key = profileKey(profileId, 'favourites');
       const refs = (await this.readRefs(key)).filter((r) => !sameRef(r, ref));
@@ -395,6 +405,7 @@ export class ProfileStore {
     at: number = this.now(),
     meta: { readonly name?: string; readonly protocol?: string } = {},
   ): Promise<void> {
+    if (this.isEphemeral(profileId)) return Promise.resolve();
     return this.serialized(async () => {
       const others = (await this.readRecents(profileId)).filter((e) => !sameRef(e.ref, ref));
       const entry: RecentEntry = {
@@ -427,6 +438,7 @@ export class ProfileStore {
     ref: ConnectionRef,
     settings: ConnectionSettings | undefined,
   ): Promise<void> {
+    if (this.isEphemeral(profileId)) return Promise.resolve();
     return this.serialized(async () => {
       const key = connectionRefKey(ref);
       const others = Object.entries(await this.readSettings(profileId)).filter(([k]) => k !== key);

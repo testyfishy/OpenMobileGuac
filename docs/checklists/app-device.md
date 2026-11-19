@@ -36,6 +36,15 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
       save battery"; Reconnect works. "Never" keeps it connected as long as the OS allows.
 - [ ] Let the server token expire while a session is suspended (or sign out on the server):
       Reconnect signs in silently with the saved password, or asks to sign in again.
+- [ ] Token expiry during a **live** session: on a test server, invalidate the app's token
+      (e.g. restart the Guacamole web application, which drops all tokens), then drop the
+      connection (airplane mode on/off) so the session reconnects. The
+      session signs in again silently and reconnects; with the app lock on, the unlock prompt
+      appears first; on an `http://` server without consent it asks to sign in again instead.
+- [ ] Session More sheet › "Back to connections" keeps the session open; the bottom
+      indicator reopens it. No floating pill covers the remote desktop's top-right corner.
+- [ ] Screen stays on during a session (native keep-awake plugin); after switching between
+      two sessions it still stays on; after leaving the last session it sleeps normally.
 
 ## Backup, share sheet, deep links
 
@@ -64,3 +73,11 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
       setting off deletes them; deleting a server deletes its thumbnails.
 - [ ] Spanish device language shows the Spanish chrome; Settings › Language overrides it.
 - [ ] Certificate errors on an HTTPS server with a private CA show the specific guidance.
+- [ ] Android: install the private CA on the phone (Settings › Security › Encryption &
+      credentials › Install a certificate › CA certificate). Sign-in, connection list **and
+      the session tunnel (WebSocket)** then work over HTTPS (docs/tls.md).
+- [ ] Share link to a server that is also saved: the share opens as a separate "(shared
+      link)" entry; afterwards the saved server is still signed in as you, with its own
+      connections. The entry's close button, or restarting the app, removes it.
+- [ ] File download / print job: the share sheet opens; after a few minutes (or the next
+      app start) the copy in the app cache is gone (Android: Settings › Apps › storage).

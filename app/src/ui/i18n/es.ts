@@ -352,8 +352,14 @@ export const es: Strings = {
     invalid: 'No es un enlace compartido de Guacamole.',
     open: 'Abrir',
     signingIn: 'Abriendo…',
-    noServer: (host: string) =>
-      `Ningún servidor guardado coincide con ${host}. Se añadirá a tu lista de servidores.`,
+    separate:
+      'Se abre como una sesión aparte y temporal: no se guarda nada y tu propio inicio de sesión en este servidor no cambia.',
+    serverName: (name: string) => `${name} (enlace compartido)`,
+    badge: 'Compartido',
+    subtitle: (host: string) => `Sesión temporal de enlace compartido · ${host}`,
+    ended:
+      'Esta sesión de enlace compartido ha terminado. Vuelve a abrir el enlace para continuar.',
+    end: (name: string) => `Cerrar ${name}`,
     failed: 'El servidor no aceptó ese enlace compartido. Puede haber caducado.',
   },
 
@@ -374,7 +380,6 @@ export const es: Strings = {
     keepOpen: 'Mantener abierta',
     loading: 'Preparando la sesión…',
     switcherTitle: 'Sesiones abiertas',
-    switcherButton: (n: number) => `Sesiones, ${n} ${plural(n, 'abierta', 'abiertas')}`,
     indicator: (n: number) => `${n} ${plural(n, 'sesión abierta', 'sesiones abiertas')}`,
     show: 'Mostrar',
     switchTo: (name: string) => `Cambiar a ${name}`,
@@ -392,7 +397,6 @@ export const es: Strings = {
     reconnecting: 'Volviendo a conectar…',
     signInAgain: 'Volver a iniciar sesión',
     reloginFailed: 'La sesión caducó y la app no pudo volver a iniciarla por sí sola.',
-    minimise: 'Volver a las conexiones sin cerrar la sesión',
   },
 
   lock: {

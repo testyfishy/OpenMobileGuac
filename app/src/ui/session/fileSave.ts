@@ -4,7 +4,9 @@
  * - Native: written to the app cache with @capacitor/filesystem in base64 chunks
  *   (`writeFile` then `appendFile`, no `encoding` = base64 data, per the plugin's
  *   `WriteFileOptions` / `AppendFileOptions` docs), so a large file never becomes one giant
- *   string, then offered with the @capacitor/share sheet (`files: [uri]`).
+ *   string, then offered with the @capacitor/share sheet (`files: [uri]`). The cached copy
+ *   is deleted a while after the sheet resolves, and any leftovers on the next app start
+ *   (`downloadCache.ts`).
  * - Web: an object URL on a temporary `<a download>`.
  *
  * Never throws: failures resolve to an outcome the transfers panel can show.
@@ -13,14 +15,19 @@
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { safeFilename } from '../../session/transfer/TransferModel.ts';
+import {
+  newDeliveryDir,
+  removeCachedDelivery,
+  scheduleCachedDeliveryRemoval,
+} from './downloadCache.ts';
 import { isPluginAvailable } from './platform.ts';
+import { sessionStrings } from './sessionStrings.ts';
 
 export type DeliverResult =
   { readonly ok: true; readonly outcome: string } | { readonly ok: false; readonly error: string };
 
 /** Bytes per append: a multiple of 3, so every chunk is standalone base64. */
 const CHUNK_BYTES = 3 * 256 * 1024;
-const CACHE_DIR = 'downloads';
 
 function base64OfBytes(bytes: Uint8Array): string {
   let bin = '';
@@ -31,8 +38,7 @@ function base64OfBytes(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-async function writeNative(blob: Blob, name: string): Promise<string> {
-  const path = `${CACHE_DIR}/${name}`;
+async function writeNative(blob: Blob, path: string): Promise<string> {
   let first = true;
   for (let offset = 0; offset < blob.size || first; offset += CHUNK_BYTES) {
     const part = new Uint8Array(await blob.slice(offset, offset + CHUNK_BYTES).arrayBuffer());
@@ -56,24 +62,35 @@ export async function deliverFile(
   options: { print?: boolean } = {},
 ): Promise<DeliverResult> {
   const name = safeFilename(filename, options.print ? 'print.pdf' : 'download');
+  const t = sessionStrings.files;
   if (isPluginAvailable('Filesystem')) {
+    const dir = newDeliveryDir();
+    const path = `${dir}/${name}`;
     let uri: string;
     try {
-      uri = await writeNative(blob, name);
+      uri = await writeNative(blob, path);
     } catch {
-      return { ok: false, error: 'The file could not be saved on this device.' };
+      await removeCachedDelivery(dir);
+      return { ok: false, error: t.saveFailed };
     }
-    if (!isPluginAvailable('Share')) return { ok: true, outcome: 'Saved in the app cache' };
+    if (!isPluginAvailable('Share')) {
+      // Nothing can pick the file up from the private cache: do not leave it there.
+      await removeCachedDelivery(dir);
+      return { ok: false, error: t.cannotShare };
+    }
     try {
       await Share.share({
         title: name,
         files: [uri],
-        dialogTitle: options.print ? 'Print or save the document' : 'Save or open the file',
+        dialogTitle: options.print ? t.shareTitlePrint : t.shareTitle,
       });
-      return { ok: true, outcome: 'Shared' };
+      return { ok: true, outcome: t.shared };
     } catch {
       // The user closed the share sheet (the plugin rejects on cancel).
-      return { ok: true, outcome: 'Kept in the app cache (share sheet closed)' };
+      return { ok: true, outcome: t.shareClosed };
+    } finally {
+      // The receiving app may still be reading it when the sheet resolves (Android).
+      scheduleCachedDeliveryRemoval(dir);
     }
   }
   try {
@@ -87,8 +104,8 @@ export async function deliverFile(
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    return { ok: true, outcome: 'Saved by the browser' };
+    return { ok: true, outcome: t.savedByBrowser };
   } catch {
-    return { ok: false, error: 'The browser did not allow the download.' };
+    return { ok: false, error: t.browserBlocked };
   }
 }

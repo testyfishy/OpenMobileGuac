@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import type { RequiredField } from '../../session/credentials/requiredParams.ts';
 import { ChromeButton } from './ChromeButton.tsx';
 import { IconEye } from './icons.tsx';
+import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
 export interface CredentialSheetProps {
@@ -18,6 +19,7 @@ export interface CredentialSheetProps {
 export function CredentialSheet({ title, fields, onSubmit, onCancel }: CredentialSheetProps) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [shown, setShown] = useState<Record<string, boolean>>({});
+  const t = sessionStrings.credentials;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -27,17 +29,14 @@ export function CredentialSheet({ title, fields, onSubmit, onCancel }: Credentia
 
   return (
     <Sheet
-      title="Sign in to the remote computer"
+      title={t.title}
       onClose={onCancel}
       dismissible={false}
-      closeLabel="Cancel and disconnect"
+      closeLabel={t.cancelAndDisconnect}
       className="omg-sheet--prompt"
     >
       <form onSubmit={submit} autoComplete="on">
-        <p className="omg-muted omg-prompt__intro">
-          {title} needs {fields.length === 1 ? 'this detail' : 'these details'} to continue. They
-          are sent to the remote computer and not saved on this device.
-        </p>
+        <p className="omg-muted omg-prompt__intro">{t.intro(title, fields.length)}</p>
         {fields.map((f, i) => {
           const id = `omg-req-${f.name}`;
           const visible = shown[f.name] === true;
@@ -80,7 +79,7 @@ export function CredentialSheet({ title, fields, onSubmit, onCancel }: Credentia
                   <ChromeButton
                     className="omg-btn--icon"
                     aria-label={
-                      visible ? `Hide ${f.label.toLowerCase()}` : `Show ${f.label.toLowerCase()}`
+                      visible ? t.hide(f.label.toLowerCase()) : t.show(f.label.toLowerCase())
                     }
                     aria-pressed={visible}
                     aria-controls={id}
@@ -100,10 +99,10 @@ export function CredentialSheet({ title, fields, onSubmit, onCancel }: Credentia
         })}
         <div className="omg-sheet__actions omg-sheet__actions--end">
           <ChromeButton className="omg-btn--ghost" onClick={onCancel}>
-            Cancel
+            {sessionStrings.common.cancel}
           </ChromeButton>
           <ChromeButton type="submit" className="omg-btn--primary">
-            Continue
+            {t.continue}
           </ChromeButton>
         </div>
       </form>

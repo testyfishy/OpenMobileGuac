@@ -3,6 +3,7 @@ import type { Combo } from '../../session/keys/KeyModel.ts';
 import { ChromeButton } from './ChromeButton.tsx';
 import { comboMenuEntries, reduceComboList, validateCombo } from './combos.ts';
 import { IconArrow, IconTrash } from './icons.tsx';
+import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
 export interface ComboMenuProps {
@@ -28,6 +29,7 @@ export function ComboMenu({
   const errorId = useId();
   const entries = comboMenuEntries(customCombos);
   const preview = draft.trim() === '' ? null : validateCombo(draft);
+  const t = sessionStrings.combos;
 
   const add = () => {
     const r = reduceComboList(customCombos, { type: 'add', text: draft });
@@ -41,7 +43,7 @@ export function ComboMenu({
   };
 
   return (
-    <Sheet title={editing ? 'Edit key combos' : 'Key combos'} onClose={onClose}>
+    <Sheet title={editing ? t.editTitle : t.title} onClose={onClose}>
       {!editing && (
         <>
           <div className="omg-combo-grid">
@@ -66,26 +68,24 @@ export function ComboMenu({
                 onClose();
               }}
             >
-              Type clipboard as keystrokes
+              {t.typeClipboard}
             </ChromeButton>
             <ChromeButton className="omg-btn--ghost" onClick={() => setEditing(true)}>
-              Edit my combos
+              {t.editMine}
             </ChromeButton>
           </div>
         </>
       )}
       {editing && (
         <>
-          {customCombos.length === 0 && (
-            <p className="omg-muted">No custom combos yet. Add one below.</p>
-          )}
+          {customCombos.length === 0 && <p className="omg-muted">{t.noneYet}</p>}
           <ol className="omg-combo-list">
             {customCombos.map((c, i) => (
               <li key={`${i}:${c}`} className="omg-combo-list__item">
                 <span className="omg-combo-list__label">{c}</span>
                 <ChromeButton
                   className="omg-btn--icon"
-                  aria-label={`Move ${c} up`}
+                  aria-label={t.moveUp(c)}
                   disabled={i === 0}
                   onClick={() =>
                     onChangeCombos(
@@ -97,7 +97,7 @@ export function ComboMenu({
                 </ChromeButton>
                 <ChromeButton
                   className="omg-btn--icon"
-                  aria-label={`Move ${c} down`}
+                  aria-label={t.moveDown(c)}
                   disabled={i === customCombos.length - 1}
                   onClick={() =>
                     onChangeCombos(
@@ -109,7 +109,7 @@ export function ComboMenu({
                 </ChromeButton>
                 <ChromeButton
                   className="omg-btn--icon omg-btn--danger"
-                  aria-label={`Delete ${c}`}
+                  aria-label={t.remove(c)}
                   onClick={() =>
                     onChangeCombos(reduceComboList(customCombos, { type: 'remove', index: i }).list)
                   }
@@ -127,14 +127,14 @@ export function ComboMenu({
             }}
           >
             <label htmlFor={inputId} className="omg-label">
-              New combo
+              {t.newCombo}
             </label>
             <div className="omg-combo-form__row">
               <input
                 id={inputId}
                 className="omg-input"
                 value={draft}
-                placeholder="e.g. Ctrl+Shift+T or Ctrl+K, Ctrl+C"
+                placeholder={t.placeholder}
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="off"
@@ -147,7 +147,7 @@ export function ComboMenu({
                 }}
               />
               <button type="submit" className="omg-btn omg-btn--primary" disabled={!preview?.ok}>
-                Add
+                {sessionStrings.common.add}
               </button>
             </div>
             <p
@@ -155,16 +155,12 @@ export function ComboMenu({
               className={error || (preview && !preview.ok) ? 'omg-error' : 'omg-muted'}
             >
               {error ??
-                (preview
-                  ? preview.ok
-                    ? `Will send: ${preview.canonical}`
-                    : preview.error
-                  : 'Use + between keys held together, a comma between steps.')}
+                (preview ? (preview.ok ? t.willSend(preview.canonical) : preview.error) : t.syntax)}
             </p>
           </form>
           <div className="omg-sheet__actions">
             <ChromeButton className="omg-btn--ghost" onClick={() => setEditing(false)}>
-              Done
+              {sessionStrings.common.done}
             </ChromeButton>
           </div>
         </>

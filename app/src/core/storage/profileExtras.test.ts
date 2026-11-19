@@ -128,3 +128,21 @@ describe('ProfileStore extras', () => {
     expect(await store.list()).toEqual([]);
   });
 });
+
+describe('ephemeral (memory-only) server ids', () => {
+  it('never writes per-server data for them', async () => {
+    const kv = new MemoryKeyValueStore();
+    const store = new ProfileStore(kv, { isEphemeral: (id) => id.startsWith('share-') });
+    const ref = { dataSource: 'postgresql', identifier: '1', type: 'c' as const };
+    const id = 'share-abc';
+    await store.setOptions(id, { totpAutofill: true });
+    await store.setFavourite(id, ref, true);
+    await store.recordRecent(id, ref, 1);
+    await store.setConnectionSettings(id, ref, { scaling: 'fit' });
+    await store.setThumbnail(id, ref, { dataUrl: 'data:image/jpeg;base64,AA', at: 1 });
+    expect(await kv.keys()).toEqual([]);
+    // Other ids are unaffected.
+    await store.setFavourite('builtin-dev', ref, true);
+    expect(await store.listFavourites('builtin-dev')).toHaveLength(1);
+  });
+});

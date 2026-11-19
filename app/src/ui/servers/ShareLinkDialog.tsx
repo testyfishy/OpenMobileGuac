@@ -6,8 +6,9 @@ import { InfoBanner } from '../components/Feedback.tsx';
 import { TextField } from '../components/Form.tsx';
 import { describeError } from '../errors/errorMessages.ts';
 import { useNav } from '../nav/NavContext.ts';
-import { useProfilesVersion, useServices } from '../services/context.ts';
+import { useServices } from '../services/context.ts';
 import { haptic } from '../services/native.ts';
+import { makeShareProfile } from '../services/shareSessions.ts';
 import { strings } from '../strings.ts';
 import { hostOf } from './serverForm.ts';
 
@@ -15,11 +16,14 @@ import { hostOf } from './serverForm.ts';
  * CON-6: open a Guacamole share link (`…/#/?key=…`). Signs in with the key (no username or
  * password); the resulting session lists the shared connection, which is then opened with
  * the normal `GUAC_TYPE=c` connect.
+ *
+ * The key session lives under its own temporary server entry (`shareSessions.ts`), even
+ * when the link points at a saved server: that server's own sign-in, token and saved
+ * credentials are left alone, and nothing about the share is persisted.
  */
 export function ShareLinkDialog({ onClose }: { onClose: () => void }) {
   const services = useServices();
   const nav = useNav();
-  const { bump } = useProfilesVersion();
   const s = strings.shareLink;
   const [text, setText] = useState('');
   const [error, setError] = useState<string | undefined>();
@@ -35,14 +39,16 @@ export function ShareLinkDialog({ onClose }: { onClose: () => void }) {
     setError(undefined);
     try {
       const existing = (await services.profiles.list()).find((p) => p.baseUrl === link.baseUrl);
-      const profile =
-        existing ??
-        (await services.profiles.add({
-          name: hostOf(link.baseUrl),
-          baseUrl: (await services.probeApi.probe(link.baseUrl)).baseUrl,
-        }));
-      if (!existing) bump();
+      const baseUrl = existing?.baseUrl ?? (await services.probeApi.probe(link.baseUrl)).baseUrl;
+      const profile = makeShareProfile(
+        link,
+        baseUrl,
+        s.serverName(existing?.name || hostOf(baseUrl)),
+        Date.now(),
+        Math.random().toString(36).slice(2, 8),
+      );
       await services.auth.loginWithParameters(profile, { key: link.key });
+      services.shares.add(profile);
       haptic('success');
       onClose();
       nav.open({ name: 'connections', serverId: profile.id });
@@ -94,7 +100,11 @@ export function ShareLinkDialog({ onClose }: { onClose: () => void }) {
         spellCheck={false}
         error={error}
       />
-      {link && !error ? <InfoBanner>{hostOf(link.baseUrl)}</InfoBanner> : null}
+      {link && !error ? (
+        <InfoBanner>
+          {hostOf(link.baseUrl)}. {s.separate}
+        </InfoBanner>
+      ) : null}
     </Dialog>
   );
 }
