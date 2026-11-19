@@ -82,6 +82,8 @@ export type AuthFlowEvent =
       readonly browser?: boolean;
     }
   | { readonly type: 'session-expired' }
+  /** Signed in without the form: single sign-on or a share link (SRV-7, CON-6). */
+  | { readonly type: 'external-ok' }
   | { readonly type: 'logout' }
   | { readonly type: 'start-over' };
 
@@ -255,6 +257,17 @@ export function authFlowReducer(state: AuthFlowState, event: AuthFlowEvent): Aut
       }
       return form({ ...c, expected: [] }, 'credentials', { notice: strings.login.sessionExpired });
     }
+
+    case 'external-ok':
+      if (state.phase === 'authenticated') return state;
+      return {
+        ...c,
+        phase: 'authenticated',
+        expected: [],
+        values: { ...c.values, password: '', extra: {} },
+        passwordIsSaved: false,
+        needsHttpConfirm: c.needsHttpConfirm,
+      };
 
     case 'logout':
       return form(

@@ -158,3 +158,21 @@ describe('authFlowReducer', () => {
     expect(s).toMatchObject({ phase: 'form', step: 'credentials', expected: [] });
   });
 });
+
+describe('external sign-in', () => {
+  it('moves to authenticated from the form (SSO, share link)', () => {
+    let s = authFlowReducer(initialAuthFlow(), {
+      type: 'start',
+      hasToken: false,
+      username: '',
+      savedPassword: null,
+      remember: false,
+      needsHttpConfirm: false,
+    });
+    expect(s.phase).toBe('form');
+    s = authFlowReducer(s, { type: 'external-ok' });
+    expect(s.phase).toBe('authenticated');
+    expect(s.passwordIsSaved).toBe(false);
+    expect(authFlowReducer(s, { type: 'external-ok' })).toBe(s);
+  });
+});

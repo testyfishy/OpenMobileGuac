@@ -2,7 +2,8 @@
  * A tiny navigation stack (no dependency). Pure: the React side lives in `NavProvider`.
  *
  * The root entry is always the server list. Opening a server replaces everything above the
- * root, so the stack stays shallow: servers → connections → session.
+ * root, so the stack stays shallow: servers → connections. Open sessions live outside the
+ * stack (`sessions/SessionsProvider`), so going back to the list keeps them connected.
  */
 
 export interface SessionTarget {
@@ -19,7 +20,8 @@ export type Route =
   | { readonly name: 'server-edit'; readonly serverId?: string }
   | { readonly name: 'connections'; readonly serverId: string }
   | { readonly name: 'settings' }
-  | { readonly name: 'session'; readonly serverId: string; readonly target: SessionTarget };
+  | { readonly name: 'backup' }
+  | { readonly name: 'diagnostics' };
 
 export interface NavEntry {
   readonly key: number;
@@ -84,7 +86,7 @@ export function canGoBack(state: NavState): boolean {
 export function selectedServerId(state: NavState): string | undefined {
   for (let i = state.stack.length - 1; i >= 0; i--) {
     const r = state.stack[i]?.route;
-    if (r && (r.name === 'connections' || r.name === 'session')) return r.serverId;
+    if (r && r.name === 'connections') return r.serverId;
     if (r && r.name === 'server-edit') return r.serverId;
   }
   return undefined;

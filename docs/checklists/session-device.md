@@ -104,6 +104,178 @@ Record failures as `T1.x-fix` tasks with device, OS version, keyboard app and ap
 - [ ] Wrong/removed connection: a readable error with Retry and Close.
 - [ ] Exit (tap twice) returns to the connection list; the remote session is closed.
 
+## Input pass (tap latency, settings, keyboard robustness): needs a real device
+
+### Taps and gestures
+
+- [ ] Direct mode: a slow tap (finger held ~0.4 s, not moved) still clicks; there is no
+      "nothing happens" zone between a tap and a long press.
+- [ ] Trackpad mode: a single tap feels instant (a button reacts on press at once; a link
+      that opens on release may lag by up to the double-tap time).
+- [ ] Trackpad: tap, then touch again and drag a window by its title bar: the window moves
+      and does NOT maximise; text selection by tap-and-a-half selects by character, not by
+      word (the remote must not see a double click).
+- [ ] Trackpad: double tap opens a desktop icon.
+- [ ] Input options > Tap and a half to drag off: taps are instant complete clicks; long
+      press still drags.
+- [ ] Two-finger tap = right click and three-finger tap = middle click in both modes (direct:
+      at the fingers' centre). A hurried two-finger double tap gives one context menu only.
+- [ ] Three-finger double tap resets the zoom in both modes, with no middle click.
+- [ ] Direct mode, whole desktop visible: one-finger drag drags (e.g. selects text, moves a
+      window) at once. Zoomed in: it pans (or drags with "Drag on the remote").
+- [ ] Horizontal two-finger drag scrolls sideways in a wide spreadsheet / browser page
+      (Shift + wheel); a mostly vertical drag never scrolls sideways. The switch turns it off.
+- [ ] Trackpad: pinch to zoom away from the pointer, then tap: the pointer first jumps to
+      the nearest visible spot, then clicks there.
+- [ ] Input options timing sliders (long press, double tap, tap tolerance) change the feel
+      at once; leave and reopen the connection: they are remembered (this needs the app
+      shell to store the new input fields; record it if they reset).
+
+### Hardware keyboard, mouse and pen (tablet / Chromebook / DeX)
+
+- [ ] Ctrl+C, Ctrl+V, Ctrl+Shift+T, Alt+Tab (Alt held across several Tabs), Alt+F4, Win.
+- [ ] A lone Alt tap focuses the menu bar of a Windows app; Ctrl+click multi-selects files.
+- [ ] AltGr characters on a non-US layout (`@`, `€`, `{`): exactly the character arrives,
+      no Ctrl+Alt shortcut fires.
+- [ ] Holding an arrow key repeats; no key stays stuck after switching apps or locking the
+      screen.
+- [ ] Caps Lock toggles on the remote; typed letters have the right case.
+- [ ] Mouse: hover moves the pointer, left/middle/right and wheel work; horizontal wheel
+      (tilt or trackpad) scrolls sideways; back/forward buttons go back/forward (Alt+Left /
+      Alt+Right) and never leave the session.
+- [ ] Input options > Pointer lock (trackpad mode, tablet with mouse): clicking captures
+      the mouse; motion is relative; Esc releases it.
+- [ ] Stylus: hover moves the pointer, tip = left click/drag at the tip in both modes,
+      barrel button = right click.
+- [ ] With a hardware keyboard and the on-screen keyboard hidden, nothing is padded at the
+      bottom for a keyboard that is not shown.
+
+### Soft keyboard robustness
+
+- [ ] iOS: drag the space bar to move the cursor left inside the word you typed: the remote
+      cursor moves left the same number of characters; typing continues there correctly.
+- [ ] Autocorrect replacing a word (if enabled by the keyboard anyway), tapping a suggestion,
+      dictation, and pasting into the keyboard's clipboard strip all produce the right text.
+- [ ] Android keyboards that send key code 229 (Gboard, Samsung, SwiftKey): no doubled or
+      missing characters; Backspace on an empty field still deletes on the remote.
+- [ ] Input options > Commit on word: a word appears on the remote when space/punctuation is
+      typed, on Enter from the key bar, or when tapping the desktop.
+- [ ] Text input bar: type, dictate or paste into the visible field, Send types it; ⏎ sends
+      it plus Enter.
+
+### Key bar editor (KEY-7)
+
+- [ ] Input options > Edit key bar: add a key and a saved combo, reorder, add/remove a row,
+      Reset to default; the bar updates live and is remembered for the connection.
+- [ ] Sticky Shift + "1" on the soft keyboard gives "!" on the remote (US and non-US remote
+      layouts: note what a non-US layout gives).
+
+### Touch pass-through (PTR-6, RDP with touch enabled)
+
+- [ ] On an RDP connection with touch support, the pointer-mode button also offers
+      Multi-touch; pinch zooms a Windows photo viewer; a two-finger scroll scrolls natively.
+- [ ] Toolbar Zoom / Out buttons zoom the local view in that mode; leaving the app lifts all
+      touches (nothing stays pressed on the remote).
+- [ ] On a connection without touch support the mode is not offered.
+
+### Cursor, split layout, immersive
+
+- [ ] A remote app that hides its cursor: trackpad mode still shows the fallback arrow;
+      direct mode shows none. Large cursor makes it bigger with a contrasting outline.
+- [ ] Foldable in tabletop posture: with Split layout "When folded" the display sits on the
+      top half and a trackpad + key bar on the bottom; unfolding returns to normal.
+- [ ] Split layout "On" on a phone/tablet: the trackpad area drives the pointer (move, tap,
+      tap-and-a-half drag, two-finger scroll) while the display area keeps its mode.
+- [ ] Immersive on: status bar hidden on iOS and Android (Android navigation bar too where
+      the WebView allows full screen); the collapsed toolbar becomes a thin edge grip that
+      still opens the toolbar.
+
+## Session features (credential prompt, audio, files, lifecycle)
+
+Use a test connection on a throwaway machine. Nothing here has been tried against a real
+guacd yet; the browser harness (`app/src/ui/session/dev/harness.html?tunnel=features`)
+only fakes the server side.
+
+### Credential prompt (SRV-11)
+
+- [ ] An RDP connection saved without username/password shows "Sign in to the remote
+      computer" with Username, Domain (if requested) and Password; the password is masked
+      and the eye button shows/hides it.
+- [ ] Correct values connect. Wrong values end with "Sign-in failed" and no auto-retry.
+- [ ] Cancel (or the close button, or Escape on a hardware keyboard) disconnects; Reconnect
+      prompts again. Values are not pre-filled and do not appear in the app's diagnostics log.
+- [ ] iOS / Android password manager offers to fill the fields (autocomplete hints).
+- [ ] VNC connection without a stored password: the prompt asks for Password (and
+      Username where the VNC auth type needs one). SSH without a stored password asks
+      inside the terminal instead (guacd 1.6.0 behaviour), and typing there works.
+
+### Audio (AUD-1)
+
+- [ ] RDP audio plays (play a sound on the remote). On iOS, audio starts after the first
+      tap on the session if it was silent before.
+- [ ] More > Sound off silences it at once; Sound on resumes without a burst of old audio.
+      The choice is remembered for this connection after reconnecting.
+- [ ] iOS silent switch: note whether remote audio follows it.
+- [ ] Hiding the session (back to connections) or backgrounding the app stops the sound;
+      coming back resumes it. Another app playing audio: note what happens.
+
+### Files and printing (FIL-1, FIL-2)
+
+- [ ] RDP with a shared drive (or SFTP): More > Files lists the drive, folders open,
+      breadcrumbs and Up work, names with accents/emoji display correctly.
+- [ ] Tap a file: it downloads with progress, then the share sheet opens (Save to Files /
+      Drive / another app). Large file (≥ 50 MB): note the speed and memory use.
+- [ ] Upload here: the OS picker (photos and files, several at once) uploads into the
+      current folder with progress; the folder refreshes; Cancel stops a large upload (the
+      remote keeps a partial file, expected).
+- [ ] Connection with uploads disabled: the transfer fails with "Uploads are disabled by
+      the administrator"; downloads disabled: "The server did not send the file" after 20 s.
+- [ ] Connection without a filesystem: More > Files offers "Send file to remote"; the file
+      appears where guacd puts it (RDP: the drive's upload folder).
+- [ ] RDP printing enabled: print a page from Notepad; a "Print job" transfer appears and
+      the share sheet offers Print / Save PDF. On Android, check that the share sheet can
+      read the cached file (FileProvider paths).
+
+### Clipboard panel (CLP-5)
+
+- [ ] Copy on the remote: More > Clipboard shows it; Copy to device works.
+- [ ] Type text in the panel, Send, then Ctrl+V on the remote pastes it. On SSH, Send then
+      Ctrl+Shift+V (key bar / combos) or a right-click pastes it in the terminal.
+- [ ] With `disable-paste` on the connection: Send does nothing on the remote; Type as
+      keystrokes still works. With `disable-copy`: the panel says nothing was received.
+- [ ] History lists the last items for this session only; it is empty after a reconnect of
+      the app (memory only).
+
+### Reconnect and lifecycle (DSP-9)
+
+- [ ] Airplane mode on for 5 s while connected: "Waiting for the network…", then the session
+      reconnects within a second or two of the network returning, without waiting out a
+      backoff.
+- [ ] Background the app for 30 s, return: the session is still there or reconnects at once
+      on resume (the shell's grace timer decides when it is closed).
+- [ ] Sign in to the same Windows account from another device: "Signed in elsewhere", no
+      auto-retry. Idle timeout on the RDP host: "Session timed out". Admin disconnect:
+      "Disconnected by the server". Sign out on the remote: "Session ended".
+
+### Hidden sessions, thumbnails, keep-awake
+
+- [ ] Back to connections (More > Back to connections, needed on iOS): the session stays
+      connected; a hardware keyboard typing in the connection list sends nothing to the
+      remote; returning re-fits the desktop correctly after a rotation while hidden.
+- [ ] The connection list shows a recent thumbnail of the session.
+- [ ] Keep screen awake: the screen stays on for 3 minutes on iOS and Android. Session info
+      shows "Keep screen on: on (screen wake lock)" or "not supported in this WebView" /
+      "refused by the system": record which, with the OS and WebView version.
+
+### Toolbar
+
+- [ ] Portrait and landscape: Pointer, Keyboard, Paste, View, More reachable with one thumb;
+      the collapsed handle sits on the right edge above the remote taskbar (bottom ~60 px
+      stay uncovered).
+- [ ] More > Ctrl+Alt+Del opens the Windows security screen (RDP); not offered on SSH.
+- [ ] TalkBack / VoiceOver read every More tile, the transfer progress and the prompt
+      fields with sensible labels.
+
 ## Notes to record
 
 - Capacitor Keyboard resize mode in effect (does the WebView shrink when the keyboard

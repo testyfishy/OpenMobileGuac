@@ -1,17 +1,32 @@
 import { isGuacApiError } from '../../core/api/errors.ts';
 import type { GuacApi } from '../../core/api/GuacApi.ts';
+import type { Logger } from '../../core/diagnostics/log.ts';
+import { FieldType } from '../../core/models/ApiErrorBody.ts';
 import type { AuthSession } from '../../core/models/AuthSession.ts';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import type { ProfileStore } from '../../core/storage/ProfileStore.ts';
 import { secretKeys, type SecureStore } from '../../core/storage/SecureStore.ts';
+import {
+  parseTotpInput,
+  totpAt,
+  totpCounter,
+  waitForFreshCode,
+  type TotpParams,
+} from '../../core/totp/totp.ts';
 
 /**
- * Session tokens and saved passwords per server (SRV-3, SRV-4). Keeps the live
- * `AuthSession` in memory and the token/password in `SecureStore`.
+ * Session tokens and saved credentials per server (SRV-3, SRV-4, SRV-6, SRV-9). Keeps the
+ * live `AuthSession` in memory and the token/password/TOTP seed in `SecureStore`.
+ *
+ * Every read of a saved password or TOTP seed for signing in goes through the credential
+ * gate (the biometric lock, when on). That makes this class the one choke point for
+ * SRV-6(b): silent re-login, reconnects and deep links all pass here.
  */
 export interface SavedSecrets {
   readonly token: string | null;
   readonly password: string | null;
+  /** A saved password exists but the gate refused it (the user cancelled the unlock). */
+  readonly lockedOut?: boolean;
 }
 
 export interface LoginRequest {
@@ -21,20 +36,44 @@ export interface LoginRequest {
   readonly extra: Readonly<Record<string, string>>;
 }
 
+/** Outcome of re-validating a server's session before reconnecting. */
+export type RevalidateResult = 'ok' | 'relogged' | 'needs-sign-in';
+
+export type CredentialGate = () => Promise<boolean>;
+
 export class AuthService {
   private readonly api: GuacApi;
   private readonly secure: SecureStore;
   private readonly profiles: ProfileStore;
+  private readonly log: Logger | undefined;
   private readonly sessions = new Map<string, AuthSession>();
   /** Secrets for virtual profiles (the dev server) that are not in `ProfileStore`. */
   private readonly virtualPasswords = new Map<string, string>();
   /** A password typed in the server form but not remembered, used once for the first sign-in. */
   private readonly transientPasswords = new Map<string, string>();
+  /** The last TOTP time step sent per server; the server refuses a reused code. */
+  private readonly lastTotpCounter = new Map<string, number>();
+  /** Servers where the user agreed to send credentials over plain http in this run. */
+  private readonly httpConfirmed = new Set<string>();
+  private gate: CredentialGate | undefined;
+  private readonly listeners = new Set<(profileId: string) => void>();
 
-  constructor(api: GuacApi, secure: SecureStore, profiles: ProfileStore) {
+  constructor(api: GuacApi, secure: SecureStore, profiles: ProfileStore, log?: Logger) {
     this.api = api;
     this.secure = secure;
     this.profiles = profiles;
+    this.log = log;
+  }
+
+  /** Installs the biometric gate (SRV-6). Without one, saved credentials are used freely. */
+  setCredentialGate(gate: CredentialGate | undefined): void {
+    this.gate = gate;
+  }
+
+  /** Called when a server's session changes (signed in, out, or expired). */
+  onSessionChange(fn: (profileId: string) => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
   }
 
   /** Registers a fixed password for a virtual profile (dev server from .env.local). */
@@ -47,12 +86,31 @@ export class AuthService {
     this.transientPasswords.set(profileId, password);
   }
 
+  markHttpConfirmed(profileId: string): void {
+    this.httpConfirmed.add(profileId);
+  }
+
+  isHttpConfirmed(profileId: string): boolean {
+    return this.httpConfirmed.has(profileId);
+  }
+
   current(profileId: string): AuthSession | undefined {
     return this.sessions.get(profileId);
   }
 
+  async loadToken(profileId: string): Promise<string | null> {
+    return this.secure.get(secretKeys.authToken(profileId)).catch(() => null);
+  }
+
+  /** Whether a password is saved, without using it (no gate, no prompt). */
+  async hasSavedPassword(profile: ServerProfile): Promise<boolean> {
+    if (!profile.rememberPassword) return false;
+    const pw = await this.secure.get(secretKeys.password(profile.id)).catch(() => null);
+    return pw !== null && pw.length > 0;
+  }
+
   async loadSecrets(profile: ServerProfile): Promise<SavedSecrets> {
-    const token = await this.secure.get(secretKeys.authToken(profile.id)).catch(() => null);
+    const token = await this.loadToken(profile.id);
     const virtual = this.virtualPasswords.get(profile.id);
     if (virtual !== undefined) return { token, password: virtual || null };
     const transient = this.transientPasswords.get(profile.id);
@@ -60,9 +118,12 @@ export class AuthService {
       this.transientPasswords.delete(profile.id);
       return { token, password: transient || null };
     }
-    const password = profile.rememberPassword
-      ? await this.secure.get(secretKeys.password(profile.id)).catch(() => null)
-      : null;
+    if (!(await this.hasSavedPassword(profile))) return { token, password: null };
+    if (this.gate && !(await this.gate())) {
+      this.log?.info('auth', 'saved password not used: unlock cancelled');
+      return { token, password: null, lockedOut: true };
+    }
+    const password = await this.secure.get(secretKeys.password(profile.id)).catch(() => null);
     return { token, password: password && password.length > 0 ? password : null };
   }
 
@@ -73,6 +134,8 @@ export class AuthService {
     try {
       const session = await this.api.resumeSession(profile, token);
       this.sessions.set(profile.id, session);
+      this.log?.info('auth', 'stored session resumed');
+      this.emit(profile.id);
       return session;
     } catch (err) {
       // Only a token the server rejected is dropped; a network failure (VPN not up yet)
@@ -88,10 +151,7 @@ export class AuthService {
       { username: req.username, password: req.password },
       req.extra,
     );
-    this.sessions.set(profile.id, session);
-    // Storage failures must not turn a successful sign-in into an error: the session is
-    // live in memory either way.
-    await this.secure.set(secretKeys.authToken(profile.id), session.token).catch(() => undefined);
+    await this.adopt(profile.id, session);
     if (!this.virtualPasswords.has(profile.id)) {
       if (req.remember) {
         await this.secure.set(secretKeys.password(profile.id), req.password).catch(() => undefined);
@@ -107,10 +167,30 @@ export class AuthService {
     return session;
   }
 
+  /** Signs in with parameters only: an SSO result or a share-link `key` (SRV-7, CON-6). */
+  async loginWithParameters(
+    profile: ServerProfile,
+    parameters: Readonly<Record<string, string>>,
+  ): Promise<AuthSession> {
+    const session = await this.api.loginWithParameters(profile, parameters);
+    await this.adopt(profile.id, session);
+    return session;
+  }
+
+  private async adopt(profileId: string, session: AuthSession): Promise<void> {
+    this.sessions.set(profileId, session);
+    this.log?.info('auth', `signed in (${session.dataSources.length} data source(s))`);
+    // Storage failures must not turn a successful sign-in into an error: the session is
+    // live in memory either way.
+    await this.secure.set(secretKeys.authToken(profileId), session.token).catch(() => undefined);
+    this.emit(profileId);
+  }
+
   /** Drops a token the server no longer accepts. */
   async forgetToken(profileId: string): Promise<void> {
-    this.sessions.delete(profileId);
+    const had = this.sessions.delete(profileId);
     await this.secure.remove(secretKeys.authToken(profileId)).catch(() => undefined);
+    if (had) this.emit(profileId);
   }
 
   /** Signs out on the server (best effort) and forgets the token. The saved password stays. */
@@ -130,8 +210,134 @@ export class AuthService {
     }
   }
 
+  /** "Clear saved credentials": password, token and TOTP seed. */
+  async clearCredentials(profileId: string): Promise<void> {
+    await this.logout(profileId);
+    for (const key of secretKeys.all(profileId)) {
+      await this.secure.remove(key).catch(() => undefined);
+    }
+  }
+
   /** Called when a profile's URL changes or it is deleted. */
   async reset(profileId: string): Promise<void> {
     await this.logout(profileId);
+  }
+
+  // ---- TOTP seed (SRV-9) -----------------------------------------------------------------
+
+  async hasTotpSeed(profileId: string): Promise<boolean> {
+    return (await this.secure.get(secretKeys.totpSeed(profileId)).catch(() => null)) !== null;
+  }
+
+  async saveTotpSeed(profileId: string, serialized: string | null): Promise<void> {
+    if (serialized === null) await this.secure.remove(secretKeys.totpSeed(profileId));
+    else await this.secure.set(secretKeys.totpSeed(profileId), serialized);
+  }
+
+  /** The stored seed, after the credential gate. `undefined` if none or refused. */
+  async loadTotpSeed(profileId: string): Promise<TotpParams | undefined> {
+    const raw = await this.secure.get(secretKeys.totpSeed(profileId)).catch(() => null);
+    if (raw === null) return undefined;
+    if (this.gate && !(await this.gate())) return undefined;
+    try {
+      return parseTotpInput(raw);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * A code that the server will accept now: if the current time step was already used
+   * from this app, waits for the next one (the TOTP extension refuses reused codes).
+   * `onWait` reports the wait in ms before it starts.
+   */
+  async freshTotpCode(
+    profileId: string,
+    seed: TotpParams,
+    onWait?: (ms: number) => void,
+    now: () => number = () => Date.now(),
+  ): Promise<string> {
+    const wait = waitForFreshCode(this.lastTotpCounter.get(profileId), now(), seed.period);
+    if (wait > 0) {
+      onWait?.(wait);
+      await new Promise((r) => setTimeout(r, wait + 250));
+    }
+    return totpAt(seed, now());
+  }
+
+  lastTotpCounterFor(profileId: string): number | undefined {
+    return this.lastTotpCounter.get(profileId);
+  }
+
+  /** Records that the code for `atMs` was sent. */
+  noteTotpUsed(profileId: string, period: number, atMs: number = Date.now()): void {
+    this.lastTotpCounter.set(profileId, totpCounter(atMs, period));
+  }
+
+  // ---- re-validation for open sessions (T2.1) ---------------------------------------------
+
+  /**
+   * Before reconnecting a session: checks the token; if it expired, signs in again silently
+   * with the saved password (and a TOTP code from the stored seed when the server asks and
+   * autofill is on). Never sends a password over plain http unless `httpAllowed`.
+   * Network failures reject, so the caller can show the session's own error.
+   */
+  async revalidate(
+    profile: ServerProfile,
+    opts: { readonly httpAllowed: boolean; readonly totpAutofill: boolean },
+  ): Promise<RevalidateResult> {
+    const live = this.sessions.get(profile.id);
+    if (live && (await this.api.isSessionValid(live))) return 'ok';
+    if (!live) {
+      const token = await this.loadToken(profile.id);
+      if (token) {
+        try {
+          await this.resume(profile, token);
+          return 'ok';
+        } catch (err) {
+          if (!isGuacApiError(err, 'session-expired')) throw err;
+        }
+      }
+    } else {
+      this.log?.info('auth', 'token expired while sessions were open');
+      await this.forgetToken(profile.id);
+    }
+    if (!opts.httpAllowed) return 'needs-sign-in';
+    const { password } = await this.loadSecrets(profile);
+    if (!password) return 'needs-sign-in';
+    const req: LoginRequest = {
+      username: profile.username,
+      password,
+      remember: true,
+      extra: {},
+    };
+    try {
+      await this.login(profile, req);
+      return 'relogged';
+    } catch (err) {
+      if (!isGuacApiError(err, 'additional-credentials-required') || !opts.totpAutofill) {
+        if (isGuacApiError(err) && err.info.kind !== 'unreachable' && err.info.kind !== 'tls') {
+          return 'needs-sign-in';
+        }
+        throw err;
+      }
+      const info = err.info;
+      const expected = info.kind === 'additional-credentials-required' ? info.expected : [];
+      const field = expected.find((f) => f.type === FieldType.GUAC_TOTP_CODE);
+      const seed = field ? await this.loadTotpSeed(profile.id) : undefined;
+      if (!field || !seed) return 'needs-sign-in';
+      const code = await this.freshTotpCode(profile.id, seed);
+      this.noteTotpUsed(profile.id, seed.period);
+      try {
+        await this.login(profile, { ...req, extra: { [field.name]: code } });
+        return 'relogged';
+      } catch {
+        return 'needs-sign-in';
+      }
+    }
+  }
+
+  private emit(profileId: string): void {
+    for (const l of this.listeners) l(profileId);
   }
 }

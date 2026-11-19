@@ -54,13 +54,27 @@ export interface TextInputOptions {
   /** Reset once this many code points beyond the sentinel have accumulated. */
   readonly maxLength: number;
   readonly composition: 'incremental' | 'commit';
+  /**
+   * `live` (default): send every change as it happens. `word`: the fallback for keyboards
+   * that misbehave with live diffing (upstream-like): new text is held in the field until
+   * a word boundary (whitespace or punctuation), `maxLength`, a deletion of text already
+   * sent, or a `flush` (blur, Enter from the key bar, a click). Composition is held too.
+   */
+  readonly commit: 'live' | 'word';
+  /** Send whatever is held (word mode). */
+  readonly flush: boolean;
 }
 
 export const DEFAULT_TEXT_INPUT_OPTIONS: TextInputOptions = {
   sentinel: DEFAULT_SENTINEL,
   maxLength: 64,
   composition: 'incremental',
+  commit: 'live',
+  flush: false,
 };
+
+/** A word boundary for commit-on-word mode. */
+const BOUNDARY = /[\s\p{P}\p{S}]/u;
 
 export interface TextInputUpdate {
   /** Backspaces to send first. */
@@ -87,9 +101,9 @@ export function diffTextInput(
   const opts = { ...DEFAULT_TEXT_INPUT_OPTIONS, ...options };
   const sentinel = opts.sentinel.length > 0 ? opts.sentinel : DEFAULT_SENTINEL;
 
-  if (composing && opts.composition === 'commit') {
-    return { backspaces: 0, text: '', baseline, reset: false };
-  }
+  const word = opts.commit === 'word';
+  const hold = { backspaces: 0, text: '', baseline, reset: false };
+  if (composing && (opts.composition === 'commit' || (word && !opts.flush))) return hold;
 
   const a = cps(baseline);
   const b = cps(value);
@@ -102,6 +116,12 @@ export function diffTextInput(
     .filter((c) => !sentinelChars.has(c))
     .join('');
 
+  if (word && !opts.flush && backspaces === 0 && value.startsWith(sentinel)) {
+    const typedLength = b.length - cps(sentinel).length;
+    // Pure addition after what was sent, no boundary yet: keep it in the field.
+    if (!BOUNDARY.test(text) && typedLength < opts.maxLength) return hold;
+  }
+
   let reset = false;
   if (!composing) {
     const typedLength = b.length - cps(sentinel).length;
@@ -111,6 +131,52 @@ export function diffTextInput(
       typedLength >= opts.maxLength;
   }
   return { backspaces, text, baseline: reset ? sentinel : value, reset };
+}
+
+export interface CaretResync {
+  /** Arrow presses to send: negative = Left, positive = Right. */
+  readonly arrows: number;
+  /** Put the caret back at the end of the field. */
+  readonly restoreCaret: boolean;
+  /** Reset the field and baseline to the sentinel (what is left of the caret is stale). */
+  readonly reset: boolean;
+}
+
+const NO_RESYNC: CaretResync = { arrows: 0, restoreCaret: false, reset: false };
+
+/**
+ * The caret of the hidden field moved away from the end without the text changing (iOS
+ * space-bar trackpad, Android cursor keys / swipe on the space bar, a long-press
+ * selection). The remote caret sits at the end of what was typed, so:
+ * - a collapsed caret moved left: the field is re-synced to the sentinel with the caret at
+ *   the end, and nothing is sent, so the next keystrokes continue at the remote caret
+ *   instead of producing a garbled diff (`followCaret` opts in to also moving the remote
+ *   caret with `n` Left presses; not used by default because some keyboards park the caret
+ *   transiently);
+ * - a selection (non-collapsed) is just collapsed back to the end, nothing is sent;
+ * - nothing happens while composing (IMEs move the selection inside their composition).
+ * Positions are UTF-16 indices as reported by `selectionStart` / `selectionEnd`.
+ */
+export function caretResync(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  composing: boolean,
+  sentinel: string = DEFAULT_SENTINEL,
+  followCaret = false,
+): CaretResync {
+  if (composing) return NO_RESYNC;
+  const end = value.length;
+  if (selectionStart >= end && selectionEnd >= end) return NO_RESYNC;
+  if (!Number.isFinite(selectionStart) || !Number.isFinite(selectionEnd)) return NO_RESYNC;
+  if (selectionStart !== selectionEnd) return { arrows: 0, restoreCaret: true, reset: false };
+  const from = Math.max(
+    Math.min(selectionStart, end),
+    value.startsWith(sentinel) ? sentinel.length : 0,
+  );
+  const n = cps(value.slice(from)).length;
+  if (n === 0) return { arrows: 0, restoreCaret: true, reset: false };
+  return { arrows: followCaret ? -n : 0, restoreCaret: true, reset: true };
 }
 
 /** Initial state for the field and baseline. */

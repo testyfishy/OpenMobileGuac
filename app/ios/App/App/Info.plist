@@ -18,6 +18,18 @@
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<!-- openmobileguac://connect?... deep links (CON-5) and the SSO app callback (SRV-7). -->
+			<key>CFBundleURLName</key>
+			<string>app.openmobileguac.client</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>openmobileguac</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
@@ -34,6 +46,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>OpenMobileGuac uses Face ID, when you turn on the app lock, to unlock the app and your saved server credentials.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OpenMobileGuac connects to the remote desktop servers you add, which are often on your local or private network.</string>
 	<key>LSRequiresIPhoneOS</key>

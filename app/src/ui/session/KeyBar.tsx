@@ -1,21 +1,24 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import type { Modifier, ModifierState } from '../../session/keys/KeyModel.ts';
 import { ChromeButton } from './ChromeButton.tsx';
 import { IconArrow, IconChevronDown } from './icons.tsx';
+import {
+  parseToken,
+  tokenLabel,
+  tokenSpokenLabel,
+  visibleRows,
+  type KeyBarLayout,
+} from './keyBarLayout.ts';
 
 export interface KeyBarProps {
   readonly modifiers: Readonly<Record<Modifier, ModifierState>>;
+  readonly layout: KeyBarLayout;
   readonly onKey: (name: string) => void;
   readonly onModifier: (mod: Modifier) => void;
-  readonly onCollapse: () => void;
+  readonly onCombo: (text: string) => void;
+  /** Omit to hide the collapse chevron (split layout keeps the bar). */
+  readonly onCollapse?: () => void;
 }
-
-const STICKY: { mod: Modifier; label: string }[] = [
-  { mod: 'Ctrl', label: 'Ctrl' },
-  { mod: 'Alt', label: 'Alt' },
-  { mod: 'Shift', label: 'Shift' },
-  { mod: 'Super', label: 'Win' },
-];
 
 const MOD_STATE_TEXT: Record<ModifierState, string> = {
   off: 'off',
@@ -23,98 +26,96 @@ const MOD_STATE_TEXT: Record<ModifierState, string> = {
   locked: 'locked',
 };
 
-function Key({
-  label,
-  name,
-  onKey,
-  wide,
-  children,
-}: {
-  label: string;
-  name: string;
-  onKey: (name: string) => void;
-  wide?: boolean;
-  children?: ReactNode;
-}) {
-  return (
-    <ChromeButton
-      className={wide ? 'omg-key omg-key--wide' : 'omg-key'}
-      aria-label={label}
-      onClick={() => onKey(name)}
-    >
-      {children ?? label}
-    </ChromeButton>
-  );
-}
+const ARROWS: Readonly<Record<string, 'left' | 'up' | 'down' | 'right'>> = {
+  Left: 'left',
+  Up: 'up',
+  Down: 'down',
+  Right: 'right',
+};
+
+const WIDE = new Set(['Home', 'End', 'PageUp', 'PageDown', 'Space', 'Insert', 'PrintScreen']);
 
 /**
- * Extra key bar (KEY-3, KEY-5): docked above the soft keyboard, or at the bottom when the
- * keyboard is hidden. Sticky modifiers: tap = next key only, tap again = locked, again = off.
+ * Extra key bar (KEY-3, KEY-5, KEY-7): docked above the soft keyboard, or at the bottom when
+ * the keyboard is hidden. Rows come from the user's layout (see keyBarLayout.ts). Sticky
+ * modifiers: tap = next key only, tap again = locked, again = off.
  */
-export function KeyBar({ modifiers, onKey, onModifier, onCollapse }: KeyBarProps) {
-  const [showF, setShowF] = useState(false);
+export function KeyBar({ modifiers, layout, onKey, onModifier, onCombo, onCollapse }: KeyBarProps) {
+  const [fnOn, setFnOn] = useState(false);
+  const rows = visibleRows(layout, fnOn);
+  const lastIndex = rows.length - 1;
   return (
     <div className="omg-keybar" role="toolbar" aria-label="Extra keys">
-      {showF && (
-        <div className="omg-keybar__row omg-keybar__row--f">
-          {Array.from({ length: 12 }, (_, i) => `F${i + 1}`).map((f) => (
-            <Key key={f} label={f} name={f} onKey={onKey} />
-          ))}
-        </div>
-      )}
-      <div className="omg-keybar__row">
-        <Key label="Esc" name="Esc" onKey={onKey} />
-        <Key label="Tab" name="Tab" onKey={onKey} />
-        {STICKY.map(({ mod, label }) => {
-          const state = modifiers[mod];
-          return (
-            <ChromeButton
-              key={mod}
-              className={`omg-key omg-key--mod omg-key--${state}`}
-              aria-label={`${label}, ${MOD_STATE_TEXT[state]}`}
-              aria-pressed={state === 'off' ? false : state === 'locked' ? true : 'mixed'}
-              onClick={() => onModifier(mod)}
-            >
-              {label}
-              <span className="omg-key__lock" aria-hidden="true" />
-            </ChromeButton>
-          );
-        })}
-        <Key label="Left arrow" name="Left" onKey={onKey}>
-          <IconArrow dir="left" />
-        </Key>
-        <Key label="Up arrow" name="Up" onKey={onKey}>
-          <IconArrow dir="up" />
-        </Key>
-        <Key label="Down arrow" name="Down" onKey={onKey}>
-          <IconArrow dir="down" />
-        </Key>
-        <Key label="Right arrow" name="Right" onKey={onKey}>
-          <IconArrow dir="right" />
-        </Key>
-        <Key label="Home" name="Home" onKey={onKey} wide />
-        <Key label="End" name="End" onKey={onKey} wide />
-        <Key label="Page up" name="PageUp" onKey={onKey} wide>
-          PgUp
-        </Key>
-        <Key label="Page down" name="PageDown" onKey={onKey} wide>
-          PgDn
-        </Key>
-        <Key label="Delete" name="Delete" onKey={onKey}>
-          Del
-        </Key>
-        <ChromeButton
-          className={showF ? 'omg-key omg-key--toggle omg-key--locked' : 'omg-key omg-key--toggle'}
-          aria-label="Function keys F1 to F12"
-          aria-pressed={showF}
-          onClick={() => setShowF((v) => !v)}
+      {rows.map((row, ri) => (
+        <div
+          key={`${ri}:${row.join(',')}`}
+          className={ri === lastIndex ? 'omg-keybar__row' : 'omg-keybar__row omg-keybar__row--f'}
         >
-          Fn
-        </ChromeButton>
-        <ChromeButton className="omg-key" aria-label="Hide extra keys" onClick={onCollapse}>
-          <IconChevronDown />
-        </ChromeButton>
-      </div>
+          {row.map((token, ki) => {
+            const t = parseToken(token);
+            if (!t) return null;
+            const key = `${ki}:${token}`;
+            if (t.kind === 'modifier') {
+              const state = modifiers[t.mod];
+              return (
+                <ChromeButton
+                  key={key}
+                  className={`omg-key omg-key--mod omg-key--${state}`}
+                  aria-label={`${tokenSpokenLabel(token)}, ${MOD_STATE_TEXT[state]}`}
+                  aria-pressed={state === 'off' ? false : state === 'locked' ? true : 'mixed'}
+                  onClick={() => onModifier(t.mod)}
+                >
+                  {tokenLabel(token)}
+                  <span className="omg-key__lock" aria-hidden="true" />
+                </ChromeButton>
+              );
+            }
+            if (t.kind === 'fn') {
+              return (
+                <ChromeButton
+                  key={key}
+                  className={
+                    fnOn ? 'omg-key omg-key--toggle omg-key--locked' : 'omg-key omg-key--toggle'
+                  }
+                  aria-label={tokenSpokenLabel(token)}
+                  aria-pressed={fnOn}
+                  onClick={() => setFnOn((v) => !v)}
+                >
+                  Fn
+                </ChromeButton>
+              );
+            }
+            if (t.kind === 'combo') {
+              return (
+                <ChromeButton
+                  key={key}
+                  className="omg-key omg-key--combo"
+                  aria-label={tokenSpokenLabel(token)}
+                  onClick={() => onCombo(t.text)}
+                >
+                  {t.text}
+                </ChromeButton>
+              );
+            }
+            const arrow = ARROWS[t.name];
+            return (
+              <ChromeButton
+                key={key}
+                className={WIDE.has(t.name) ? 'omg-key omg-key--wide' : 'omg-key'}
+                aria-label={tokenSpokenLabel(token)}
+                onClick={() => onKey(t.name)}
+              >
+                {arrow ? <IconArrow dir={arrow} /> : tokenLabel(token)}
+              </ChromeButton>
+            );
+          })}
+          {ri === lastIndex && onCollapse && (
+            <ChromeButton className="omg-key" aria-label="Hide extra keys" onClick={onCollapse}>
+              <IconChevronDown />
+            </ChromeButton>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

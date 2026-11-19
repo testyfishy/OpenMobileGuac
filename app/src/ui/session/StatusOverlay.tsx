@@ -18,16 +18,23 @@ export function StatusOverlay({ phase, title, onRetry, onClose }: StatusOverlayP
       heading = `Connecting to ${title}…`;
       break;
     case 'reconnecting':
-      heading = 'Connection lost. Reconnecting…';
-      detail = `${phase.reason} Attempt ${phase.attempt} of ${phase.maxAttempts}.`;
+      if (phase.waitingForNetwork) {
+        heading = 'Waiting for the network…';
+        detail = 'This device is offline. The session reconnects as soon as it is back.';
+      } else {
+        heading = 'Connection lost. Reconnecting…';
+        detail = `${phase.reason} Attempt ${phase.attempt} of ${phase.maxAttempts}.`;
+      }
       break;
     case 'error':
-      heading = 'Could not connect';
+      heading = phase.heading ?? 'Could not connect';
       detail = phase.message;
       break;
     case 'disconnected':
-      heading = 'Disconnected';
-      detail = `The session with ${title} has ended.`;
+      heading = phase.byServer ? 'Session ended' : 'Disconnected';
+      detail = phase.byServer
+        ? `The remote side ended the session with ${title} (for example, you signed out there).`
+        : `The session with ${title} has ended.`;
       break;
   }
   return (

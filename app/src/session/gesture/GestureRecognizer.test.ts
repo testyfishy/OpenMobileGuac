@@ -35,7 +35,7 @@ function run(steps: Step[], config: Partial<GestureConfig> = {}, rec?: GestureRe
 /** Compact names: 'tap', 'pan:start', 'long-press:end!' (! = cancelled). */
 function names(gs: Gesture[]): string[] {
   return gs.map((g) => {
-    if ('phase' in g) return `${g.type}:${g.phase}${g.cancelled ? '!' : ''}`;
+    if ('phase' in g) return `${g.type}:${g.phase}${'cancelled' in g && g.cancelled ? '!' : ''}`;
     return g.type;
   });
 }
@@ -48,7 +48,7 @@ function find<T extends Gesture['type']>(gs: Gesture[], type: T, phase?: string)
   return g as Gesture & { type: T };
 }
 
-const DEFER = { deferTapForDoubleTapDrag: true };
+const TAP_DRAG = { tapDrag: true };
 const C = DEFAULT_GESTURE_CONFIG;
 
 describe('GestureRecognizer: table of sequences', () => {
@@ -74,13 +74,22 @@ describe('GestureRecognizer: table of sequences', () => {
       ['tap'],
     ],
     [
-      'slow release in the dead zone fires nothing',
+      'slow release before the long press is still a tap (no dead zone)',
       [
         ['d', 1, 100, 100, 0],
         ['u', 1, 100, 100, 400],
       ],
       {},
-      [],
+      ['tap'],
+    ],
+    [
+      'release just before the long-press threshold is a tap',
+      [
+        ['d', 1, 100, 100, 0],
+        ['u', 1, 100, 100, 499],
+      ],
+      {},
+      ['tap'],
     ],
     [
       'pan',
@@ -210,18 +219,18 @@ describe('GestureRecognizer: table of sequences', () => {
       ['tap', 'pan:start', 'pan:move', 'pan:end'],
     ],
     [
-      'deferred: single tap is emitted when the window expires',
+      'tap-drag: the press is sent on release, the release when the window expires',
       [
         ['d', 1, 100, 100, 0],
         ['u', 1, 100, 100, 60],
         ['t', 359],
         ['t', 360],
       ],
-      DEFER,
-      ['tap'],
+      TAP_DRAG,
+      ['pending-tap:start', 'pending-tap:end'],
     ],
     [
-      'deferred: double tap',
+      'tap-drag: double tap = release, then one more click',
       [
         ['d', 1, 100, 100, 0],
         ['u', 1, 100, 100, 60],
@@ -229,11 +238,11 @@ describe('GestureRecognizer: table of sequences', () => {
         ['u', 2, 104, 100, 260],
         ['t', 2000],
       ],
-      DEFER,
-      ['tap', 'double-tap'],
+      TAP_DRAG,
+      ['pending-tap:start', 'pending-tap:end', 'double-tap'],
     ],
     [
-      'deferred: double-tap-and-move = drag, first tap swallowed',
+      'tap-drag: tap-and-a-half then move = drag on the held button (no release first)',
       [
         ['d', 1, 100, 100, 0],
         ['u', 1, 100, 100, 60],
@@ -242,44 +251,55 @@ describe('GestureRecognizer: table of sequences', () => {
         ['u', 2, 140, 100, 300],
         ['t', 3000],
       ],
-      DEFER,
-      ['double-tap-drag:start', 'double-tap-drag:move', 'double-tap-drag:end'],
+      TAP_DRAG,
+      ['pending-tap:start', 'double-tap-drag:start', 'double-tap-drag:move', 'double-tap-drag:end'],
     ],
     [
-      'deferred: double-tap-and-hold starts the drag after tapMaxMs',
+      'tap-drag: tap-and-a-half held still arms the drag after tapMaxMs',
       [
         ['d', 1, 100, 100, 0],
         ['u', 1, 100, 100, 60],
         ['d', 2, 100, 100, 200],
-        ['t', 500],
+        ['t', 450],
         ['u', 2, 100, 100, 900],
       ],
-      DEFER,
-      ['double-tap-drag:start', 'double-tap-drag:end'],
+      TAP_DRAG,
+      ['pending-tap:start', 'double-tap-drag:start', 'double-tap-drag:end'],
     ],
     [
-      'deferred: second touch far away flushes the first tap at once',
+      'tap-drag: a slow but still second tap released before tapMaxMs is a double tap',
+      [
+        ['d', 1, 100, 100, 0],
+        ['u', 1, 100, 100, 60],
+        ['d', 2, 100, 100, 200],
+        ['u', 2, 100, 100, 440],
+      ],
+      TAP_DRAG,
+      ['pending-tap:start', 'pending-tap:end', 'double-tap'],
+    ],
+    [
+      'tap-drag: second touch far away releases the first tap at once',
       [
         ['d', 1, 100, 100, 0],
         ['u', 1, 100, 100, 60],
         ['d', 2, 300, 300, 100],
       ],
-      DEFER,
-      ['tap'],
+      TAP_DRAG,
+      ['pending-tap:start', 'pending-tap:end'],
     ],
     [
-      'deferred: a second finger joining flushes the pending tap',
+      'tap-drag: a second finger joining releases the pending tap',
       [
         ['d', 1, 100, 100, 0],
         ['u', 1, 100, 100, 60],
         ['d', 2, 100, 100, 100],
         ['d', 3, 180, 100, 110],
       ],
-      DEFER,
-      ['tap'],
+      TAP_DRAG,
+      ['pending-tap:start', 'pending-tap:end'],
     ],
     [
-      'deferred: cancel drops the held-back tap',
+      'tap-drag: cancel releases the held button',
       [
         ['d', 1, 100, 100, 0],
         ['u', 1, 100, 100, 60],
@@ -287,8 +307,31 @@ describe('GestureRecognizer: table of sequences', () => {
         ['c', 2, 100, 100, 120],
         ['t', 5000],
       ],
-      DEFER,
-      [],
+      TAP_DRAG,
+      ['pending-tap:start', 'pending-tap:end'],
+    ],
+    [
+      'tap-drag: a second touch after the window but inside the double-tap window = plain pan',
+      [
+        ['d', 1, 100, 100, 0],
+        ['u', 1, 100, 100, 60],
+        ['t', 360],
+        ['d', 2, 100, 100, 360],
+        ['m', 2, 150, 100, 380],
+        ['u', 2, 150, 100, 400],
+      ],
+      { ...TAP_DRAG, doubleTapWindowMs: 300 },
+      ['pending-tap:start', 'pending-tap:end', 'pan:start', 'pan:move', 'pan:end'],
+    ],
+    [
+      'tap-drag: long press on a fresh touch still works',
+      [
+        ['d', 1, 100, 100, 0],
+        ['t', 500],
+        ['u', 1, 100, 100, 600],
+      ],
+      TAP_DRAG,
+      ['long-press:start', 'long-press:end'],
     ],
     [
       'two-finger tap',
@@ -302,18 +345,59 @@ describe('GestureRecognizer: table of sequences', () => {
       ['two-finger-tap'],
     ],
     [
-      'two-finger tap held too long is nothing',
+      'slow two-finger tap (no dead zone) is still a tap',
       [
         ['d', 1, 100, 100, 0],
         ['d', 2, 200, 100, 20],
         ['u', 1, 100, 100, 350],
-        ['u', 2, 200, 100, 360],
+        ['u', 2, 200, 100, 450],
+      ],
+      {},
+      ['two-finger-tap'],
+    ],
+    [
+      'two-finger press held past the long-press time is nothing',
+      [
+        ['d', 1, 100, 100, 0],
+        ['d', 2, 200, 100, 20],
+        ['u', 1, 100, 100, 520],
+        ['u', 2, 200, 100, 530],
       ],
       {},
       [],
     ],
     [
-      'three-finger tap',
+      'two-finger double tap never sends a second right click',
+      [
+        ['d', 1, 100, 100, 0],
+        ['d', 2, 200, 100, 10],
+        ['u', 1, 100, 100, 60],
+        ['u', 2, 200, 100, 70],
+        ['d', 3, 100, 100, 200],
+        ['d', 4, 200, 100, 205],
+        ['u', 3, 100, 100, 260],
+        ['u', 4, 200, 100, 270],
+      ],
+      {},
+      ['two-finger-tap', 'two-finger-double-tap'],
+    ],
+    [
+      'two two-finger taps far apart in time are two right clicks',
+      [
+        ['d', 1, 100, 100, 0],
+        ['d', 2, 200, 100, 10],
+        ['u', 1, 100, 100, 60],
+        ['u', 2, 200, 100, 70],
+        ['d', 3, 100, 100, 800],
+        ['d', 4, 200, 100, 805],
+        ['u', 3, 100, 100, 860],
+        ['u', 4, 200, 100, 870],
+      ],
+      {},
+      ['two-finger-tap', 'two-finger-tap'],
+    ],
+    [
+      'three-finger tap is held for the double-tap window',
       [
         ['d', 1, 100, 100, 0],
         ['d', 2, 200, 100, 10],
@@ -321,9 +405,46 @@ describe('GestureRecognizer: table of sequences', () => {
         ['u', 2, 200, 100, 90],
         ['u', 1, 100, 100, 100],
         ['u', 3, 300, 100, 110],
+        ['t', 409],
+        ['t', 410],
       ],
       {},
       ['three-finger-tap'],
+    ],
+    [
+      'three-finger double tap = zoom reset, no middle click',
+      [
+        ['d', 1, 100, 100, 0],
+        ['d', 2, 200, 100, 10],
+        ['d', 3, 300, 100, 20],
+        ['u', 1, 100, 100, 80],
+        ['u', 2, 200, 100, 85],
+        ['u', 3, 300, 100, 90],
+        ['d', 4, 100, 100, 200],
+        ['d', 5, 200, 100, 205],
+        ['d', 6, 300, 100, 210],
+        ['u', 4, 100, 100, 260],
+        ['u', 5, 200, 100, 265],
+        ['u', 6, 300, 100, 270],
+        ['t', 5000],
+      ],
+      {},
+      ['three-finger-double-tap'],
+    ],
+    [
+      'a held three-finger tap is flushed before the next gesture',
+      [
+        ['d', 1, 100, 100, 0],
+        ['d', 2, 200, 100, 10],
+        ['d', 3, 300, 100, 20],
+        ['u', 1, 100, 100, 80],
+        ['u', 2, 200, 100, 85],
+        ['u', 3, 300, 100, 90],
+        ['d', 4, 100, 100, 150],
+        ['u', 4, 100, 100, 200],
+      ],
+      {},
+      ['three-finger-tap', 'tap'],
     ],
     [
       'four fingers produce nothing',
@@ -584,9 +705,9 @@ describe('GestureRecognizer: payloads', () => {
     expect([dt.firstX, dt.firstY, dt.x, dt.y]).toEqual([100, 100, 120, 90]);
   });
 
-  it('deferred tap latency is exactly the double-tap window and is reported at the deadline', () => {
-    const r = new GestureRecognizer(DEFER);
-    run(
+  it('tap-drag: the press has no latency; the release comes at the window deadline', () => {
+    const r = new GestureRecognizer(TAP_DRAG);
+    const { out } = run(
       [
         ['d', 1, 10, 20, 0],
         ['u', 1, 10, 20, 70],
@@ -594,11 +715,77 @@ describe('GestureRecognizer: payloads', () => {
       {},
       r,
     );
-    expect(r.nextDeadline()).toBe(70 + C.doubleTapWindowMs);
-    expect(r.tick(70 + C.doubleTapWindowMs - 1)).toEqual([]);
+    expect(out).toEqual([{ type: 'pending-tap', phase: 'start', x: 10, y: 20, timeMs: 70 }]);
+    expect(r.nextDeadline()).toBe(70 + C.tapDragInitialWindowMs);
+    expect(r.tick(70 + C.tapDragInitialWindowMs - 1)).toEqual([]);
     // A late tick still reports the deadline time, not the tick time.
-    expect(r.tick(5000)).toEqual([{ type: 'tap', x: 10, y: 20, timeMs: 370 }]);
+    expect(r.tick(5000)).toEqual([
+      { type: 'pending-tap', phase: 'end', x: 10, y: 20, timeMs: 250 },
+    ]);
     expect(r.nextDeadline()).toBeNull();
+  });
+
+  it('tap-drag: the window adapts to the observed second-touch gaps, within bounds', () => {
+    const r = new GestureRecognizer({
+      ...TAP_DRAG,
+      doubleTapWindowMs: 300,
+      tapDragMinWindowMs: 150,
+    });
+    expect(r.tapDragWindowMs()).toBe(180); // initial, before the rhythm is known
+    // Three quick double taps with gaps of 80, 90 and 100 ms.
+    let t = 0;
+    for (const gap of [80, 90, 100]) {
+      run(
+        [
+          ['d', 1, 0, 0, t],
+          ['u', 1, 0, 0, t + 50],
+          ['d', 2, 0, 0, t + 50 + gap],
+          ['u', 2, 0, 0, t + 100 + gap],
+        ],
+        {},
+        r,
+      );
+      t += 2000;
+    }
+    expect(r.tapDragWindowMs()).toBe(150); // 1.5 × 100
+    // A very fast user cannot push it under the minimum; a slow second tap grows it again.
+    run(
+      [
+        ['d', 1, 0, 0, t],
+        ['u', 1, 0, 0, t + 50],
+        ['t', t + 220],
+        ['d', 2, 0, 0, t + 50 + 190],
+        ['u', 2, 0, 0, t + 300],
+      ],
+      {},
+      r,
+    );
+    expect(r.tapDragWindowMs()).toBe(285);
+  });
+
+  it('tap-drag: what the remote would see for each case', () => {
+    // press = pending-tap:start / double-tap-drag holds it; release = pending-tap:end / drag end.
+    const lone = run(
+      [
+        ['d', 1, 0, 0, 0],
+        ['u', 1, 0, 0, 50],
+        ['t', 1000],
+      ],
+      TAP_DRAG,
+    ).out;
+    expect(names(lone)).toEqual(['pending-tap:start', 'pending-tap:end']);
+    const drag = run(
+      [
+        ['d', 1, 0, 0, 0],
+        ['u', 1, 0, 0, 50],
+        ['d', 2, 0, 0, 150],
+        ['m', 2, 40, 0, 200],
+        ['u', 2, 40, 0, 250],
+      ],
+      TAP_DRAG,
+    ).out;
+    // Exactly one press and one release around the motion.
+    expect(names(drag).filter((n) => n.endsWith(':end'))).toEqual(['double-tap-drag:end']);
   });
 
   it('immediate taps add no latency', () => {
@@ -708,7 +895,7 @@ describe('GestureRecognizer: payloads', () => {
   });
 
   it('nextDeadline tracks long press and double-tap-hold timers', () => {
-    const r = new GestureRecognizer(DEFER);
+    const r = new GestureRecognizer(TAP_DRAG);
     expect(r.nextDeadline()).toBeNull();
     run([['d', 1, 0, 0, 100]], {}, r);
     expect(r.nextDeadline()).toBe(100 + C.longPressMs);
@@ -723,8 +910,8 @@ describe('GestureRecognizer: payloads', () => {
     expect(r.nextDeadline()).toBe(200 + C.tapMaxMs);
   });
 
-  it('setConfig turning deferral off flushes a held-back tap', () => {
-    const r = new GestureRecognizer(DEFER);
+  it('setConfig turning tap-drag off releases a pending tap', () => {
+    const r = new GestureRecognizer(TAP_DRAG);
     run(
       [
         ['d', 1, 5, 5, 0],
@@ -733,8 +920,21 @@ describe('GestureRecognizer: payloads', () => {
       {},
       r,
     );
-    expect(names(r.setConfig({ deferTapForDoubleTapDrag: false }))).toEqual(['tap']);
+    expect(names(r.setConfig({ tapDrag: false }))).toEqual(['pending-tap:end']);
     expect(r.tick(10_000)).toEqual([]);
+  });
+
+  it('reset releases a pending tap', () => {
+    const r = new GestureRecognizer(TAP_DRAG);
+    run(
+      [
+        ['d', 1, 5, 5, 0],
+        ['u', 1, 5, 5, 50],
+      ],
+      {},
+      r,
+    );
+    expect(names(r.reset(60))).toEqual(['pending-tap:end']);
   });
 
   it('reset ends an active drag as cancelled and forgets everything', () => {

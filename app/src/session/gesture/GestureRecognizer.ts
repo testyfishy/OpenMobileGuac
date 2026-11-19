@@ -7,44 +7,60 @@
  * `nextDeadline()` tells the host when the next timer is due.
  *
  * Mouse pointers (`pointerType: 'mouse'`) are ignored: hardware mice bypass gesture
- * recognition (see `mapHardwareMouse` in PointerModel). Pen is treated like touch.
+ * recognition (see `mapHardwareMouse` in PointerModel). Pen is treated like touch here; the
+ * session host routes pens to the precise pointer path instead.
  *
  * Ambiguity rules (all deterministic):
  * - **Tap vs pan**: a single pointer is a tap if it is released within `tapSlopPx` of where
- *   it landed and within `tapMaxMs`. Leaving the slop starts a pan; the first pan move
- *   carries the whole distance from the landing point, so no motion is lost. Released after
- *   `tapMaxMs` but before `longPressMs` is a deliberate dead zone (nothing fires).
+ *   it landed and before the long press fires (`longPressMs`). There is no dead zone: any
+ *   stationary press shorter than a long press is a tap. Leaving the slop starts a pan; the
+ *   first pan move carries the whole distance from the landing point, so no motion is lost.
  * - **Long press** fires while held (`long-press` start) once `longPressMs` elapses with no
  *   slop exit. It is then closed by exactly one of: `long-press` end (released in place),
  *   `long-press` end with `cancelled` (second finger / cancel), or a `long-press-drag` start
  *   (moved out of slop).
  * - **Double tap**: a second tap landing within `doubleTapSlopPx` of the first and within
- *   `doubleTapWindowMs` of the first release. A `double-tap` is always preceded by the
- *   `tap` for the first touch, so consumers can treat it as "one more click".
- * - **Tap latency**: with `deferTapForDoubleTapDrag` off (direct mode) taps are emitted on
- *   release with zero added latency. With it on (trackpad mode, where double-tap-and-hold
- *   starts a drag) a tap is held back until either the double-tap window expires, a second
- *   touch lands far away, a second finger joins, or the second touch resolves. Trade-off:
- *   up to `doubleTapWindowMs` of extra latency per single tap in trackpad mode, in
- *   exchange for not sending a click that a following drag would turn into the OS's
- *   "double-click-and-drag" (e.g. maximising a window on title-bar drag).
- * - **Double-tap drag** (deferred mode only): the second touch moves out of slop, or is
- *   held past `tapMaxMs`. The pending first tap is dropped.
+ *   `doubleTapWindowMs` of the first release. A `double-tap` always follows the gesture(s)
+ *   for the first tap, so consumers treat it as "one more click".
+ * - **Tap-and-a-half drag** (`tapDrag`, trackpad mode): the first tap is reported as
+ *   `pending-tap` start **on release, with no delay** (consumers press the button), and its
+ *   `pending-tap` end (release the button) is held back for a short adaptive window. Then:
+ *   - nothing else happens: `pending-tap` end when the window expires (a click whose
+ *     button-up is late by the window; the button-down is instant);
+ *   - a quick second tap near it: `pending-tap` end, then `double-tap` (a double click);
+ *   - a second touch near it that moves out of slop or is held for `tapMaxMs`:
+ *     `double-tap-drag` start **while the button is still down**, so the remote sees one
+ *     press, motion, one release (a plain drag, never a double-click-drag);
+ *   - a touch far away, a second finger, a cancel or a reset: `pending-tap` end at once.
+ *   The window adapts to the user: it starts at `tapDragInitialWindowMs` (180 ms, or
+ *   1.5 × a slower gap already seen) and, after three observed second-touch gaps, becomes
+ *   1.5 × the largest recent gap, always clamped to [`tapDragMinWindowMs`,
+ *   `doubleTapWindowMs`]. Second touches that arrive after the window but inside
+ *   `doubleTapWindowMs` are recorded too (and are still a double click), so the window
+ *   grows for slow double-tappers.
+ *   With `tapDrag` off, taps are emitted as `tap` on release and nothing is held back.
  * - **Two/three-finger tap vs pinch vs two-finger pan**: while 2+ fingers are down and none
- *   has left `multiTouchSlopPx`, a release of all fingers within `tapMaxMs` of the first
- *   landing is an N-finger tap (N = most fingers down at once, 2 or 3). Otherwise, for the
- *   first two fingers, the change of finger span and the movement of their centroid since
- *   landing are compared: `pinch` when the span change reaches `pinchThresholdPx` and is
- *   at least `pinchDominance` × the centroid movement; `two-finger-pan` when the centroid
+ *   has left `multiTouchSlopPx`, a release of all fingers before `longPressMs` (from the
+ *   first landing) is an N-finger tap (N = most fingers down at once, 2 or 3). Otherwise,
+ *   for the first two fingers, the change of finger span and the movement of their centroid
+ *   since landing are compared: `pinch` when the span change reaches `pinchThresholdPx` and
+ *   is at least `pinchDominance` × the centroid movement; `two-finger-pan` when the centroid
  *   movement reaches `twoFingerPanThresholdPx` and it is not a pinch. The decision is
  *   locked for the rest of the gesture (a scroll never zooms and vice versa).
+ * - **Multi-finger double taps**: a two-finger tap is emitted at once (right click without
+ *   latency); a second two-finger tap within `doubleTapWindowMs` is reported as
+ *   `two-finger-double-tap` instead of a second `two-finger-tap`, so a hurried double tap
+ *   never sends two right clicks. A three-finger tap is held back for `doubleTapWindowMs`
+ *   (middle click pastes on X11, so it must not fire speculatively): a second three-finger
+ *   tap in the window gives `three-finger-double-tap` (zoom reset) and no middle click;
+ *   anything else first flushes the held `three-finger-tap`.
  * - **Second finger mid-pan**: the pan ends with zero velocity (no fling) and the two
  *   fingers continue as a pinch/two-finger-pan candidate (never a tap).
  * - **Extra fingers during a drag/pinch/pan** are ignored. After any multi-finger gesture
  *   or any finger lifting from one, nothing else fires until every finger is up.
- * - **Cancel** ends whatever is active with `cancelled: true`, drops a held-back tap and
- *   waits for all fingers to be up. A repeated `down` for an id already down is treated
- *   as a cancel of the current state first.
+ * - **Cancel** ends whatever is active with `cancelled: true`, releases a pending tap,
+ *   drops a held-back three-finger tap and waits for all fingers to be up. A repeated `down`
+ *   for an id already down is treated as a cancel of the current state first.
  */
 
 export type PointerKind = 'touch' | 'mouse' | 'pen';
@@ -61,8 +77,22 @@ export interface PointerInput {
 export type GesturePhase = 'start' | 'move' | 'end';
 
 export interface TapGesture {
-  readonly type: 'tap' | 'two-finger-tap' | 'three-finger-tap';
+  readonly type:
+    | 'tap'
+    | 'two-finger-tap'
+    | 'three-finger-tap'
+    | 'two-finger-double-tap'
+    | 'three-finger-double-tap';
   /** Screen position (centroid of the landing points for multi-finger taps). */
+  readonly x: number;
+  readonly y: number;
+  readonly timeMs: number;
+}
+
+/** Tap-and-a-half mode: `start` = press now (tap released), `end` = release now. */
+export interface PendingTapGesture {
+  readonly type: 'pending-tap';
+  readonly phase: 'start' | 'end';
   readonly x: number;
   readonly y: number;
   readonly timeMs: number;
@@ -120,21 +150,26 @@ export interface PinchGesture {
   readonly timeMs: number;
 }
 
-export type Gesture = TapGesture | DoubleTapGesture | LongPressGesture | DragGesture | PinchGesture;
+export type Gesture =
+  TapGesture | PendingTapGesture | DoubleTapGesture | LongPressGesture | DragGesture | PinchGesture;
 
 export interface GestureConfig {
   /** Max movement (screen px) for a touch to still count as a tap / press in place. */
   readonly tapSlopPx: number;
-  /** Max press duration for a tap (also the hold time that starts a double-tap drag). */
+  /** Hold time of the second touch that arms a tap-and-a-half drag (`tapDrag` only). */
   readonly tapMaxMs: number;
   /** Max time between the first release and the second landing for a double tap. */
   readonly doubleTapWindowMs: number;
   /** Max distance between the first and second tap of a double tap. */
   readonly doubleTapSlopPx: number;
-  /** Hold time for a long press. Should exceed `tapMaxMs`. */
+  /** Hold time for a long press; a stationary release before it is a tap. */
   readonly longPressMs: number;
-  /** Hold taps back so a double-tap-and-hold can become a drag (trackpad mode). */
-  readonly deferTapForDoubleTapDrag: boolean;
+  /** Tap-and-a-half drag: press on the first tap's release, release late (trackpad). */
+  readonly tapDrag: boolean;
+  /** Lower bound of the adaptive tap-drag window. */
+  readonly tapDragMinWindowMs: number;
+  /** Tap-drag window before the user's double-tap rhythm is known. */
+  readonly tapDragInitialWindowMs: number;
   /** Per-finger slop for multi-finger taps. */
   readonly multiTouchSlopPx: number;
   /** Span change (px) needed to recognise a pinch. */
@@ -149,17 +184,23 @@ export interface GestureConfig {
 
 export const DEFAULT_GESTURE_CONFIG: GestureConfig = {
   tapSlopPx: 10,
-  tapMaxMs: 300,
+  tapMaxMs: 250,
   doubleTapWindowMs: 300,
   doubleTapSlopPx: 40,
   longPressMs: 500,
-  deferTapForDoubleTapDrag: false,
+  tapDrag: false,
+  tapDragMinWindowMs: 150,
+  tapDragInitialWindowMs: 180,
   multiTouchSlopPx: 16,
   pinchThresholdPx: 24,
   twoFingerPanThresholdPx: 16,
   pinchDominance: 1,
   velocityWindowMs: 80,
 };
+
+/** Second-touch gaps remembered for the adaptive tap-drag window. */
+const GAP_HISTORY = 8;
+const GAPS_BEFORE_ADAPTING = 3;
 
 interface Sample {
   readonly x: number;
@@ -184,8 +225,17 @@ interface PrevTap {
   readonly x: number;
   readonly y: number;
   readonly upTime: number;
-  /** False while the tap is held back (deferred mode). */
-  readonly emitted: boolean;
+  /** Tap-drag mode: the button is down and its release is still held back. */
+  readonly pending: boolean;
+}
+
+interface PrevMulti {
+  readonly count: 2 | 3;
+  readonly x: number;
+  readonly y: number;
+  readonly upTime: number;
+  /** A held-back three-finger tap that has not been emitted yet. */
+  readonly held: boolean;
 }
 
 type State =
@@ -232,7 +282,10 @@ export class GestureRecognizer {
   private readonly tracks = new Map<number, Track>();
   private state: State = IDLE;
   private prevTap: PrevTap | null = null;
+  private prevMulti: PrevMulti | null = null;
   private lastTime = Number.NEGATIVE_INFINITY;
+  /** Recent gaps between a tap's release and the next touch near it (adaptive window). */
+  private gaps: number[] = [];
 
   constructor(config: Partial<GestureConfig> = {}) {
     this.config = { ...DEFAULT_GESTURE_CONFIG, ...config };
@@ -242,12 +295,12 @@ export class GestureRecognizer {
     return this.config;
   }
 
-  /** Update thresholds. Turning tap deferral off flushes a held-back tap. */
+  /** Update thresholds. Turning `tapDrag` off releases a pending tap. */
   setConfig(config: Partial<GestureConfig>): Gesture[] {
     const out: Gesture[] = [];
     this.config = { ...this.config, ...config };
-    if (!this.config.deferTapForDoubleTapDrag && this.prevTap && !this.prevTap.emitted) {
-      this.flushPrevTap(out, this.prevTap.upTime);
+    if (!this.config.tapDrag && this.prevTap?.pending) {
+      this.endPendingTap(out, this.lastTime);
     }
     return out;
   }
@@ -255,6 +308,20 @@ export class GestureRecognizer {
   /** Number of touch pointers currently down. */
   get activePointers(): number {
     return this.tracks.size;
+  }
+
+  /** Current tap-and-a-half window (ms): how long a tap's button-up is held back. */
+  tapDragWindowMs(): number {
+    const c = this.config;
+    const max = Math.max(0, c.doubleTapWindowMs);
+    const min = Math.min(max, Math.max(0, c.tapDragMinWindowMs));
+    const fromGaps = this.gaps.length > 0 ? Math.round(1.5 * Math.max(...this.gaps)) : 0;
+    // Until the user's own rhythm is known, start short but never below a gap already seen.
+    const value =
+      this.gaps.length < GAPS_BEFORE_ADAPTING
+        ? Math.max(c.tapDragInitialWindowMs, fromGaps)
+        : fromGaps;
+    return Math.min(max, Math.max(min, value));
   }
 
   /** When the next timer fires (ms), or null if none is pending. */
@@ -268,11 +335,12 @@ export class GestureRecognizer {
     if (s.kind === 'single') {
       const track = this.tracks.get(s.id);
       if (track) {
-        if (s.secondTap && c.deferTapForDoubleTapDrag) consider(track.downTime + c.tapMaxMs);
-        else consider(track.downTime + c.longPressMs);
+        if (s.secondTap && this.prevTap?.pending) consider(track.downTime + c.tapMaxMs);
+        consider(track.downTime + c.longPressMs);
       }
-    } else if (this.prevTap && s.kind === 'idle') {
-      consider(this.prevTap.upTime + c.doubleTapWindowMs);
+    } else if (s.kind === 'idle') {
+      if (this.prevTap?.pending) consider(this.prevTap.upTime + this.tapDragWindowMs());
+      if (this.prevMulti?.held) consider(this.prevMulti.upTime + c.doubleTapWindowMs);
     }
     return deadline;
   }
@@ -308,12 +376,17 @@ export class GestureRecognizer {
     return out;
   }
 
-  /** Abort everything (e.g. app backgrounded, mode switch). Ends active gestures as cancelled. */
+  /**
+   * Abort everything (e.g. app backgrounded, mode switch). Ends active gestures as
+   * cancelled and releases a pending tap; a held-back three-finger tap is dropped.
+   */
   reset(timeMs: number = this.lastTime): Gesture[] {
     const out: Gesture[] = [];
     const t = Number.isFinite(timeMs) ? timeMs : 0;
     this.cancelActive(t, out);
+    if (this.prevTap?.pending) this.endPendingTap(out, t);
     this.prevTap = null;
+    this.prevMulti = null;
     this.tracks.clear();
     this.state = IDLE;
     return out;
@@ -328,21 +401,30 @@ export class GestureRecognizer {
     return this.lastTime;
   }
 
+  private recordGap(gap: number): void {
+    if (!Number.isFinite(gap) || gap < 0) return;
+    this.gaps.push(gap);
+    if (this.gaps.length > GAP_HISTORY) this.gaps.shift();
+  }
+
   private runTimers(t: number, out: Gesture[]): void {
     const c = this.config;
     const s = this.state;
     if (s.kind === 'single') {
       const track = this.tracks.get(s.id);
       if (!track) return;
-      if (s.secondTap && c.deferTapForDoubleTapDrag) {
-        if (t >= track.downTime + c.tapMaxMs) {
-          // Double-tap-and-hold: start the drag in place.
-          this.prevTap = null;
-          this.state = { kind: 'dt-drag', id: s.id };
-          this.emitDrag(out, 'double-tap-drag', 'start', track, track.downTime + c.tapMaxMs);
-        }
-      } else if (t >= track.downTime + c.longPressMs) {
-        if (s.secondTap) this.prevTap = null;
+      if (s.secondTap && this.prevTap?.pending && t >= track.downTime + c.tapMaxMs) {
+        // Tap-and-a-half held in place: the drag starts with the button still down.
+        this.prevTap = null;
+        this.state = { kind: 'dt-drag', id: s.id };
+        this.emitDrag(out, 'double-tap-drag', 'start', track, track.downTime + c.tapMaxMs);
+        return;
+      }
+      if (t >= track.downTime + c.longPressMs) {
+        const at = track.downTime + c.longPressMs;
+        this.flushMulti(out, at);
+        if (this.prevTap?.pending) this.endPendingTap(out, at);
+        this.prevTap = null;
         this.state = { kind: 'long-pressed', id: s.id };
         out.push({
           type: 'long-press',
@@ -350,30 +432,46 @@ export class GestureRecognizer {
           x: track.startX,
           y: track.startY,
           cancelled: false,
-          timeMs: track.downTime + c.longPressMs,
+          timeMs: at,
         });
       }
       return;
     }
-    if (s.kind === 'idle' && this.prevTap && t >= this.prevTap.upTime + c.doubleTapWindowMs) {
-      this.flushPrevTap(out, this.prevTap.upTime + c.doubleTapWindowMs);
-      this.prevTap = null;
+    if (s.kind !== 'idle') return;
+    const p = this.prevTap;
+    if (p?.pending) {
+      const due = p.upTime + this.tapDragWindowMs();
+      if (t >= due) this.endPendingTap(out, due);
+    }
+    const m = this.prevMulti;
+    if (m?.held && t >= m.upTime + c.doubleTapWindowMs) {
+      this.flushMulti(out, m.upTime + c.doubleTapWindowMs);
     }
   }
 
-  /** Emit a held-back tap, if any. Keeps `prevTap` (marked emitted) for double-tap matching. */
-  private flushPrevTap(out: Gesture[], timeMs: number): void {
+  /** Release a pending tap (tap-drag mode). Keeps `prevTap` for double-tap matching. */
+  private endPendingTap(out: Gesture[], timeMs: number): void {
     const p = this.prevTap;
-    if (!p || p.emitted) return;
-    out.push({ type: 'tap', x: p.x, y: p.y, timeMs });
-    this.prevTap = { ...p, emitted: true };
+    if (!p?.pending) return;
+    out.push({ type: 'pending-tap', phase: 'end', x: p.x, y: p.y, timeMs });
+    this.prevTap = { ...p, pending: false };
+  }
+
+  /** Emit a held-back three-finger tap, if any, and forget the previous multi tap. */
+  private flushMulti(out: Gesture[], timeMs: number): void {
+    const m = this.prevMulti;
+    if (!m) return;
+    if (m.held) out.push({ type: 'three-finger-tap', x: m.x, y: m.y, timeMs });
+    this.prevMulti = null;
   }
 
   private onDown(e: PointerInput, t: number, out: Gesture[]): void {
     if (this.tracks.has(e.id)) {
       // Missed up/cancel for this id: abandon the current state first.
       this.cancelActive(t, out);
+      if (this.prevTap?.pending) this.endPendingTap(out, t);
       this.prevTap = null;
+      this.flushMulti(out, t);
       this.tracks.clear();
       this.state = IDLE;
     }
@@ -389,16 +487,21 @@ export class GestureRecognizer {
       samples: [{ x: e.x, y: e.y, t }],
     };
     this.tracks.set(e.id, track);
+    const c = this.config;
     const s = this.state;
     switch (s.kind) {
       case 'idle': {
+        const m = this.prevMulti;
+        if (m && t > m.upTime + c.doubleTapWindowMs) this.flushMulti(out, t);
         let secondTap = false;
         const p = this.prevTap;
         if (p) {
-          if (dist(p.x, p.y, e.x, e.y) <= this.config.doubleTapSlopPx) {
+          const gap = t - p.upTime;
+          if (gap <= c.doubleTapWindowMs && dist(p.x, p.y, e.x, e.y) <= c.doubleTapSlopPx) {
             secondTap = true;
+            if (c.tapDrag) this.recordGap(gap);
           } else {
-            this.flushPrevTap(out, t);
+            if (p.pending) this.endPendingTap(out, t);
             this.prevTap = null;
           }
         }
@@ -406,7 +509,7 @@ export class GestureRecognizer {
         return;
       }
       case 'single': {
-        this.flushPrevTap(out, t);
+        if (this.prevTap?.pending) this.endPendingTap(out, t);
         this.prevTap = null;
         const first = this.tracks.get(s.id);
         this.state = {
@@ -450,6 +553,7 @@ export class GestureRecognizer {
           s.landings.push({ x: e.x, y: e.y });
           s.maxCount = Math.max(s.maxCount, s.ids.length);
         } else if (s.lifted || s.ids.length >= 3) {
+          this.flushMulti(out, t);
           this.state = { kind: 'wait-all-up' };
         }
         // Otherwise (non-tap candidate with two fingers): ignore the extra finger.
@@ -509,12 +613,15 @@ export class GestureRecognizer {
       case 'single': {
         if (s.id !== track.id) return;
         if (dist(track.x, track.y, track.startX, track.startY) <= c.tapSlopPx) return;
-        if (s.secondTap && c.deferTapForDoubleTapDrag) {
+        this.flushMulti(out, t);
+        if (s.secondTap && this.prevTap?.pending) {
+          // Tap-and-a-half: the button from the first tap is still down.
           this.prevTap = null;
           this.state = { kind: 'dt-drag', id: track.id };
           this.emitDragStartAndMove(out, 'double-tap-drag', track, t);
         } else {
-          if (s.secondTap) this.prevTap = null;
+          if (this.prevTap?.pending) this.endPendingTap(out, t);
+          this.prevTap = null;
           this.state = { kind: 'pan', id: track.id };
           this.emitDragStartAndMove(out, 'pan', track, t);
         }
@@ -561,7 +668,10 @@ export class GestureRecognizer {
       s.tapEligible = false;
     }
     if (s.lifted || s.maxCount >= 3) {
-      if (!s.tapEligible) this.state = { kind: 'wait-all-up' };
+      if (!s.tapEligible) {
+        this.flushMulti(out, t);
+        this.state = { kind: 'wait-all-up' };
+      }
       return;
     }
     const [ida, idb] = s.ids;
@@ -581,6 +691,7 @@ export class GestureRecognizer {
     const isPan = !isPinch && centroidMove >= c.twoFingerPanThresholdPx;
     if (!isPinch && !isPan) return;
 
+    this.flushMulti(out, t);
     const kind = isPinch ? 'pinch' : 'two-pan';
     const safeStartSpan = startSpan > 0 ? startSpan : 1;
     const next: Extract<State, { kind: 'two-pan' | 'pinch' }> = {
@@ -686,14 +797,14 @@ export class GestureRecognizer {
     const s = this.state;
     switch (s.kind) {
       case 'single': {
+        // Still 'single' means: within slop and released before the long press fired.
         this.tracks.delete(e.id);
         this.state = IDLE;
-        const duration = t - track.downTime;
-        const isTap = duration <= c.tapMaxMs;
+        this.flushMulti(out, t);
         if (s.secondTap) {
           const p = this.prevTap;
-          if (isTap && p) {
-            this.flushPrevTap(out, t);
+          if (p) {
+            if (p.pending) this.endPendingTap(out, t);
             out.push({
               type: 'double-tap',
               x: track.x,
@@ -706,12 +817,18 @@ export class GestureRecognizer {
           this.prevTap = null;
           return;
         }
-        if (!isTap) return;
-        if (c.deferTapForDoubleTapDrag) {
-          this.prevTap = { x: track.startX, y: track.startY, upTime: t, emitted: false };
+        if (c.tapDrag) {
+          out.push({
+            type: 'pending-tap',
+            phase: 'start',
+            x: track.startX,
+            y: track.startY,
+            timeMs: t,
+          });
+          this.prevTap = { x: track.startX, y: track.startY, upTime: t, pending: true };
         } else {
           out.push({ type: 'tap', x: track.startX, y: track.startY, timeMs: t });
-          this.prevTap = { x: track.startX, y: track.startY, upTime: t, emitted: true };
+          this.prevTap = { x: track.startX, y: track.startY, upTime: t, pending: false };
         }
         return;
       }
@@ -747,8 +864,10 @@ export class GestureRecognizer {
         if (s.ids.includes(e.id)) s.lifted = true;
         if (this.tracks.size > 0) return;
         this.state = IDLE;
-        if (s.tapEligible && t - s.startTime <= c.tapMaxMs) {
+        if (s.tapEligible && t - s.startTime < c.longPressMs) {
           this.emitMultiTap(s, t, out);
+        } else {
+          this.flushMulti(out, t);
         }
         return;
       }
@@ -777,18 +896,38 @@ export class GestureRecognizer {
       sx += p.x;
       sy += p.y;
     }
-    out.push({
-      type: s.maxCount >= 3 ? 'three-finger-tap' : 'two-finger-tap',
-      x: sx / n,
-      y: sy / n,
-      timeMs: t,
-    });
+    const x = sx / n;
+    const y = sy / n;
+    const count: 2 | 3 = s.maxCount >= 3 ? 3 : 2;
+    const window = this.config.doubleTapWindowMs;
+    const prev = this.prevMulti;
+    const isDouble = prev !== null && prev.count === count && s.startTime - prev.upTime <= window;
+    if (isDouble) {
+      // The first of the pair was either emitted (two fingers) or held back (three).
+      this.prevMulti = null;
+      out.push({
+        type: count === 3 ? 'three-finger-double-tap' : 'two-finger-double-tap',
+        x,
+        y,
+        timeMs: t,
+      });
+      return;
+    }
+    this.flushMulti(out, t);
+    if (count === 3) {
+      this.prevMulti = { count, x, y, upTime: t, held: true };
+    } else {
+      out.push({ type: 'two-finger-tap', x, y, timeMs: t });
+      this.prevMulti = { count, x, y, upTime: t, held: false };
+    }
   }
 
   private onCancel(e: PointerInput, t: number, out: Gesture[]): void {
     if (!this.tracks.has(e.id)) return;
     this.cancelActive(t, out);
+    if (this.prevTap?.pending) this.endPendingTap(out, t);
     this.prevTap = null;
+    this.prevMulti = null;
     this.tracks.delete(e.id);
     this.state = this.tracks.size > 0 ? { kind: 'wait-all-up' } : IDLE;
   }

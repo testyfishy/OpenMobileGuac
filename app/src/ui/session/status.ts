@@ -53,8 +53,22 @@ const MESSAGES: Readonly<Record<number, string>> = {
   [STATUS.CLIENT_TOO_MANY]: 'Too many sessions are open for this account or connection.',
 };
 
-/** A readable message for a status code; falls back to the server's text, then a generic one. */
-export function statusMessage(code: number, serverMessage?: string): string {
+/** Where an error status came from: guacd (`error` instruction) or the tunnel itself. */
+export type StatusSource = 'client' | 'tunnel';
+
+/**
+ * A readable message for a status code; falls back to the server's text, then a generic one.
+ * CLIENT_UNAUTHORIZED means different things by source (upstream `en.json`:
+ * `ERROR_CLIENT_301` "Log in failed" vs `ERROR_TUNNEL_301` "not logged in"): from guacd it
+ * is the remote computer rejecting the credentials, from the tunnel an expired sign-in.
+ */
+export function statusMessage(code: number, serverMessage?: string, source?: StatusSource): string {
+  if (code === STATUS.CLIENT_UNAUTHORIZED && source === 'client') {
+    return 'The remote computer rejected the sign-in. Check the username and password and try again.';
+  }
+  if (code === STATUS.CLIENT_FORBIDDEN && source === 'client') {
+    return 'The remote computer denied access to this account.';
+  }
   const known = MESSAGES[code];
   if (known) return known;
   const text = serverMessage?.trim();
@@ -90,6 +104,78 @@ export function isRetryableStatus(code: number): boolean {
 // ---------------------------------------------------------------------------------------
 // Overlay state machine
 
+/**
+ * Why a session ended, for tailored messages and the retry decision (DSP-9). Derived from
+ * the status code and, where guacd uses one code for several causes, its message. RDP
+ * (guacamole-server `src/protocols/rdp/error.c`, `guac_rdp_client_abort`):
+ * SESSION_CLOSED "Forcibly disconnected." / "Logged off." / "Active session time limit
+ * exceeded.", SESSION_TIMEOUT "Idle session time limit exceeded.", SESSION_CONFLICT
+ * "Disconnected by other connection."; a log off or disconnect by the remote user sends
+ * no error at all (status SUCCESS), so the session just ends.
+ */
+export type EndReason =
+  | 'network'
+  | 'server-closed'
+  | 'logged-off'
+  | 'kicked'
+  | 'idle'
+  | 'auth'
+  | 'forbidden'
+  | 'not-found'
+  | 'busy'
+  | 'other';
+
+export function classifyStatus(code: number, serverMessage?: string): EndReason {
+  switch (code) {
+    case STATUS.SESSION_CONFLICT:
+      return 'kicked';
+    case STATUS.SESSION_TIMEOUT:
+      return 'idle';
+    case STATUS.SESSION_CLOSED:
+      return /log(ged)?[\s-]*off/i.test(serverMessage ?? '') ? 'logged-off' : 'server-closed';
+    case STATUS.RESOURCE_CONFLICT:
+    case STATUS.CLIENT_TOO_MANY:
+    case STATUS.SERVER_BUSY:
+      return 'busy';
+    case STATUS.CLIENT_UNAUTHORIZED:
+      return 'auth';
+    case STATUS.CLIENT_FORBIDDEN:
+      return 'forbidden';
+    case STATUS.RESOURCE_NOT_FOUND:
+      return 'not-found';
+    case STATUS.UPSTREAM_NOT_FOUND:
+    case STATUS.CLIENT_TIMEOUT:
+    case STATUS.UPSTREAM_TIMEOUT:
+      return 'network';
+    default:
+      return 'other';
+  }
+}
+
+/** Overlay heading for an ended session. */
+export function endHeading(reason: EndReason, everConnected: boolean): string {
+  switch (reason) {
+    case 'kicked':
+      return 'Signed in elsewhere';
+    case 'idle':
+      return 'Session timed out';
+    case 'logged-off':
+      return 'Signed out';
+    case 'server-closed':
+      return 'Disconnected by the server';
+    case 'auth':
+      return 'Sign-in failed';
+    case 'forbidden':
+      return 'Access denied';
+    case 'busy':
+      return 'Connection busy';
+    case 'network':
+      return everConnected ? 'Connection lost' : 'Could not connect';
+    default:
+      return everConnected ? 'Connection ended' : 'Could not connect';
+  }
+}
+
 export type SessionPhase =
   | { readonly kind: 'connecting' }
   | { readonly kind: 'connected' }
@@ -100,9 +186,21 @@ export type SessionPhase =
       readonly maxAttempts: number;
       readonly delayMs: number;
       readonly reason: string;
+      /** The device is offline: the attempt waits for the network instead of the delay. */
+      readonly waitingForNetwork?: boolean;
     }
-  | { readonly kind: 'error'; readonly code: number | null; readonly message: string }
-  | { readonly kind: 'disconnected' };
+  | {
+      readonly kind: 'error';
+      readonly code: number | null;
+      readonly message: string;
+      readonly reason?: EndReason;
+      readonly heading?: string;
+    }
+  | {
+      readonly kind: 'disconnected';
+      /** The remote side ended the session (e.g. the user signed out on the remote). */
+      readonly byServer?: boolean;
+    };
 
 export interface ReconnectPolicy {
   readonly maxAttempts: number;
@@ -136,10 +234,16 @@ export type SessionEvent =
       readonly code: number;
       readonly message?: string;
       readonly display?: string;
+      readonly source?: StatusSource;
     }
-  /** The tunnel closed. `intentional` = the user, unmount or the server asked for it. */
-  | { readonly type: 'closed'; readonly intentional: boolean }
-  | { readonly type: 'user-disconnect' };
+  /**
+   * The tunnel closed. `intentional` = the user, unmount or the server asked for it;
+   * `byServer` = the server ended the session without an error.
+   */
+  | { readonly type: 'closed'; readonly intentional: boolean; readonly byServer?: boolean }
+  | { readonly type: 'user-disconnect' }
+  /** Device network state (`online` / `offline` events). */
+  | { readonly type: 'network'; readonly online: boolean };
 
 export interface SessionMachine {
   readonly phase: SessionPhase;
@@ -147,8 +251,14 @@ export interface SessionMachine {
   readonly everConnected: boolean;
   /** Reconnect attempts made since the last successful connection. */
   readonly attempts: number;
-  /** Last error seen in this attempt (decides retry vs error). */
-  readonly lastError: { readonly code: number; readonly text: string } | null;
+  /** First error seen in this attempt (decides retry vs error). */
+  readonly lastError: {
+    readonly code: number;
+    readonly text: string;
+    readonly reason: EndReason;
+  } | null;
+  /** The device reported that it is offline. */
+  readonly offline?: boolean;
 }
 
 export const INITIAL_SESSION_MACHINE: SessionMachine = {
@@ -160,8 +270,10 @@ export const INITIAL_SESSION_MACHINE: SessionMachine = {
 
 /**
  * Reduce a connection event. Auto-reconnect happens only after an unintentional close of a
- * session that had connected, when the last error (if any) is retryable, and while
- * attempts remain. The host schedules the retry after `phase.delayMs`.
+ * session that had connected, when the first error of the attempt (if any) is retryable,
+ * and while attempts remain. The host schedules the retry after `phase.delayMs`, or, while
+ * `phase.waitingForNetwork`, as soon as the network is back. Terminal causes (signed in
+ * elsewhere, idle timeout, closed by an administrator, sign-in failure) never retry.
  */
 export function reduceSession(
   m: SessionMachine,
@@ -173,17 +285,44 @@ export function reduceSession(
       return {
         ...m,
         lastError: null,
-        phase: m.phase.kind === 'reconnecting' ? m.phase : { kind: 'connecting' },
+        phase:
+          m.phase.kind === 'reconnecting'
+            ? { ...m.phase, waitingForNetwork: false }
+            : { kind: 'connecting' },
       };
-    case 'connected':
-      return { phase: { kind: 'connected' }, everConnected: true, attempts: 0, lastError: null };
-    case 'error':
-      return {
-        ...m,
-        lastError: { code: e.code, text: e.display ?? statusMessage(e.code, e.message) },
+    case 'connected': {
+      const next: SessionMachine = {
+        phase: { kind: 'connected' },
+        everConnected: true,
+        attempts: 0,
+        lastError: null,
       };
+      return m.offline ? { ...next, offline: true } : next;
+    }
+    case 'error': {
+      // Keep the first error of an attempt: a tunnel error that follows a guacd error is
+      // less specific.
+      if (m.lastError !== null) return m;
+      const text =
+        e.display ??
+        (e.source === 'tunnel'
+          ? tunnelErrorMessage(e.code, e.message)
+          : statusMessage(e.code, e.message, e.source));
+      const reason: EndReason =
+        e.source === 'tunnel' && e.code === STATUS.UPSTREAM_UNAVAILABLE
+          ? 'network'
+          : classifyStatus(e.code, e.message);
+      return { ...m, lastError: { code: e.code, text, reason } };
+    }
     case 'user-disconnect':
       return { ...m, phase: { kind: 'disconnected' } };
+    case 'network': {
+      const offline = !e.online;
+      if (m.phase.kind === 'reconnecting') {
+        return { ...m, offline, phase: { ...m.phase, waitingForNetwork: offline } };
+      }
+      return { ...m, offline };
+    }
     case 'closed': {
       if (m.phase.kind === 'error' || m.phase.kind === 'disconnected') return m;
       const err = m.lastError;
@@ -201,16 +340,28 @@ export function reduceSession(
             maxAttempts: policy.maxAttempts,
             delayMs: reconnectDelay(attempt, policy),
             reason: err ? err.text : 'The connection was lost.',
+            waitingForNetwork: m.offline === true,
           },
         };
       }
       if (err) {
         return {
           ...m,
-          phase: { kind: 'error', code: err.code, message: err.text },
+          phase: {
+            kind: 'error',
+            code: err.code,
+            message: err.text,
+            reason: err.reason,
+            heading: endHeading(err.reason, m.everConnected),
+          },
         };
       }
-      if (e.intentional) return { ...m, phase: { kind: 'disconnected' } };
+      if (e.intentional) {
+        return {
+          ...m,
+          phase: e.byServer ? { kind: 'disconnected', byServer: true } : { kind: 'disconnected' },
+        };
+      }
       return {
         ...m,
         phase: {
@@ -218,7 +369,9 @@ export function reduceSession(
           code: null,
           message: m.everConnected
             ? 'The connection was lost and could not be restored.'
-            : 'Could not reach the server.',
+            : m.offline
+              ? 'This device is offline.'
+              : 'Could not reach the server.',
         },
       };
     }

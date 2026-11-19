@@ -169,6 +169,54 @@ describe('KeyModel sticky modifiers (KEY-3)', () => {
     ]);
   });
 
+  it.each([
+    ['1', 0x21],
+    ['2', 0x40],
+    ['9', 0x28],
+    ['-', 0x5f],
+    ['/', 0x3f],
+    ['`', 0x7e],
+    ["'", 0x22],
+  ])('sticky Shift + "%s" sends the shifted keysym with Shift held', (ch, shifted) => {
+    // guacd's keymaps type keysym "1" without Shift even when Shift is held, so the
+    // shifted keysym must be sent (see the file comment).
+    const k = new KeyModel();
+    k.tapModifier('Shift');
+    expect(ev(k.typeText(ch))).toEqual([down(SHIFT), down(shifted), up(shifted), up(SHIFT)]);
+  });
+
+  it('sticky Shift + key-bar / hardware keysym uses the shifted symbol too', () => {
+    const k = new KeyModel();
+    k.tapModifier('Shift');
+    expect(ev(k.pressKey(0x31))).toEqual([down(SHIFT), down(0x21), up(0x21), up(SHIFT)]);
+    k.tapModifier('Shift');
+    expect(ev(k.pressKey('Comma'))).toEqual([down(SHIFT), down(0x3c), up(0x3c), up(SHIFT)]);
+    // Non-printable keys keep their keysym: Shift+Left extends a selection.
+    k.tapModifier('Shift');
+    expect(ev(k.pressKey('Left'))).toEqual([down(SHIFT), down(0xff51), up(0xff51), up(SHIFT)]);
+  });
+
+  it('locked Shift shifts every character; already-shifted text is sent as is', () => {
+    const k = new KeyModel();
+    k.tapModifier('Shift');
+    k.tapModifier('Shift'); // locked: Shift is held on the remote
+    expect(ev(k.typeText('a1!'))).toEqual([
+      down(0x41),
+      up(0x41),
+      down(0x21),
+      up(0x21),
+      down(0x21),
+      up(0x21),
+    ]);
+  });
+
+  it('Ctrl chords stay unshifted: sticky Ctrl + "1" = Ctrl+1', () => {
+    const k = new KeyModel();
+    k.tapModifier('Ctrl');
+    expect(ev(k.typeText('1'))).toEqual([down(CTRL), down(0x31), up(0x31), up(CTRL)]);
+    expect(k.applyModifiers(0x31)).toBe(0x31);
+  });
+
   it('Ctrl+Shift one-shot + "t" = Ctrl+Shift+T in press order', () => {
     const k = new KeyModel();
     k.tapModifier('Shift');

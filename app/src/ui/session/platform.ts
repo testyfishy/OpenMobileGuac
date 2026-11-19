@@ -9,6 +9,7 @@ import { Clipboard } from '@capacitor/clipboard';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Keyboard } from '@capacitor/keyboard';
+import { StatusBar } from '@capacitor/status-bar';
 import type { HapticHint } from '../../session/pointer/PointerModel.ts';
 
 export function isNative(): boolean {
@@ -151,25 +152,80 @@ export function onForeground(cb: () => void): Disposable {
 }
 
 // ---------------------------------------------------------------------------------------
-// Keep-awake (DSP-7) with the Screen Wake Lock API. The lock is released by the browser
-// whenever the page is hidden, so it is re-requested on visibility.
+// Keep-awake (DSP-7)
+//
+// A small seam so a native plugin can replace the Screen Wake Lock API without touching
+// the session screen. The web implementation uses `navigator.wakeLock`, re-requested on
+// visibility (the browser releases the lock whenever the page is hidden). Whether that API
+// works inside Android WebView and WKWebView has NOT been verified on a device (see
+// docs/checklists/session-device.md); MDN's compatibility data only "mirrors" the browser
+// entries for the WebViews, and iOS before 16.4 has no Wake Lock at all.
+//
+// Recommended native implementation, not installed (package.json is owned by the shell):
+// `@capacitor-community/keep-awake` 8.0.1 (MIT, peer `@capacitor/core >=8.0.0`), wired as
+//   setKeepAwakeImpl({ acquire: async () => { await KeepAwake.keepAwake(); return 'native'; },
+//                      release: async () => { await KeepAwake.allowSleep(); } })
 
-export function keepScreenAwake(): Disposable {
-  const nav = navigator as Navigator & {
-    wakeLock?: { request(type: 'screen'): Promise<{ release(): Promise<void> }> };
+/** How the screen is being kept on, or why it is not. */
+export type KeepAwakeState = 'native' | 'wake-lock' | 'unsupported' | 'denied' | 'released';
+
+export interface KeepAwakeImpl {
+  /** Keep the screen on; resolves to how (or why not). Called again after foregrounding. */
+  acquire(): Promise<KeepAwakeState>;
+  release(): Promise<void>;
+}
+
+type WakeLockSentinelLike = { release(): Promise<void> };
+type WakeLockLike = { request(type: 'screen'): Promise<WakeLockSentinelLike> };
+
+/** The Screen Wake Lock API implementation (web, and WebViews that support it). */
+export function webKeepAwake(): KeepAwakeImpl {
+  let lock: WakeLockSentinelLike | null = null;
+  return {
+    async acquire() {
+      const wl = (navigator as Navigator & { wakeLock?: WakeLockLike }).wakeLock;
+      if (!wl) return 'unsupported';
+      if (document.visibilityState !== 'visible') return 'denied';
+      try {
+        const next = await wl.request('screen');
+        await lock?.release().catch(() => undefined);
+        lock = next;
+        return 'wake-lock';
+      } catch {
+        return 'denied';
+      }
+    },
+    async release() {
+      const l = lock;
+      lock = null;
+      await l?.release().catch(() => undefined);
+    },
   };
-  if (!nav.wakeLock) return { dispose() {} };
-  let lock: { release(): Promise<void> } | null = null;
+}
+
+let keepAwakeImpl: KeepAwakeImpl | null = null;
+
+/** Replace the keep-awake implementation (e.g. with a native plugin). */
+export function setKeepAwakeImpl(impl: KeepAwakeImpl | null): void {
+  keepAwakeImpl = impl;
+}
+
+/**
+ * Keep the screen awake until disposed. `onState` reports the outcome of every attempt,
+ * so the UI or log can tell whether it actually worked.
+ */
+export function keepScreenAwake(onState?: (state: KeepAwakeState) => void): Disposable {
+  const impl = keepAwakeImpl ?? webKeepAwake();
   let disposed = false;
   const acquire = () => {
-    if (disposed || document.visibilityState !== 'visible' || !nav.wakeLock) return;
-    nav.wakeLock
-      .request('screen')
-      .then((l) => {
-        if (disposed) l.release().catch(() => undefined);
-        else lock = l;
+    if (disposed || document.visibilityState !== 'visible') return;
+    impl
+      .acquire()
+      .then((s) => {
+        if (disposed) impl.release().catch(() => undefined);
+        else onState?.(s);
       })
-      .catch(() => undefined);
+      .catch(() => onState?.('denied'));
   };
   const onVisible = () => {
     if (document.visibilityState === 'visible') acquire();
@@ -178,10 +234,158 @@ export function keepScreenAwake(): Disposable {
   acquire();
   return {
     dispose() {
+      if (disposed) return;
       disposed = true;
       document.removeEventListener('visibilitychange', onVisible);
-      lock?.release().catch(() => undefined);
-      lock = null;
+      impl.release().catch(() => undefined);
+      onState?.('released');
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------
+// Lifecycle (DSP-9): app resume and network changes
+
+/** Native app resumed (Capacitor App `resume`); on the web, the page became visible. */
+export function onAppResume(cb: () => void): Disposable {
+  if (isPluginAvailable('App')) return handles([App.addListener('resume', cb)]);
+  const listener = () => {
+    if (document.visibilityState === 'visible') cb();
+  };
+  document.addEventListener('visibilitychange', listener);
+  return { dispose: () => document.removeEventListener('visibilitychange', listener) };
+}
+
+/** `online` / `offline` events (the WebView reports the device network state). */
+export function onNetworkChange(cb: (online: boolean) => void): Disposable {
+  const on = () => cb(true);
+  const off = () => cb(false);
+  window.addEventListener('online', on);
+  window.addEventListener('offline', off);
+  return {
+    dispose() {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    },
+  };
+}
+
+export function isOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+
+// ---------------------------------------------------------------------------------------
+// Immersive mode (DSP-7): hide the system bars on native, full screen on the web.
+
+/**
+ * Enter immersive mode. Native: hides the status bar (StatusBar plugin, iOS and Android)
+ * and, where the WebView supports the Fullscreen API (some Android WebViews do), also
+ * requests full screen so the navigation bar can hide. Web: the Fullscreen API only.
+ * Returns a disposable that restores the bars. Every step is best effort.
+ */
+export function enterImmersive(): Disposable {
+  let disposed = false;
+  if (isPluginAvailable('StatusBar')) StatusBar.hide().catch(() => undefined);
+  const root = typeof document !== 'undefined' ? document.documentElement : null;
+  const canFullscreen =
+    root !== null &&
+    typeof root.requestFullscreen === 'function' &&
+    (typeof document.fullscreenEnabled !== 'boolean' || document.fullscreenEnabled);
+  if (canFullscreen && !document.fullscreenElement) {
+    root.requestFullscreen({ navigationUI: 'hide' }).catch(() => undefined);
+  }
+  return {
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      if (isPluginAvailable('StatusBar')) StatusBar.show().catch(() => undefined);
+      if (typeof document !== 'undefined' && document.fullscreenElement) {
+        document.exitFullscreen().catch(() => undefined);
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------
+// Foldables (DSP-8)
+
+export interface FoldInfo {
+  /** A horizontal hinge (tabletop / laptop posture): segments above and below. */
+  readonly horizontalFold: boolean;
+  /** Top of the lower segment in CSS px from the viewport top, when known. */
+  readonly foldTop: number | null;
+}
+
+const NO_FOLD: FoldInfo = { horizontalFold: false, foldTop: null };
+
+interface ViewportSegmentsApi {
+  readonly segments?: readonly { readonly top: number; readonly height: number }[] | null;
+}
+
+interface DevicePostureApi {
+  readonly type?: string;
+  addEventListener?(type: 'change', cb: () => void): void;
+  removeEventListener?(type: 'change', cb: () => void): void;
+}
+
+/**
+ * Current fold state from whichever API the WebView has: the Viewport Segments API
+ * (`window.viewport.segments`), the `vertical-viewport-segments` media query (two
+ * segments stacked vertically = a horizontal fold), and the Device Posture API
+ * (`navigator.devicePosture.type === 'folded'`, without geometry). Absent APIs = no fold.
+ */
+export function readFold(): FoldInfo {
+  if (typeof window === 'undefined') return NO_FOLD;
+  try {
+    const vp = (window as unknown as { viewport?: ViewportSegmentsApi }).viewport;
+    const segs = vp?.segments;
+    if (segs && segs.length === 2) {
+      const [a, b] = segs;
+      if (a && b && Math.abs(a.top - b.top) > 1) {
+        return { horizontalFold: true, foldTop: Math.max(a.top, b.top) };
+      }
+      return NO_FOLD;
+    }
+  } catch {
+    // ignore
+  }
+  const mq = (q: string) => {
+    try {
+      return typeof window.matchMedia === 'function' && window.matchMedia(q).matches;
+    } catch {
+      return false;
+    }
+  };
+  if (mq('(vertical-viewport-segments: 2)')) {
+    return { horizontalFold: true, foldTop: Math.round(window.innerHeight / 2) };
+  }
+  const posture = (navigator as Navigator & { devicePosture?: DevicePostureApi }).devicePosture;
+  if (posture?.type === 'folded' && window.innerWidth > window.innerHeight) {
+    return { horizontalFold: true, foldTop: Math.round(window.innerHeight / 2) };
+  }
+  return NO_FOLD;
+}
+
+/** Calls `cb` whenever the fold state may have changed. */
+export function onFoldChange(cb: () => void): Disposable {
+  if (typeof window === 'undefined') return { dispose() {} };
+  const queries: MediaQueryList[] = [];
+  for (const q of ['(vertical-viewport-segments: 2)', '(horizontal-viewport-segments: 2)']) {
+    try {
+      if (typeof window.matchMedia === 'function') queries.push(window.matchMedia(q));
+    } catch {
+      // ignore
+    }
+  }
+  for (const m of queries) m.addEventListener?.('change', cb);
+  window.addEventListener('resize', cb);
+  const posture = (navigator as Navigator & { devicePosture?: DevicePostureApi }).devicePosture;
+  posture?.addEventListener?.('change', cb);
+  return {
+    dispose() {
+      for (const m of queries) m.removeEventListener?.('change', cb);
+      window.removeEventListener('resize', cb);
+      posture?.removeEventListener?.('change', cb);
     },
   };
 }

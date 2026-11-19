@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
 import type { Connection, ConnectionGroup, ConnectionTree } from '../../core/models/Connection.ts';
 import type { ConnectionRef } from '../../core/storage/ProfileStore.ts';
 import { EmptyState } from '../components/Feedback.tsx';
@@ -7,6 +7,7 @@ import { strings } from '../strings.ts';
 import {
   groupHasContent,
   groupKey,
+  isBalancing,
   isTreeEmpty,
   protocolIcon,
   protocolLabel,
@@ -14,7 +15,10 @@ import {
   refOf,
   resolveRefs,
   searchConnections,
+  sortConnections,
+  sortGroups,
   type ConnectionMatch,
+  type SortMode,
 } from './treeView.ts';
 
 export interface ConnectionBrowserProps {
@@ -24,13 +28,23 @@ export interface ConnectionBrowserProps {
   recents: readonly ConnectionRef[];
   onConnect: (c: Connection) => void;
   onToggleFavourite: (c: Connection, favourite: boolean) => void;
+  /** CON-6: connect to a balancing group (`GUAC_TYPE=g`). */
+  onConnectGroup?: (g: ConnectionGroup) => void;
+  onDetails?: (m: ConnectionMatch) => void;
+  sort?: SortMode;
+  /** refKey → last use (ms), for the "recently used" sort. */
+  lastUsed?: ReadonlyMap<string, number>;
+  /** `c:ds:id` / `g:ds:id` of targets with an open session. */
+  openKeys?: ReadonlySet<string>;
+  /** refKey → thumbnail data URL (CON-4). */
+  thumbnails?: ReadonlyMap<string, string>;
   /** Hide data-source headings (e.g. the demo). */
   flat?: boolean;
 }
 
 const RECENTS_SHOWN = 5;
 
-/** Connection tree with search, favourites and recents (CON-1…CON-3). */
+/** Connection tree with search, favourites and recents (CON-1…CON-6). */
 export function ConnectionBrowser({
   tree,
   query,
@@ -38,6 +52,12 @@ export function ConnectionBrowser({
   recents,
   onConnect,
   onToggleFavourite,
+  onConnectGroup,
+  onDetails,
+  sort = 'server',
+  lastUsed,
+  openKeys,
+  thumbnails,
   flat,
 }: ConnectionBrowserProps) {
   const c = strings.connections;
@@ -51,23 +71,35 @@ export function ConnectionBrowser({
       return next;
     });
 
-  const row = (m: ConnectionMatch, showPath: boolean, keyPrefix: string, depth = 0) => (
-    <li
-      key={`${keyPrefix}:${refKey(refOf(m.connection))}`}
-      style={depth > 0 ? { paddingInlineStart: `${depth * 1.25}rem` } : undefined}
-    >
-      <ConnectionRow
-        connection={m.connection}
-        path={showPath ? m.path : undefined}
-        favourite={favKeys.has(refKey(refOf(m.connection)))}
-        onConnect={onConnect}
-        onToggleFavourite={onToggleFavourite}
-      />
-    </li>
-  );
+  const row = (
+    m: ConnectionMatch,
+    showPath: boolean,
+    keyPrefix: string,
+    depth = 0,
+    thumb = false,
+  ) => {
+    const key = refKey(refOf(m.connection));
+    return (
+      <li
+        key={`${keyPrefix}:${key}`}
+        style={depth > 0 ? { paddingInlineStart: `${depth * 1.25}rem` } : undefined}
+      >
+        <ConnectionRow
+          match={m}
+          showPath={showPath}
+          favourite={favKeys.has(key)}
+          open={openKeys?.has(key) ?? false}
+          thumbnail={thumb ? thumbnails?.get(key) : undefined}
+          onConnect={onConnect}
+          onToggleFavourite={onToggleFavourite}
+          onDetails={onDetails}
+        />
+      </li>
+    );
+  };
 
   if (query.trim()) {
-    const results = searchConnections(tree, query);
+    const results = sortConnections(searchConnections(tree, query), sort, lastUsed);
     if (results.length === 0) return <EmptyState icon="search" title={c.noResults(query.trim())} />;
     return (
       <ul className="list" aria-label={c.search}>
@@ -86,12 +118,14 @@ export function ConnectionBrowser({
     <>
       {favList.length > 0 ? (
         <Section title={c.favourites} icon="star">
-          {favList.map((m) => row(m, true, 'f'))}
+          {sortConnections(favList, sort === 'server' ? 'server' : sort, lastUsed).map((m) =>
+            row(m, true, 'f'),
+          )}
         </Section>
       ) : null}
       {recentList.length > 0 ? (
         <Section title={c.recents} icon="clock">
-          {recentList.map((m) => row(m, true, 'r'))}
+          {recentList.map((m) => row(m, true, 'r', 0, true))}
         </Section>
       ) : null}
       {tree.dataSources
@@ -105,11 +139,14 @@ export function ConnectionBrowser({
             <GroupChildren
               group={d.root}
               depth={0}
+              path={[]}
               expanded={expanded}
+              sort={sort}
+              lastUsed={lastUsed}
+              openKeys={openKeys}
               onToggleGroup={toggleGroup}
-              renderConnection={(conn, depth) =>
-                row({ connection: conn, path: [] }, false, 't', depth)
-              }
+              onConnectGroup={onConnectGroup}
+              renderConnection={(m, depth) => row(m, false, 't', depth)}
             />
           </Section>
         ))}
@@ -139,53 +176,87 @@ function Section({
 function GroupChildren({
   group,
   depth,
+  path,
   expanded,
+  sort,
+  lastUsed,
+  openKeys,
   onToggleGroup,
+  onConnectGroup,
   renderConnection,
 }: {
   group: ConnectionGroup;
   depth: number;
+  path: readonly string[];
   expanded: ReadonlySet<string>;
+  sort: SortMode;
+  lastUsed: ReadonlyMap<string, number> | undefined;
+  openKeys: ReadonlySet<string> | undefined;
   onToggleGroup: (key: string) => void;
-  renderConnection: (c: Connection, depth: number) => ReactNode;
+  onConnectGroup: ((g: ConnectionGroup) => void) | undefined;
+  renderConnection: (m: ConnectionMatch, depth: number) => ReactNode;
 }) {
+  const connections = sortConnections(
+    group.childConnections.map((connection) => ({ connection, path })),
+    sort,
+    lastUsed,
+  );
   return (
     <>
-      {group.childConnectionGroups.filter(groupHasContent).map((g) => {
+      {sortGroups(group.childConnectionGroups.filter(groupHasContent), sort).map((g) => {
         const key = groupKey(g);
         const open = expanded.has(key);
         const label = open
           ? strings.connections.collapseGroup(g.name)
           : strings.connections.expandGroup(g.name);
+        const balancing = isBalancing(g);
         return (
           <li key={key}>
-            <button
-              type="button"
-              className="row-main group-row"
-              style={{ paddingInlineStart: `${0.75 + depth * 1.25}rem` }}
-              aria-expanded={open}
-              aria-label={label}
-              onClick={() => onToggleGroup(key)}
-            >
-              <Icon name={open ? 'chevron-down' : 'chevron-right'} className="group-chevron" />
-              <span className="row-icon row-icon-group">
-                <Icon name="folder" />
-              </span>
-              <span className="row-text">
-                <span className="row-title">{g.name}</span>
-                {g.type === 'BALANCING' ? (
-                  <span className="row-subtitle">{strings.connections.balancing}</span>
-                ) : null}
-              </span>
-              {g.activeConnections > 0 ? <ActiveDot count={g.activeConnections} /> : null}
-            </button>
+            <div className="group-line" style={{ paddingInlineStart: `${depth * 1.25}rem` }}>
+              <button
+                type="button"
+                className="row-main group-row"
+                aria-expanded={open}
+                aria-label={label}
+                onClick={() => onToggleGroup(key)}
+              >
+                <Icon name={open ? 'chevron-down' : 'chevron-right'} className="group-chevron" />
+                <span className="row-icon row-icon-group">
+                  <Icon name={balancing ? 'layers' : 'folder'} />
+                </span>
+                <span className="row-text">
+                  <span className="row-title">{g.name}</span>
+                  {balancing ? (
+                    <span className="row-subtitle">{strings.connections.balancing}</span>
+                  ) : null}
+                </span>
+                {g.activeConnections > 0 ? <ActiveDot count={g.activeConnections} /> : null}
+                {openKeys?.has(`g:${g.dataSource}:${g.identifier}`) ? <OpenBadge /> : null}
+              </button>
+              {balancing && onConnectGroup ? (
+                <button
+                  type="button"
+                  className="icon-btn group-connect"
+                  onClick={() => onConnectGroup(g)}
+                  aria-label={strings.connections.connectGroup(g.name)}
+                  title={strings.connections.connectGroup(g.name)}
+                >
+                  <Icon name="play" />
+                </button>
+              ) : null}
+            </div>
             {open ? (
               <ul className="list nested">
                 <GroupChildren
                   group={g}
                   depth={depth + 1}
+                  path={[...path, g.name]}
                   expanded={expanded}
+                  sort={sort}
+                  lastUsed={lastUsed}
+                  openKeys={openKeys}
                   onToggleGroup={onToggleGroup}
+                  onConnectGroup={onConnectGroup}
                   renderConnection={renderConnection}
                 />
               </ul>
@@ -193,7 +264,7 @@ function GroupChildren({
           </li>
         );
       })}
-      {group.childConnections.map((conn) => renderConnection(conn, depth))}
+      {connections.map((m) => renderConnection(m, depth))}
     </>
   );
 }
@@ -207,64 +278,185 @@ function ActiveDot({ count }: { count: number }) {
   );
 }
 
+function OpenBadge() {
+  return <span className="badge badge-open">{strings.connections.openSessionBadge}</span>;
+}
+
+const SWIPE_OPEN_PX = 112;
+
 function ConnectionRow({
-  connection,
-  path,
+  match,
+  showPath,
   favourite,
+  open,
+  thumbnail,
   onConnect,
   onToggleFavourite,
+  onDetails,
 }: {
-  connection: Connection;
-  path: readonly string[] | undefined;
+  match: ConnectionMatch;
+  showPath: boolean;
   favourite: boolean;
+  open: boolean;
+  thumbnail: string | undefined;
   onConnect: (c: Connection) => void;
   onToggleFavourite: (c: Connection, favourite: boolean) => void;
+  onDetails: ((m: ConnectionMatch) => void) | undefined;
 }) {
   const c = strings.connections;
+  const connection = match.connection;
+  const path = showPath ? match.path : undefined;
   const subtitle = [
     protocolLabel(connection.protocol),
     ...(path && path.length ? [path.join(' › ')] : []),
   ]
     .filter(Boolean)
     .join(' · ');
+  const swipe = useSwipe();
+  const favLabel = favourite ? c.removeFavourite(connection.name) : c.addFavourite(connection.name);
   return (
-    <div className="row">
-      <button
-        type="button"
-        className="row-main"
-        onClick={() => onConnect(connection)}
-        aria-label={c.connect(connection.name)}
-      >
-        <span className={`row-icon row-icon-${connection.protocol.toLowerCase() || 'other'}`}>
-          <Icon name={protocolIcon(connection.protocol)} />
-        </span>
-        <span className="row-text">
-          <span className="row-title">{connection.name}</span>
-          <span className="row-subtitle">
-            {subtitle}
-            {connection.activeConnections > 0 ? (
-              <span className="in-use"> · {c.inUseShort}</span>
-            ) : null}
-          </span>
-        </span>
-        {connection.activeConnections > 0 ? (
-          <ActiveDot count={connection.activeConnections} />
-        ) : null}
-      </button>
-      <div className="row-trailing">
+    <div className="swipe-wrap">
+      <div className="swipe-actions" aria-hidden={!swipe.revealed}>
         <button
           type="button"
-          className={favourite ? 'icon-btn star-on' : 'icon-btn'}
-          aria-pressed={favourite}
-          aria-label={
-            favourite ? c.removeFavourite(connection.name) : c.addFavourite(connection.name)
-          }
-          title={favourite ? c.removeFavourite(connection.name) : c.addFavourite(connection.name)}
-          onClick={() => onToggleFavourite(connection, !favourite)}
+          className="swipe-action swipe-action-fav"
+          tabIndex={swipe.revealed ? 0 : -1}
+          onClick={() => {
+            swipe.close();
+            onToggleFavourite(connection, !favourite);
+          }}
+          aria-label={favLabel}
         >
           <Icon name={favourite ? 'star-filled' : 'star'} />
         </button>
+        {onDetails ? (
+          <button
+            type="button"
+            className="swipe-action swipe-action-info"
+            tabIndex={swipe.revealed ? 0 : -1}
+            onClick={() => {
+              swipe.close();
+              onDetails(match);
+            }}
+            aria-label={c.details(connection.name)}
+          >
+            <Icon name="info" />
+          </button>
+        ) : null}
+      </div>
+      <div
+        className="row swipe-row"
+        style={{ transform: swipe.offset ? `translateX(${swipe.offset}px)` : undefined }}
+        {...swipe.handlers}
+      >
+        <button
+          type="button"
+          className="row-main"
+          onClick={() => {
+            if (swipe.consumeClick()) return;
+            onConnect(connection);
+          }}
+          aria-label={c.connect(connection.name)}
+        >
+          {thumbnail ? (
+            <img className="row-thumb" src={thumbnail} alt="" width={64} height={40} />
+          ) : (
+            <span className={`row-icon row-icon-${connection.protocol.toLowerCase() || 'other'}`}>
+              <Icon name={protocolIcon(connection.protocol)} />
+            </span>
+          )}
+          <span className="row-text">
+            <span className="row-title">
+              {connection.name}
+              {open ? <OpenBadge /> : null}
+            </span>
+            <span className="row-subtitle">
+              {subtitle}
+              {connection.activeConnections > 0 ? (
+                <span className="in-use"> · {c.inUseShort}</span>
+              ) : null}
+            </span>
+          </span>
+          {connection.activeConnections > 0 ? (
+            <ActiveDot count={connection.activeConnections} />
+          ) : null}
+        </button>
+        <div className="row-trailing">
+          <button
+            type="button"
+            className={favourite ? 'icon-btn star-on' : 'icon-btn'}
+            aria-pressed={favourite}
+            aria-label={favLabel}
+            title={favLabel}
+            onClick={() => onToggleFavourite(connection, !favourite)}
+          >
+            <Icon name={favourite ? 'star-filled' : 'star'} />
+          </button>
+          {onDetails ? (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={c.details(connection.name)}
+              title={c.details(connection.name)}
+              onClick={() => onDetails(match)}
+            >
+              <Icon name="info" />
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
+}
+
+/**
+ * Horizontal swipe to reveal row actions (touch only; the same actions are always
+ * available as buttons). Vertical movement keeps scrolling the list.
+ */
+function useSwipe() {
+  const start = useRef<{ x: number; y: number; base: number } | null>(null);
+  const axis = useRef<'x' | 'y' | null>(null);
+  const moved = useRef(false);
+  const [offset, setOffset] = useState(0);
+  const onTouchStart = (e: TouchEvent) => {
+    const t = e.touches[0];
+    if (!t || e.touches.length !== 1) return;
+    start.current = { x: t.clientX, y: t.clientY, base: offset };
+    axis.current = null;
+    moved.current = false;
+  };
+  const onTouchMove = (e: TouchEvent) => {
+    const t = e.touches[0];
+    const s = start.current;
+    if (!t || !s) return;
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+    if (axis.current === null && Math.hypot(dx, dy) > 8)
+      axis.current = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    if (axis.current !== 'x') return;
+    moved.current = true;
+    const dir = document.documentElement.dir === 'rtl' ? -1 : 1;
+    const next = Math.max(-SWIPE_OPEN_PX, Math.min(0, s.base + dx * dir));
+    setOffset(next * dir);
+  };
+  const onTouchEnd = () => {
+    if (axis.current === 'x')
+      setOffset((o) => (Math.abs(o) > SWIPE_OPEN_PX / 2 ? Math.sign(o) * SWIPE_OPEN_PX : 0));
+    start.current = null;
+  };
+  return {
+    offset,
+    revealed: offset !== 0,
+    close: () => setOffset(0),
+    /** A click right after a swipe (or on a revealed row) only closes the row. */
+    consumeClick: () => {
+      if (moved.current || offset !== 0) {
+        moved.current = false;
+        setOffset(0);
+        return true;
+      }
+      return false;
+    },
+    handlers: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd },
+  };
 }

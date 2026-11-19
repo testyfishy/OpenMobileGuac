@@ -73,6 +73,69 @@ describe('AuthService', () => {
     ).resolves.toMatchObject({ token: authResultJson.authToken });
   });
 
+  it('asks the credential gate before using a saved password', async () => {
+    const { auth, profile, secure } = await setup(new FakeHttpClient());
+    await secure.set(secretKeys.password(profile.id), 'pw');
+    let allow = false;
+    let asked = 0;
+    auth.setCredentialGate(async () => {
+      asked++;
+      return allow;
+    });
+    expect(await auth.hasSavedPassword(profile)).toBe(true);
+    expect(asked).toBe(0);
+    expect(await auth.loadSecrets(profile)).toMatchObject({ password: null, lockedOut: true });
+    allow = true;
+    expect((await auth.loadSecrets(profile)).password).toBe('pw');
+    expect(asked).toBe(2);
+  });
+
+  it('re-signs in silently with the password and a TOTP code from the stored seed', async () => {
+    const sent: Record<string, string>[] = [];
+    const http = new FakeHttpClient()
+      .on('HEAD', `${BASE}/api/session`, () => jsonResponse(403, permissionDeniedJson))
+      .on('POST', TOKENS, (req) => {
+        const fields = req.body?.kind === 'form' ? (req.body.fields as Record<string, string>) : {};
+        sent.push(fields);
+        if (!fields['guac-totp']) {
+          return jsonResponse(403, {
+            message: 'code',
+            type: 'INSUFFICIENT_CREDENTIALS',
+            expected: [{ name: 'guac-totp', type: 'GUAC_TOTP_CODE' }],
+          });
+        }
+        return jsonResponse(200, authResultJson);
+      });
+    const { auth, profile, secure } = await setup(http);
+    await secure.set(secretKeys.password(profile.id), 'pw');
+    await auth.saveTotpSeed(profile.id, 'otpauth://totp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+    const result = await auth.revalidate(profile, { httpAllowed: true, totpAutofill: true });
+    expect(result).toBe('relogged');
+    expect(sent[1]?.['guac-totp']).toMatch(/^\d{6}$/);
+    expect(sent[1]?.['password']).toBe('pw');
+  });
+
+  it('needs a sign-in when http is not allowed or no password is saved', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () =>
+      jsonResponse(403, permissionDeniedJson),
+    );
+    const { auth, profile, secure } = await setup(http);
+    expect(await auth.revalidate(profile, { httpAllowed: true, totpAutofill: false })).toBe(
+      'needs-sign-in',
+    );
+    await secure.set(secretKeys.password(profile.id), 'pw');
+    expect(await auth.revalidate(profile, { httpAllowed: false, totpAutofill: false })).toBe(
+      'needs-sign-in',
+    );
+  });
+
+  it('clears password, token and TOTP seed', async () => {
+    const { auth, profile, secure } = await setup(new FakeHttpClient());
+    for (const k of secretKeys.all(profile.id)) await secure.set(k, 'x');
+    await auth.clearCredentials(profile.id);
+    for (const k of secretKeys.all(profile.id)) expect(await secure.get(k)).toBeNull();
+  });
+
   it('hands a not-remembered password to the first sign-in only', async () => {
     const { auth, profile } = await setup(new FakeHttpClient());
     auth.setTransientPassword(profile.id, 'once');

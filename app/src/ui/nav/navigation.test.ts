@@ -13,14 +13,6 @@ import {
 const run = (actions: NavAction[], from: NavState = initialNavState()) =>
   actions.reduce(navReducer, from);
 
-const target = {
-  dataSource: 'ds',
-  identifier: '1',
-  type: 'c',
-  name: 'PC',
-  protocol: 'rdp',
-} as const;
-
 describe('navReducer', () => {
   it('starts at the server list and cannot pop the root', () => {
     const s = initialNavState();
@@ -32,10 +24,10 @@ describe('navReducer', () => {
   it('pushes and pops with unique keys', () => {
     const s = run([
       { type: 'push', route: { name: 'connections', serverId: 'a' } },
-      { type: 'push', route: { name: 'session', serverId: 'a', target } },
+      { type: 'push', route: { name: 'diagnostics' } },
     ]);
     expect(s.stack.map((e) => e.key)).toEqual([0, 1, 2]);
-    expect(topRoute(s).name).toBe('session');
+    expect(topRoute(s).name).toBe('diagnostics');
     expect(topRoute(navReducer(s, { type: 'pop' })).name).toBe('connections');
   });
 

@@ -1,24 +1,55 @@
-import { Screen } from '../components/Screen.tsx';
+import { useEffect, useState } from 'react';
+import { Dialog } from '../components/Dialog.tsx';
 import { RangeField, Segmented, Toggle } from '../components/Form.tsx';
-import { DEFAULT_SESSION_SETTINGS, type SessionSettings } from '../integration/session.ts';
+import { Icon } from '../components/Icon.tsx';
+import { Screen } from '../components/Screen.tsx';
+import { useToast } from '../components/toastContext.ts';
+import { LOCALES, LOCALE_NAMES, type LanguagePreference } from '../i18n/locale.ts';
+import { DEFAULT_SESSION_SETTINGS, type SessionSettings } from '../session/settings.ts';
 import { useNav } from '../nav/NavContext.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
+import type { BiometryAvailability } from '../services/native.ts';
 import { SOURCE_URL, strings } from '../strings.ts';
 import type { ThemePreference } from '../theme/theme.ts';
 import {
+  BACKGROUND_DISCONNECT_CHOICES,
+  LOCK_AFTER_CHOICES,
+  MAX_SESSIONS_MAX,
+  MAX_SESSIONS_MIN,
   POINTER_SPEED_MAX,
   POINTER_SPEED_MIN,
   diffFromDefaults,
   mergeSessionSettings,
+  parseServerOptions,
+  serverOptionsToJson,
 } from './settingsModel.ts';
 
-/** Global settings (SET-1) and About. */
+function durationLabel(seconds: number | null): string {
+  if (seconds === null) return strings.common.never;
+  if (seconds === 0) return strings.common.immediately;
+  return seconds < 60 ? strings.common.seconds(seconds) : strings.common.minutes(seconds / 60);
+}
+
+/** Global settings (SET-1), security (SRV-6), sessions (MUL-1, T2.1), data and About. */
 export function SettingsScreen() {
   const nav = useNav();
   const services = useServices();
+  const toast = useToast();
   const { settings, update } = useAppSettings();
   const t = strings.settings;
   const session = mergeSessionSettings(DEFAULT_SESSION_SETTINGS, settings.sessionDefaults, {});
+  const [biometry, setBiometry] = useState<BiometryAvailability | undefined>(undefined);
+  const [confirmLockOff, setConfirmLockOff] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void services.lock.availability().then((a) => {
+      if (live) setBiometry(a);
+    });
+    return () => {
+      live = false;
+    };
+  }, [services.lock]);
 
   const setSession = <K extends keyof SessionSettings>(key: K, value: SessionSettings[K]) => {
     update({
@@ -27,12 +58,39 @@ export function SettingsScreen() {
     });
   };
 
+  const setLock = async (on: boolean) => {
+    if (on) {
+      // Prove the prompt works before relying on it.
+      const ok = (await services.lock.prompt(strings.lock.reason, strings.lock.cancel)) === 'ok';
+      if (ok) update({ ...settings, lock: { ...settings.lock, enabled: true } });
+      return;
+    }
+    // Stored TOTP seeds are only allowed behind the lock (SRV-9): turning it off deletes them.
+    const ids = [...(await services.profiles.list()).map((p) => p.id)];
+    const withSeeds: string[] = [];
+    for (const id of ids) if (await services.auth.hasTotpSeed(id)) withSeeds.push(id);
+    if (withSeeds.length > 0) setConfirmLockOff(withSeeds);
+    else update({ ...settings, lock: { ...settings.lock, enabled: false } });
+  };
+
+  const lockOffAndWipe = async (ids: string[]) => {
+    setConfirmLockOff(null);
+    for (const id of ids) {
+      await services.auth.saveTotpSeed(id, null);
+      const o = parseServerOptions(await services.profiles.getOptions(id));
+      await services.profiles.setOptions(id, serverOptionsToJson({ ...o, totpAutofill: false }));
+    }
+    update({ ...settings, lock: { ...settings.lock, enabled: false } });
+  };
+
   const storage =
     services.secretStorage === 'secure'
       ? t.storageSecure
       : services.secretStorage === 'insecure-dev'
         ? t.storageDev
         : t.storageMemory;
+
+  const lockAvailable = biometry === 'available';
 
   return (
     <Screen title={t.title} onBack={nav.back}>
@@ -51,6 +109,93 @@ export function SettingsScreen() {
               { value: 'dark', label: t.themeDark },
             ]}
           />
+          <Segmented<LanguagePreference>
+            label={t.language}
+            value={settings.language}
+            onChange={(language) => update({ ...settings, language })}
+            options={[
+              { value: 'system', label: t.languageSystem },
+              ...LOCALES.map((l) => ({ value: l, label: LOCALE_NAMES[l] })),
+            ]}
+          />
+        </section>
+
+        <section className="settings-group" aria-labelledby="set-security">
+          <h2 id="set-security" className="section-title">
+            <Icon name="lock" size="1rem" /> {t.security}
+          </h2>
+          <Toggle
+            label={t.lockEnable}
+            hint={
+              biometry === 'web'
+                ? t.lockUnavailableWeb
+                : biometry === 'no-device-security'
+                  ? t.lockUnavailableDevice
+                  : t.lockHint
+            }
+            checked={settings.lock.enabled && lockAvailable}
+            disabled={!lockAvailable}
+            onChange={(v) => void setLock(v)}
+          />
+          {settings.lock.enabled && lockAvailable ? (
+            <Segmented<string>
+              label={t.lockAfter}
+              value={String(settings.lock.afterSeconds)}
+              onChange={(v) =>
+                update({ ...settings, lock: { ...settings.lock, afterSeconds: Number(v) } })
+              }
+              options={LOCK_AFTER_CHOICES.map((s) => ({
+                value: String(s),
+                label: durationLabel(s),
+              }))}
+            />
+          ) : null}
+        </section>
+
+        <section className="settings-group" aria-labelledby="set-sessions">
+          <h2 id="set-sessions" className="section-title">
+            <Icon name="layers" size="1rem" /> {t.sessions}
+          </h2>
+          <RangeField
+            label={t.maxSessions}
+            value={settings.maxSessions}
+            min={MAX_SESSIONS_MIN}
+            max={MAX_SESSIONS_MAX}
+            step={1}
+            onChange={(v) => update({ ...settings, maxSessions: v })}
+            format={(v) => String(v)}
+          />
+          <p className="field-hint">{t.maxSessionsHint}</p>
+          <Segmented<string>
+            label={t.backgroundDisconnect}
+            value={String(settings.backgroundDisconnectSeconds)}
+            onChange={(v) =>
+              update({ ...settings, backgroundDisconnectSeconds: v === 'null' ? null : Number(v) })
+            }
+            options={BACKGROUND_DISCONNECT_CHOICES.map((s) => ({
+              value: String(s),
+              label: durationLabel(s),
+            }))}
+          />
+          <p className="field-hint">{t.backgroundDisconnectHint}</p>
+          <Toggle
+            label={t.thumbnails}
+            hint={t.thumbnailsHint}
+            checked={settings.thumbnails}
+            onChange={(v) => {
+              update({ ...settings, thumbnails: v });
+              if (!v) void services.profiles.clearThumbnails();
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() =>
+              void services.profiles.clearThumbnails().then(() => toast.show(t.thumbnailsCleared))
+            }
+          >
+            {t.clearThumbnails}
+          </button>
         </section>
 
         <section className="settings-group" aria-labelledby="set-session">
@@ -73,7 +218,7 @@ export function SettingsScreen() {
             label={t.pointerMode}
             value={session.pointerMode}
             onChange={(v) => setSession('pointerMode', v)}
-            options={(['direct', 'trackpad'] as const).map((v) => ({
+            options={(['direct', 'trackpad', 'touch'] as const).map((v) => ({
               value: v,
               label: t.pointerModes[v] ?? v,
             }))}
@@ -129,6 +274,37 @@ export function SettingsScreen() {
           </button>
         </section>
 
+        <section className="settings-group" aria-labelledby="set-data">
+          <h2 id="set-data" className="section-title">
+            {t.data}
+          </h2>
+          <div className="link-list">
+            <button
+              type="button"
+              className="row-main link-row"
+              onClick={() => nav.push({ name: 'backup' })}
+            >
+              <Icon name="archive" /> <span className="row-text">{t.backup}</span>
+              <Icon name="chevron-right" className="row-chevron" />
+            </button>
+            <button
+              type="button"
+              className="row-main link-row"
+              onClick={() => nav.push({ name: 'diagnostics' })}
+            >
+              <Icon name="bug" /> <span className="row-text">{t.diagnostics}</span>
+              <Icon name="chevron-right" className="row-chevron" />
+            </button>
+            <button
+              type="button"
+              className="row-main link-row"
+              onClick={() => update({ ...settings, onboardingDone: false })}
+            >
+              <Icon name="info" /> <span className="row-text">{t.introduction}</span>
+            </button>
+          </div>
+        </section>
+
         <section className="settings-group" aria-labelledby="set-about">
           <h2 id="set-about" className="section-title">
             {t.about}
@@ -160,6 +336,29 @@ export function SettingsScreen() {
           <p className="muted">{t.privacy}</p>
         </section>
       </div>
+      {confirmLockOff ? (
+        <Dialog
+          title={t.lockEnable}
+          tone="warning"
+          onCancel={() => setConfirmLockOff(null)}
+          actions={
+            <>
+              <button type="button" className="btn" onClick={() => setConfirmLockOff(null)}>
+                {strings.common.cancel}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => void lockOffAndWipe(confirmLockOff)}
+              >
+                {t.lockOffConfirm}
+              </button>
+            </>
+          }
+        >
+          <p>{t.lockOffWithSeeds}</p>
+        </Dialog>
+      ) : null}
     </Screen>
   );
 }

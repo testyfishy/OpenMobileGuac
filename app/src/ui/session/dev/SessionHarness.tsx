@@ -19,6 +19,7 @@ import { useRef, useState, useSyncExternalStore, type CSSProperties, type JSX } 
 import { makeStatus, type TunnelLike } from '../../../core/transport/TunnelLike.ts';
 import { SessionScreen } from '../SessionScreen.tsx';
 import { DEFAULT_SESSION_SETTINGS, type SessionSettings } from '../settings.ts';
+import { FeatureTunnel } from './FeatureTunnel.ts';
 import { ScribbleTunnel, type ScribbleLogEntry } from './ScribbleTunnel.ts';
 
 /** Tiny external store for the log so the panel re-renders without effects. */
@@ -39,13 +40,26 @@ class LogStore {
 export interface SessionHarnessProps {
   /** Optional tunnel factory (e.g. the demo server's tunnel); defaults to ScribbleTunnel. */
   readonly createTunnel?: () => TunnelLike;
+  /**
+   * Use FeatureTunnel: credential prompt, filesystem, downloads, print job and audio
+   * (`?tunnel=features`). `requireCredentials: false` skips the prompt.
+   */
+  readonly features?: { readonly requireCredentials?: boolean; readonly filesystem?: boolean };
+  /** Called with each new tunnel (for automated checks). */
+  readonly onTunnel?: (t: TunnelLike) => void;
 }
 
-export function SessionHarness({ createTunnel }: SessionHarnessProps = {}): JSX.Element {
+export function SessionHarness({
+  createTunnel,
+  features,
+  onTunnel,
+}: SessionHarnessProps = {}): JSX.Element {
   const [settings, setSettings] = useState<SessionSettings>(DEFAULT_SESSION_SETTINGS);
   const [run, setRun] = useState(0);
   const [exited, setExited] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
+  /** Simulates the shell hiding the session (the `active` prop). */
+  const [active, setActive] = useState(true);
   const [log] = useState(() => new LogStore());
   const entries = useSyncExternalStore(log.subscribe, log.get);
   const current = useRef<ScribbleTunnel | null>(null);
@@ -55,11 +69,17 @@ export function SessionHarness({ createTunnel }: SessionHarnessProps = {}): JSX.
     if (createTunnel) return createTunnel();
     const fail = failNext.current > 0;
     failNext.current = Math.max(0, failNext.current - 1);
-    const t = new ScribbleTunnel({
-      failConnect: fail ? makeStatus(0x0207, 'Simulated: host not found') : null,
-    });
+    const t = features
+      ? new FeatureTunnel({
+          requireCredentials: features.requireCredentials,
+          filesystem: features.filesystem,
+        })
+      : new ScribbleTunnel({
+          failConnect: fail ? makeStatus(0x0207, 'Simulated: host not found') : null,
+        });
     t.onlog = (e) => log.set(e);
     current.current = t;
+    onTunnel?.(t);
     return t;
   };
 
@@ -88,6 +108,7 @@ export function SessionHarness({ createTunnel }: SessionHarnessProps = {}): JSX.
         title="Scribble desktop"
         protocol="rdp"
         isDemo
+        active={active}
         createTunnel={makeTunnel}
         buildConnectData={(size) =>
           `GUAC_WIDTH=${size.width}&GUAC_HEIGHT=${size.height}&GUAC_DPI=${size.dpi}`
@@ -95,6 +116,12 @@ export function SessionHarness({ createTunnel }: SessionHarnessProps = {}): JSX.
         settings={settings}
         onSettingsChange={(patch) => setSettings((s) => ({ ...s, ...patch }))}
         onExit={() => setExited(true)}
+        onMinimize={() => setExited(true)}
+        onLog={(e) => console.debug(`[session ${e.level}] ${e.message}`)}
+        onThumbnail={(url) => {
+          (window as { __omgThumbnails?: string[] }).__omgThumbnails ??= [];
+          (window as { __omgThumbnails?: string[] }).__omgThumbnails?.push(url);
+        }}
       />
       <div style={styles.panel} data-harness-panel="">
         <button type="button" style={styles.button} onClick={() => setPanelOpen((v) => !v)}>
@@ -115,6 +142,39 @@ export function SessionHarness({ createTunnel }: SessionHarnessProps = {}): JSX.
               <button type="button" style={styles.button} onClick={() => current.current?.drop()}>
                 Drop link
               </button>
+              <button
+                type="button"
+                style={styles.button}
+                data-harness-active=""
+                onClick={() => setActive((v) => !v)}
+              >
+                {active ? 'Hide session' : 'Show session'}
+              </button>
+              {features && (
+                <>
+                  <button
+                    type="button"
+                    style={styles.button}
+                    onClick={() => (current.current as FeatureTunnel | null)?.pushDownload()}
+                  >
+                    Push file
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.button}
+                    onClick={() => (current.current as FeatureTunnel | null)?.pushPrint()}
+                  >
+                    Print
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.button}
+                    onClick={() => (current.current as FeatureTunnel | null)?.playTone()}
+                  >
+                    Tone
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 style={styles.button}

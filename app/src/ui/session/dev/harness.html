@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Session harness</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Developer harness only; not linked from index.html, so it is not in the build.
+         Open /src/ui/session/dev/harness.html (?tunnel=demo for the demo desktop). -->
+    <div id="root"></div>
+    <script type="module" src="./harnessMain.tsx"></script>
+  </body>
+</html>

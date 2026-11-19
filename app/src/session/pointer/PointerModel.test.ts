@@ -18,6 +18,7 @@ import {
   type ViewportState,
 } from '../viewport/Viewport.ts';
 import {
+  AxisLockedScroll,
   PointerModel,
   ScrollAccumulator,
   accelerationGain,
@@ -220,13 +221,63 @@ describe('PTR-1 direct touch mode (end to end)', () => {
     expect(fmt(h.mouse)).toEqual(['1800,800', '1800,800L', '1999,999L', '1999,999']);
   });
 
-  it('two/three-finger taps do nothing in direct mode', () => {
+  it('two-finger tap = right click and three-finger tap = middle click at the centroid', () => {
     const h = new Harness()
       .down(1, 100, 100, 0)
       .down(2, 200, 100, 10)
       .up(1, 100, 100, 60)
       .up(2, 200, 100, 70);
+    expect(fmt(h.take())).toEqual(['300,200', '300,200R', '300,200']);
+    h.down(3, 100, 200, 1000)
+      .down(4, 200, 200, 1010)
+      .down(5, 300, 200, 1020)
+      .up(3, 100, 200, 1060)
+      .up(4, 200, 200, 1065)
+      .up(5, 300, 200, 1070)
+      .tick(2000);
+    expect(fmt(h.take())).toEqual(['400,400', '400,400M', '400,400']);
+  });
+
+  it('one-finger drag = left drag at once when the desktop fits (nothing to pan)', () => {
+    const h = new Harness();
+    h.down(1, 100, 100, 0).move(1, 150, 100, 30).up(1, 150, 100, 60);
+    expect(fmt(h.mouse)).toEqual(['200,200', '200,200L', '300,200L', '300,200']);
+    expect(h.haptics).toEqual(['drag-start']);
+  });
+
+  it('directPan "viewport" never drags', () => {
+    const h = new Harness({ directPan: 'viewport' });
+    h.down(1, 100, 100, 0).move(1, 150, 100, 30).up(1, 150, 100, 60);
     expect(h.mouse).toEqual([]);
+  });
+
+  it('three-finger double tap resets the zoom without a middle click', () => {
+    const h = new Harness();
+    h.vp = zoomAt(h.vp, 3, { x: 500, y: 250 });
+    let t = 0;
+    for (let i = 0; i < 2; i++) {
+      h.down(1, 100, 100, t)
+        .down(2, 200, 100, t + 5)
+        .down(3, 300, 100, t + 10);
+      h.up(1, 100, 100, t + 60)
+        .up(2, 200, 100, t + 62)
+        .up(3, 300, 100, t + 64);
+      t += 150;
+    }
+    h.tick(5000);
+    expect(h.mouse).toEqual([]);
+    expect(h.vp.zoom).toBe(1);
+  });
+
+  it('two-finger double tap sends one right click, not two', () => {
+    const h = new Harness();
+    let t = 0;
+    for (let i = 0; i < 2; i++) {
+      h.down(1, 100, 100, t).down(2, 200, 100, t + 5);
+      h.up(1, 100, 100, t + 60).up(2, 200, 100, t + 62);
+      t += 150;
+    }
+    expect(h.mouse.filter((s) => s.right)).toHaveLength(1);
   });
 });
 
@@ -246,12 +297,40 @@ describe('PTR-2 trackpad mode (end to end)', () => {
     expect(h.haptics).toEqual([]);
   });
 
-  it('tap = left click at the pointer, after the double-tap window', () => {
+  it('tap = press at the pointer on release (no latency), release after the window', () => {
     const h = tp().down(1, 700, 400, 0).up(1, 700, 400, 50);
-    expect(h.mouse).toEqual([]);
+    expect(fmt(h.mouse)).toEqual(['1000,500L']);
+    expect(h.haptics).toEqual(['click']);
     h.tick(350);
     expect(fmt(h.mouse)).toEqual(['1000,500L', '1000,500']);
-    expect(h.haptics).toEqual(['click']);
+  });
+
+  it('tapDrag off: a tap is a complete click on release', () => {
+    const h = tp({ tapDrag: false }).down(1, 700, 400, 0).up(1, 700, 400, 50);
+    expect(fmt(h.mouse)).toEqual(['1000,500L', '1000,500']);
+  });
+
+  it('tap-and-a-half drag is one press, motion, one release (never a double click)', () => {
+    const h = tp().down(1, 500, 250, 0).up(1, 500, 250, 50).down(2, 500, 250, 150);
+    h.move(2, 530, 250, 200).move(2, 560, 250, 250).up(2, 560, 250, 300).tick(5000);
+    const presses = h.mouse.filter((s, i) => s.left && !(h.mouse[i - 1]?.left ?? false));
+    expect(presses).toHaveLength(1);
+    expect(fmt(h.mouse).at(-1)?.endsWith('L')).toBe(false);
+  });
+
+  it('after a pinch moved the pointer off-screen, the next interaction brings it back', () => {
+    const h = tp();
+    h.pm.setPointer({ x: 100, y: 100 });
+    h.vp = zoomAt(h.vp, 4, { x: 900, y: 450 }); // pointer is now far off-screen
+    h.down(1, 500, 250, 0).up(1, 500, 250, 50);
+    const p = h.mouse[0];
+    if (!p) throw new Error('no state');
+    const s = remoteToScreen(h.vp, p);
+    const vis = visibleRect(h.vp);
+    expect(s.x).toBeGreaterThanOrEqual(vis.x);
+    expect(s.y).toBeGreaterThanOrEqual(vis.y);
+    expect(p.left).toBe(false); // moved first, then pressed
+    expect(h.mouse[1]?.left).toBe(true);
   });
 
   it('double tap = double click at the pointer', () => {
@@ -281,6 +360,8 @@ describe('PTR-2 trackpad mode (end to end)', () => {
       .up(1, 100, 100, 80)
       .up(2, 200, 100, 85)
       .up(3, 300, 100, 90);
+    expect(h.mouse).toEqual([]); // held for the double-tap window (zoom reset)
+    h.tick(1000);
     expect(fmt(h.mouse)).toEqual(['1000,500M', '1000,500']);
   });
 
@@ -307,7 +388,7 @@ describe('PTR-2 trackpad mode (end to end)', () => {
     expect(f[f.length - 1]).toBe('1100,500');
     expect(f.slice(1, -1).every((s) => s.endsWith('L'))).toBe(true);
     expect(h.mouse.filter((s) => s.left).length).toBeGreaterThan(1);
-    expect(h.haptics).toEqual(['drag-start']);
+    expect(h.haptics).toEqual(['click', 'drag-start']);
   });
 
   it('double-tap-and-hold without moving still starts a drag after tapMaxMs', () => {
@@ -373,9 +454,10 @@ describe('PTR-2 trackpad mode (end to end)', () => {
   it('sub-pixel moves accumulate (precise nudge, S4)', () => {
     const h = tp({}, { ...VP, mode: 'one-to-one' });
     h.vp = zoomAt(h.vp, 8, { x: 500, y: 250 }); // 8 screen px per remote px
+    h.pm.setPointer({ x: 500, y: 250 }); // visible
     h.down(1, 100, 100, 0);
     h.slowDrag(1, [100, 100], [140, 100], 0, 40); // 1 screen px per move
-    expect(h.mouse.at(-1)?.x).toBe(1005);
+    expect(h.mouse.at(-1)?.x).toBe(505);
   });
 
   it('follow-pointer keeps the pointer visible while zoomed', () => {
@@ -419,6 +501,59 @@ describe('scroll and options (PTR-7)', () => {
     expect(acc.add(29)).toBe(0);
     expect(acc.add(Number.NaN)).toBe(0);
     expect(new ScrollAccumulator(0).add(3)).toBe(3);
+  });
+
+  it('horizontal two-finger drag = Shift + wheel; the gesture locks to its dominant axis', () => {
+    const h = new Harness({ mode: 'trackpad' });
+    // Fingers move left 70 px (natural: content follows → scroll right = wheel down) with a
+    // little vertical drift that must not produce vertical notches.
+    h.down(1, 300, 200, 0).down(2, 400, 200, 0);
+    for (let i = 1; i <= 7; i++) {
+      h.move(1, 300 - i * 10, 200 + i, i * 20).move(2, 400 - i * 10, 200 + i, i * 20 + 10);
+    }
+    const states = h.take();
+    expect(states.length).toBeGreaterThan(0);
+    expect(states.every((s) => s.withShift === true)).toBe(true);
+    expect(fmt(states)).toEqual(['1000,500D', '1000,500', '1000,500D', '1000,500']);
+    expect(states.some((s) => s.up)).toBe(false);
+  });
+
+  it('horizontalScroll off: horizontal travel is ignored', () => {
+    const h = new Harness({ mode: 'trackpad', horizontalScroll: false });
+    h.down(1, 300, 200, 0).down(2, 400, 200, 0);
+    h.move(1, 230, 200, 20).move(2, 330, 200, 30);
+    expect(h.take()).toEqual([]);
+  });
+
+  it('AxisLockedScroll replays the deciding travel and then ignores the other axis', () => {
+    const s = new AxisLockedScroll(30);
+    expect(s.add(5, 1, true)).toEqual({ x: 0, y: 0 });
+    expect(s.lockedAxis).toBeNull();
+    expect(s.add(30, 2, true)).toEqual({ x: 1, y: 0 });
+    expect(s.lockedAxis).toBe('x');
+    expect(s.add(0, 500, true)).toEqual({ x: 0, y: 0 });
+    s.reset();
+    expect(s.add(100, 0, false)).toEqual({ x: 0, y: 0 });
+    expect(s.lockedAxis).toBe('y');
+  });
+
+  it('wheelStates marks horizontal notches withShift', () => {
+    const w = wheelStates(ms(1, 2), -1, true);
+    expect(w).toEqual([
+      { ...ms(1, 2, { up: true }), withShift: true },
+      { ...ms(1, 2), withShift: true },
+    ]);
+  });
+
+  it('relative hardware mouse (pointer lock) moves by screen px ÷ scale with buttons', () => {
+    const pm = new PointerModel({ mode: 'trackpad' });
+    const vp = createViewport(VP);
+    const out = pm.handleRelativeMouse(
+      { dx: 10, dy: -5, left: true, middle: false, right: false },
+      vp,
+    );
+    expect(out.mouse).toEqual([ms(1020, 490, { left: true })]);
+    expect(out.viewport[0]?.type).toBe('ensure-visible');
   });
 
   it('two-finger drag can pan the viewport instead of scrolling', () => {

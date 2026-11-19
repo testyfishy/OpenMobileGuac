@@ -22,8 +22,14 @@ export type GuacErrorInfo =
   | { readonly kind: 'not-guacamole'; readonly url: string; readonly status: number | undefined }
   /** The URL is not usable at all (empty, bad syntax, unsupported scheme). */
   | { readonly kind: 'invalid-url'; readonly reason: 'empty' | 'invalid' | 'unsupported-scheme' }
-  /** `INVALID_CREDENTIALS`: wrong username or password. */
-  | ({ readonly kind: 'invalid-credentials' } & ServerDetail)
+  /**
+   * `INVALID_CREDENTIALS`: wrong username or password. `expected` carries the fields the
+   * server listed; an SSO extension lists a `REDIRECT` field here (SRV-7).
+   */
+  | ({
+      readonly kind: 'invalid-credentials';
+      readonly expected?: readonly FieldDescriptor[];
+    } & ServerDetail)
   /**
    * `INSUFFICIENT_CREDENTIALS`: the server wants more fields (TOTP, etc.). Render
    * `expected`, then call `login` again with the same credentials plus the new values.
@@ -84,7 +90,9 @@ export function errorFromApiBody(
   };
   switch (body.type) {
     case 'INVALID_CREDENTIALS':
-      return { kind: 'invalid-credentials', ...detail };
+      return body.expected.length > 0
+        ? { kind: 'invalid-credentials', expected: body.expected, ...detail }
+        : { kind: 'invalid-credentials', ...detail };
     case 'INSUFFICIENT_CREDENTIALS':
       return { kind: 'additional-credentials-required', expected: body.expected, ...detail };
     case 'PERMISSION_DENIED':

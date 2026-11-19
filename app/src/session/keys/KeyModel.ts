@@ -17,10 +17,19 @@
  * locked and released when unlocked, so held-modifier interactions such as Alt held while
  * tapping Tab, or Ctrl/Shift + click, work. Call `releaseAll()` on disconnect/blur.
  *
- * Letter case with modifiers: guacd adjusts Shift to match the keysym it receives (an
- * uppercase letter keysym makes it press Shift). So while Ctrl/Alt/Super apply without
- * Shift, ASCII letters are sent lowercase (Ctrl + "C" stays Ctrl+C, not Ctrl+Shift+C);
- * while Shift applies, they are sent uppercase.
+ * Letter case with modifiers: guacd adjusts Shift to match the keysym it receives. Its RDP
+ * keymaps define every printable keysym with a required Shift state (e.g. `en-us-qwerty`:
+ * `map -shift 0x02.. ~ "1234…"`, `map +shift 0x02.. ~ "!@#$…"`), and
+ * `guac_rdp_keyboard_send_defined_key` presses or releases Shift to match before sending
+ * the scancode (guacamole-server 1.6.0, `src/protocols/rdp/keyboard.c`). So the keysym, not
+ * the held Shift, decides the character: keysym `1` with Shift held still types "1".
+ * Therefore:
+ * - while Ctrl/Alt/Super apply without Shift, ASCII letters are sent lowercase (Ctrl + "C"
+ *   stays Ctrl+C, not Ctrl+Shift+C);
+ * - while Shift applies (sticky or locked), letters are sent uppercase and the US-layout
+ *   shifted symbol is sent for digits and punctuation (sticky Shift + "1" sends "!" with
+ *   Shift held), via `shiftedCodePoint`. Text the soft keyboard already shifted ("!") is
+ *   sent as is.
  */
 
 export interface KeyEvent {
@@ -200,10 +209,45 @@ function isAsciiLetter(cp: number): boolean {
   return (cp >= 0x41 && cp <= 0x5a) || (cp >= 0x61 && cp <= 0x7a);
 }
 
-/** Adjust ASCII letter case to the active modifiers (see file comment). */
+/** US-layout Shift pairs for digits and punctuation. */
+const US_SHIFTED: Readonly<Record<string, string>> = {
+  '`': '~',
+  '1': '!',
+  '2': '@',
+  '3': '#',
+  '4': '$',
+  '5': '%',
+  '6': '^',
+  '7': '&',
+  '8': '*',
+  '9': '(',
+  '0': ')',
+  '-': '_',
+  '=': '+',
+  '[': '{',
+  ']': '}',
+  '\\': '|',
+  ';': ':',
+  "'": '"',
+  ',': '<',
+  '.': '>',
+  '/': '?',
+};
+
+/**
+ * The character Shift produces for `cp` (US layout): uppercase for ASCII letters, the
+ * shifted symbol for digits and punctuation, `cp` itself otherwise.
+ */
+export function shiftedCodePoint(cp: number): number {
+  if (isAsciiLetter(cp)) return cp & ~0x20;
+  const shifted = US_SHIFTED[String.fromCharCode(cp)];
+  return cp <= 0x7f && shifted !== undefined ? shifted.charCodeAt(0) : cp;
+}
+
+/** Adjust an ASCII character to the active modifiers (see file comment). */
 function caseForModifiers(cp: number, mods: ReadonlySet<Modifier>): number {
+  if (mods.has('Shift')) return shiftedCodePoint(cp);
   if (!isAsciiLetter(cp)) return cp;
-  if (mods.has('Shift')) return cp & ~0x20; // uppercase
   if (mods.has('Ctrl') || mods.has('Alt') || mods.has('Super')) return cp | 0x20; // lowercase
   return cp;
 }
@@ -423,7 +467,16 @@ export class KeyModel {
   pressKey(key: string | number): KeyEvent[] {
     const keysym = typeof key === 'number' ? key : keysymForName(key);
     if (keysym === null) throw new RangeError(`Unknown key name: ${String(key)}`);
-    return this.wrapOneShot([keysym]);
+    return this.wrapOneShot([this.applyModifiers(keysym)]);
+  }
+
+  /**
+   * A printable Latin-1 keysym adjusted for the sticky modifiers now active (Shift → shifted
+   * symbol / uppercase, Ctrl/Alt/Super → lowercase letters). Other keysyms are unchanged.
+   */
+  applyModifiers(keysym: number): number {
+    if (keysym < 0x20 || keysym > 0x7e) return keysym;
+    return caseForModifiers(keysym, this.activeSet());
   }
 
   /**

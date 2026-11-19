@@ -10,21 +10,32 @@
  * right, up, down) in integer remote pixels, clamped to the remote framebuffer. Each
  * gesture yields an ordered list (e.g. a direct tap = move, press, release). A state equal
  * to the previously emitted one is skipped. Wheel notches are press+release of `up`/`down`
- * (how Guacamole encodes the wheel); there is no horizontal wheel in that state.
+ * (how Guacamole encodes the wheel). Guacamole has no horizontal wheel, so horizontal
+ * notches are emitted with `withShift: true`: the host holds Shift around each run of such
+ * states (Shift + wheel is horizontal scrolling in most desktop apps).
  *
  * Mode summary:
  * - direct: tap = left click at the finger; double-tap = second click at the first tap's
  *   pixel (the first click was the tap); long-press = right click on release (only a
  *   haptic while held, so moving instead gives a left drag without a stray context menu);
- *   long-press-drag = left drag; one-finger pan = viewport pan with fling (or left drag,
- *   `directPan: 'drag'`); two-finger pan = wheel at the fingers' centroid (or viewport pan);
- *   pinch = zoom. Taps/presses that land on letterbox bars outside the remote are ignored.
+ *   long-press-drag = left drag; one-finger pan = left drag when the whole desktop fits
+ *   (nothing to pan), viewport pan with fling when zoomed in (`directPan: 'auto'`; or
+ *   always drag / always pan); two-finger tap = right click and three-finger tap = middle
+ *   click at the fingers' centroid; two-finger pan = wheel at the centroid (or viewport
+ *   pan); pinch = zoom. Taps/presses that land on letterbox bars are ignored.
  * - trackpad: one-finger pan = relative pointer motion (speed + acceleration, in screen
- *   terms so it feels the same at every zoom); tap = left click at the pointer; two-finger
- *   tap = right click; three-finger tap = middle click; double-tap-and-hold = left drag;
- *   long-press = left drag too (or right click, `trackpadLongPress`); two-finger pan =
- *   wheel; pinch = zoom; after every pointer move the viewport is asked to keep the
- *   pointer visible (follow-pointer, also above the soft keyboard).
+ *   terms so it feels the same at every zoom); tap = left click at the pointer (with
+ *   `tapDrag`, the recogniser's `pending-tap` presses on release and releases late, and a
+ *   tap-and-a-half drag continues on that same press); two-finger tap = right click;
+ *   three-finger tap = middle click; long-press = left drag too (or right click,
+ *   `trackpadLongPress`); two-finger pan = wheel; pinch = zoom; after every pointer move the
+ *   viewport is asked to keep the pointer visible (follow-pointer, also above the soft
+ *   keyboard). If the pointer is outside the visible area when an interaction starts (e.g.
+ *   after a pinch), it is first brought to the nearest visible point.
+ * - both: three-finger double tap = reset zoom; two-finger double tap = nothing (its first
+ *   tap already right-clicked; the second is swallowed so it never double right-clicks).
+ * - touch: raw multi-touch pass-through is done by the host (`TouchPassthrough`); gestures
+ *   handed to this model in that mode behave as in direct mode.
  *
  * Held buttons are always released when a drag ends, is cancelled, the mode changes, or
  * the remote is resized.
@@ -32,16 +43,21 @@
 
 import type { DragGesture, Gesture, PinchGesture } from '../gesture/GestureRecognizer.ts';
 import {
+  canPan,
   clampToRemotePixel,
   isOverContent,
+  remoteToScreen,
   scaleOf,
   screenToRemote,
+  visibleRect,
   type Point,
   type ViewportCommand,
   type ViewportState,
 } from '../viewport/Viewport.ts';
 
-export type PointerMode = 'direct' | 'trackpad';
+export type PointerMode = 'direct' | 'trackpad' | 'touch';
+
+export const POINTER_MODES: readonly PointerMode[] = ['direct', 'trackpad', 'touch'];
 
 export interface MouseState {
   readonly x: number;
@@ -51,6 +67,8 @@ export interface MouseState {
   readonly right: boolean;
   readonly up: boolean;
   readonly down: boolean;
+  /** Horizontal wheel notch: send with Shift held (see the file comment). */
+  readonly withShift?: boolean;
 }
 
 export type HapticHint = 'click' | 'right-click' | 'drag-start';
@@ -63,8 +81,16 @@ export interface PointerOutput {
 
 export interface PointerConfig {
   readonly mode: PointerMode;
-  /** Direct mode one-finger pan: move the viewport, or left-drag on the remote. */
-  readonly directPan: 'viewport' | 'drag';
+  /**
+   * Direct mode one-finger drag: `auto` = left drag when the desktop fits the screen and
+   * viewport pan when there is something to pan; `drag` = always left drag; `viewport` =
+   * always pan the view.
+   */
+  readonly directPan: 'auto' | 'viewport' | 'drag';
+  /** Trackpad tap-and-a-half drag (adds a short release delay to taps; see recogniser). */
+  readonly tapDrag: boolean;
+  /** Two-finger horizontal scroll as Shift + wheel; off = vertical only. */
+  readonly horizontalScroll: boolean;
   /** Two-finger drag: scroll wheel, or move the viewport (PTR-7). */
   readonly twoFingerPan: 'scroll' | 'viewport';
   /** Natural scrolling: content follows the fingers (fingers up = wheel down). */
@@ -83,7 +109,9 @@ export interface PointerConfig {
 
 export const DEFAULT_POINTER_CONFIG: PointerConfig = {
   mode: 'direct',
-  directPan: 'viewport',
+  directPan: 'auto',
+  tapDrag: true,
+  horizontalScroll: true,
   twoFingerPan: 'scroll',
   naturalScroll: true,
   scrollStepPx: 30,
@@ -145,16 +173,79 @@ export class ScrollAccumulator {
   }
 }
 
-/** Press+release states for `notches` wheel steps at `base` (positive = down). */
-export function wheelStates(base: MouseState, notches: number): MouseState[] {
+/**
+ * Press+release states for `notches` wheel steps at `base` (positive = down). With
+ * `horizontal`, positive = right: the states carry `withShift` (Shift + wheel down scrolls
+ * right in most desktop apps).
+ */
+export function wheelStates(base: MouseState, notches: number, horizontal = false): MouseState[] {
   const out: MouseState[] = [];
   const n = Math.min(Math.abs(Math.trunc(notches)), 100);
   const key = notches > 0 ? 'down' : 'up';
+  const plain = { x: base.x, y: base.y, left: base.left, middle: base.middle, right: base.right };
+  const extra = horizontal ? { withShift: true } : {};
   for (let i = 0; i < n; i++) {
-    out.push({ ...base, up: false, down: false, [key]: true });
-    out.push({ ...base, up: false, down: false });
+    out.push({ ...plain, up: false, down: false, [key]: true, ...extra });
+    out.push({ ...plain, up: false, down: false, ...extra });
   }
   return out;
+}
+
+/** Travel (px) before a two-finger scroll locks onto its dominant axis. */
+export const SCROLL_AXIS_LOCK_PX = 8;
+
+/**
+ * Two-finger scroll: locks onto the dominant axis once the travel reaches
+ * `SCROLL_AXIS_LOCK_PX`, then accumulates notches on that axis only.
+ */
+export class AxisLockedScroll {
+  private axis: 'x' | 'y' | null = null;
+  private totalX = 0;
+  private totalY = 0;
+  private readonly x: ScrollAccumulator;
+  private readonly y: ScrollAccumulator;
+
+  constructor(stepPx: number) {
+    this.x = new ScrollAccumulator(stepPx);
+    this.y = new ScrollAccumulator(stepPx);
+  }
+
+  setStep(stepPx: number): void {
+    this.x.setStep(stepPx);
+    this.y.setStep(stepPx);
+  }
+
+  get lockedAxis(): 'x' | 'y' | null {
+    return this.axis;
+  }
+
+  /** Add travel (positive = wheel down / right). Returns notches on the locked axis. */
+  add(dx: number, dy: number, allowHorizontal: boolean): { x: number; y: number } {
+    const fx = Number.isFinite(dx) ? dx : 0;
+    const fy = Number.isFinite(dy) ? dy : 0;
+    if (this.axis === null) {
+      this.totalX += fx;
+      this.totalY += fy;
+      if (!allowHorizontal) this.axis = 'y';
+      else if (Math.hypot(this.totalX, this.totalY) >= SCROLL_AXIS_LOCK_PX) {
+        this.axis = Math.abs(this.totalX) > Math.abs(this.totalY) ? 'x' : 'y';
+      } else {
+        return { x: 0, y: 0 };
+      }
+      // Replay the travel that decided the axis.
+      const replay = this.axis === 'x' ? this.totalX : this.totalY;
+      return this.axis === 'x' ? { x: this.x.add(replay), y: 0 } : { x: 0, y: this.y.add(replay) };
+    }
+    return this.axis === 'x' ? { x: this.x.add(fx), y: 0 } : { x: 0, y: this.y.add(fy) };
+  }
+
+  reset(): void {
+    this.axis = null;
+    this.totalX = 0;
+    this.totalY = 0;
+    this.x.reset();
+    this.y.reset();
+  }
 }
 
 export interface HardwareMouseInput {
@@ -190,7 +281,16 @@ interface Buttons {
   right: boolean;
 }
 
-type DragOwner = 'pan' | 'long-press-drag' | 'double-tap-drag' | 'long-press';
+export interface RelativeMouseInput {
+  /** Movement in screen px (e.g. `movementX/Y` under pointer lock). */
+  readonly dx: number;
+  readonly dy: number;
+  readonly left: boolean;
+  readonly middle: boolean;
+  readonly right: boolean;
+}
+
+type DragOwner = 'pan' | 'long-press-drag' | 'double-tap-drag' | 'long-press' | 'pending-tap';
 
 export class PointerModel {
   private config: PointerConfig;
@@ -199,17 +299,19 @@ export class PointerModel {
   private pointerInitialised = false;
   private buttons: Buttons = { left: false, middle: false, right: false };
   private last: MouseState | null = null;
-  private readonly scroll: ScrollAccumulator;
+  private readonly scroll: AxisLockedScroll;
   /** Which gesture currently holds the left button (if any). */
   private dragOwner: DragOwner | null = null;
   /** Direct-mode long press origin (remote), or null if it landed off-content. */
   private longPressOrigin: Point | null = null;
   /** A drag whose start landed off-content is ignored until it ends. */
   private ignoring: DragOwner | null = null;
+  /** Direct mode: how the current one-finger pan was resolved at its start. */
+  private directPanAs: 'viewport' | 'drag' = 'viewport';
 
   constructor(config: Partial<PointerConfig> = {}) {
     this.config = { ...DEFAULT_POINTER_CONFIG, ...config };
-    this.scroll = new ScrollAccumulator(this.config.scrollStepPx);
+    this.scroll = new AxisLockedScroll(this.config.scrollStepPx);
   }
 
   getConfig(): PointerConfig {
@@ -221,8 +323,8 @@ export class PointerModel {
   }
 
   /** Options the GestureRecognizer needs for the current mode. */
-  recognizerOptions(): { deferTapForDoubleTapDrag: boolean } {
-    return { deferTapForDoubleTapDrag: this.config.mode === 'trackpad' };
+  recognizerOptions(mode: PointerMode = this.config.mode): { tapDrag: boolean } {
+    return { tapDrag: mode === 'trackpad' && this.config.tapDrag };
   }
 
   /** Current pointer in remote pixels (rounded). */
@@ -250,6 +352,7 @@ export class PointerModel {
     const behaviourChanged =
       prev.mode !== this.config.mode ||
       prev.directPan !== this.config.directPan ||
+      prev.tapDrag !== this.config.tapDrag ||
       prev.trackpadLongPress !== this.config.trackpadLongPress ||
       prev.twoFingerPan !== this.config.twoFingerPan;
     if (behaviourChanged) return this.releaseAll(viewport);
@@ -285,27 +388,58 @@ export class PointerModel {
     this.pointer = { x: state.x, y: state.y };
     this.pointerInitialised = true;
     this.buttons = { left: input.left, middle: input.middle, right: input.right };
+    this.dragOwner = null;
     this.push(out, state);
     return out;
   }
 
-  /** Translate one gesture. */
-  handle(g: Gesture, viewport: ViewportState): PointerOutput {
+  /**
+   * Relative hardware mouse (pointer lock): moves the pointer by screen px converted to
+   * remote px (no acceleration: the OS already applied its own), buttons map 1:1, and the
+   * view follows the pointer.
+   */
+  handleRelativeMouse(input: RelativeMouseInput, viewport: ViewportState): PointerOutput {
     const out = emptyOutput();
     this.initPointer(viewport);
-    // Gestures common to both modes.
+    const scale = scaleOf(viewport);
+    const k = scale > 0 ? 1 / scale : 1;
+    const dx = Number.isFinite(input.dx) ? input.dx : 0;
+    const dy = Number.isFinite(input.dy) ? input.dy : 0;
+    this.pointer = clampFloat(viewport, { x: this.pointer.x + dx * k, y: this.pointer.y + dy * k });
+    this.buttons = { left: input.left, middle: input.middle, right: input.right };
+    this.dragOwner = null;
+    this.emit(out, viewport);
+    if (dx !== 0 || dy !== 0) this.follow(viewport, out);
+    return out;
+  }
+
+  /**
+   * Translate one gesture. `mode` overrides the configured mode for this gesture (the split
+   * layout's trackpad surface is always a trackpad).
+   */
+  handle(g: Gesture, viewport: ViewportState, mode: PointerMode = this.config.mode): PointerOutput {
+    const out = emptyOutput();
+    this.initPointer(viewport);
+    // Gestures common to all modes.
     switch (g.type) {
       case 'pinch':
         this.pinch(g, out);
         return out;
       case 'two-finger-pan':
-        this.twoFingerPan(g, viewport, out);
+        this.twoFingerPan(g, viewport, out, mode);
+        return out;
+      case 'three-finger-double-tap':
+        out.viewport.push({ type: 'reset' });
+        out.haptics.push('click');
+        return out;
+      case 'two-finger-double-tap':
+        // The first two-finger tap already right-clicked; never send a second one.
         return out;
       default:
         break;
     }
-    if (this.config.mode === 'direct') this.direct(g, viewport, out);
-    else this.trackpad(g, viewport, out);
+    if (mode === 'trackpad') this.trackpad(g, viewport, out);
+    else this.direct(g, viewport, out);
     return out;
   }
 
@@ -316,6 +450,14 @@ export class PointerModel {
     switch (g.type) {
       case 'tap':
         if (this.moveToScreen(vp, g, out)) this.click(vp, out, 'left');
+        return;
+      case 'pending-tap':
+        // Only produced with tapDrag (trackpad); handled as a press/release at the finger.
+        if (g.phase === 'start') {
+          if (this.moveToScreen(vp, g, out)) this.press(vp, out, 'pending-tap', 'click');
+        } else if (this.dragOwner === 'pending-tap') {
+          this.release(vp, out);
+        }
         return;
       case 'double-tap':
         // The first click was the tap; land the second on the first tap's pixel.
@@ -345,8 +487,13 @@ export class PointerModel {
         this.longPressOrigin = null;
         this.directDrag(g, vp, out);
         return;
-      case 'pan':
-        if (this.config.directPan === 'drag') {
+      case 'pan': {
+        if (g.phase === 'start') {
+          const mode = this.config.directPan;
+          this.directPanAs =
+            mode === 'drag' || (mode === 'auto' && !canPan(vp)) ? 'drag' : 'viewport';
+        }
+        if (this.directPanAs === 'drag') {
           this.directDrag(g, vp, out);
           return;
         }
@@ -359,12 +506,18 @@ export class PointerModel {
           }
         }
         return;
+      }
       case 'two-finger-tap':
+        // Consistent with trackpad mode: right click, here at the fingers' centroid.
+        if (this.moveToScreen(vp, g, out)) this.click(vp, out, 'right');
+        return;
       case 'three-finger-tap':
-        // Not mapped in direct mode (PTR-1 does not define them).
+        if (this.moveToScreen(vp, g, out)) this.click(vp, out, 'middle');
         return;
       case 'pinch':
       case 'two-finger-pan':
+      case 'two-finger-double-tap':
+      case 'three-finger-double-tap':
         return;
     }
   }
@@ -397,18 +550,30 @@ export class PointerModel {
   private trackpad(g: Gesture, vp: ViewportState, out: PointerOutput): void {
     switch (g.type) {
       case 'tap':
+        this.bringIntoView(vp, out);
         this.click(vp, out, 'left');
+        return;
+      case 'pending-tap':
+        if (g.phase === 'start') {
+          this.bringIntoView(vp, out);
+          this.press(vp, out, 'pending-tap', 'click');
+        } else if (this.dragOwner === 'pending-tap') {
+          this.release(vp, out);
+        }
         return;
       case 'double-tap':
         this.click(vp, out, 'left');
         return;
       case 'two-finger-tap':
+        this.bringIntoView(vp, out);
         this.click(vp, out, 'right');
         return;
       case 'three-finger-tap':
+        this.bringIntoView(vp, out);
         this.click(vp, out, 'middle');
         return;
       case 'long-press':
+        if (g.phase === 'start') this.bringIntoView(vp, out);
         if (this.config.trackpadLongPress === 'drag') {
           if (g.phase === 'start') this.press(vp, out, 'long-press');
           else if (this.dragOwner === 'long-press') this.release(vp, out);
@@ -431,7 +596,14 @@ export class PointerModel {
         return;
       case 'double-tap-drag':
         if (g.phase === 'start') {
-          this.press(vp, out, 'double-tap-drag');
+          if (this.dragOwner === 'pending-tap') {
+            // Tap-and-a-half: keep the button pressed by the first tap (no up/down pair,
+            // so the remote never sees a double-click-drag).
+            this.dragOwner = 'double-tap-drag';
+            out.haptics.push('drag-start');
+          } else {
+            this.press(vp, out, 'double-tap-drag');
+          }
           return;
         }
         if (this.dragOwner !== 'double-tap-drag') return;
@@ -439,11 +611,15 @@ export class PointerModel {
         if (g.phase === 'end') this.release(vp, out);
         return;
       case 'pan':
-        if (g.phase === 'start') out.viewport.push({ type: 'stop-fling' });
-        else this.relativeMove(g, vp, out);
+        if (g.phase === 'start') {
+          out.viewport.push({ type: 'stop-fling' });
+          this.bringIntoView(vp, out);
+        } else this.relativeMove(g, vp, out);
         return;
       case 'pinch':
       case 'two-finger-pan':
+      case 'two-finger-double-tap':
+      case 'three-finger-double-tap':
         return;
     }
   }
@@ -462,6 +638,10 @@ export class PointerModel {
       y: this.pointer.y + g.dy * k,
     });
     this.emit(out, vp);
+    this.follow(vp, out);
+  }
+
+  private follow(vp: ViewportState, out: PointerOutput): void {
     const p = clampToRemotePixel(vp, this.pointer);
     out.viewport.push({
       type: 'ensure-visible',
@@ -469,6 +649,28 @@ export class PointerModel {
       y: p.y,
       margin: this.config.followMarginPx,
     });
+  }
+
+  /**
+   * Trackpad: if the pointer is outside the visible area (e.g. the user pinched or panned
+   * away from it), move it to the nearest point inside, `followMarginPx` from the edge, so
+   * the next click lands where the user can see the cursor.
+   */
+  private bringIntoView(vp: ViewportState, out: PointerOutput): void {
+    if (vp.remote.width <= 0 || vp.remote.height <= 0) return;
+    const vis = visibleRect(vp);
+    if (vis.width <= 0 || vis.height <= 0) return;
+    const s = remoteToScreen(vp, this.pointer);
+    const inside =
+      s.x >= vis.x && s.y >= vis.y && s.x <= vis.x + vis.width && s.y <= vis.y + vis.height;
+    if (inside) return;
+    const m = Math.min(this.config.followMarginPx, vis.width / 2, vis.height / 2);
+    const target = {
+      x: Math.min(vis.x + vis.width - m, Math.max(vis.x + m, s.x)),
+      y: Math.min(vis.y + vis.height - m, Math.max(vis.y + m, s.y)),
+    };
+    this.pointer = clampFloat(vp, screenToRemote(vp, target));
+    this.emit(out, vp);
   }
 
   // -------------------------------------------------------------------------------------
@@ -487,7 +689,12 @@ export class PointerModel {
     if (g.dx !== 0 || g.dy !== 0) out.viewport.push({ type: 'pan', dx: g.dx, dy: g.dy });
   }
 
-  private twoFingerPan(g: DragGesture, vp: ViewportState, out: PointerOutput): void {
+  private twoFingerPan(
+    g: DragGesture,
+    vp: ViewportState,
+    out: PointerOutput,
+    mode: PointerMode,
+  ): void {
     if (this.config.twoFingerPan === 'viewport') {
       if (g.phase === 'start') out.viewport.push({ type: 'stop-fling' });
       else if (g.dx !== 0 || g.dy !== 0) out.viewport.push({ type: 'pan', dx: g.dx, dy: g.dy });
@@ -498,15 +705,15 @@ export class PointerModel {
     }
     if (g.phase === 'start') {
       this.scroll.reset();
-      // Direct mode scrolls whatever is under the fingers.
-      if (this.config.mode === 'direct' && isOverContent(vp, g)) this.moveToScreen(vp, g, out);
+      // Direct mode scrolls whatever is under the fingers; trackpad scrolls at the pointer.
+      if (mode !== 'trackpad' && isOverContent(vp, g)) this.moveToScreen(vp, g, out);
+      else if (mode === 'trackpad') this.bringIntoView(vp, out);
       return;
     }
-    const travel = this.config.naturalScroll ? -g.dy : g.dy;
-    const notches = this.scroll.add(travel);
-    if (notches !== 0) {
-      for (const s of wheelStates(this.current(vp), notches)) this.push(out, s);
-    }
+    const sign = this.config.naturalScroll ? -1 : 1;
+    const n = this.scroll.add(sign * g.dx, sign * g.dy, this.config.horizontalScroll);
+    if (n.y !== 0) for (const s of wheelStates(this.current(vp), n.y)) this.push(out, s);
+    if (n.x !== 0) for (const s of wheelStates(this.current(vp), n.x, true)) this.push(out, s);
     if (g.phase === 'end') this.scroll.reset();
   }
 
@@ -533,12 +740,17 @@ export class PointerModel {
     if (haptic) out.haptics.push(button === 'right' ? 'right-click' : 'click');
   }
 
-  private press(vp: ViewportState, out: PointerOutput, owner: DragOwner): void {
-    if (this.dragOwner !== null) return;
+  private press(
+    vp: ViewportState,
+    out: PointerOutput,
+    owner: DragOwner,
+    haptic: HapticHint = 'drag-start',
+  ): void {
+    if (this.dragOwner !== null || this.buttons.left) return;
     this.dragOwner = owner;
     this.buttons = { ...this.buttons, left: true };
     this.emit(out, vp);
-    out.haptics.push('drag-start');
+    out.haptics.push(haptic);
   }
 
   private release(vp: ViewportState, out: PointerOutput): void {
@@ -567,7 +779,8 @@ export class PointerModel {
       l.middle === s.middle &&
       l.right === s.right &&
       l.up === s.up &&
-      l.down === s.down
+      l.down === s.down &&
+      (l.withShift ?? false) === (s.withShift ?? false)
     ) {
       return;
     }

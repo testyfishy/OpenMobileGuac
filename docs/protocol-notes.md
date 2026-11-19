@@ -391,7 +391,131 @@ The `Client.connect(connectString)` call passes this string to `tunnel.connect(d
     `guacKeydown`/`guacKeyup` and `guacSyntheticKeydown`/`guacSyntheticKeyup` events, and
     only while the client is focused (`guacClient.js`).
 
-## 6. Not verified
+## 6. Session streams: required/argv, files, audio, statistics
+
+Implemented in `app/src/ui/session/` (`SessionController.ts`, `argv.ts`, `transfers.ts`,
+`audio.ts`, `fileSave.ts`) with the pure parts in `app/src/session/` (`credentials/`,
+`transfer/`, `clipboard/`). Server-side facts cite guacamole-server at tag `1.6.0`
+(abbreviated `SRV/` = `src/`); nothing below has been checked against a running guacd yet.
+
+### 6.1 Credential prompt (`required`) and argument values (`argv`)
+
+- guacd asks for missing connection parameters with `required,<name>,...`. The library
+  calls `client.onrequired(names)` (`JS/Client.js`, handler `"required"`). It arrives while
+  the client is still `WAITING` (before the first `sync`), so the prompt must work before
+  the session counts as connected; the library accepts streams in `WAITING`
+  (`isConnected()` is `CONNECTED || WAITING`).
+- RDP asks for `username` and `password` when they are unset, and `domain` only when both
+  username and domain are unset (`SRV/protocols/rdp/rdp.c`, the FreeRDP authenticate
+  callback: `guac_argv_register`, `guac_client_owner_send_required`, `guac_argv_await`).
+  VNC asks for `password`, and `username` where the server's auth type needs one
+  (`SRV/protocols/vnc/auth.c`). SSH does not use `required` in 1.6.0: it prompts inside the
+  terminal (`SRV/protocols/ssh/ssh.c`, `guac_terminal_prompt`). guacd sends `required` only
+  if the connection owner supports it (`guac_client_owner_supports_required`).
+- The web client keeps an empty string per requested name and answers each with
+  `client.createArgumentValueStream('text/plain', name)` (sends `argv,<stream>,text/plain,<name>`),
+  a `StringWriter` with the value, then `sendEnd` (`FE/client/types/ManagedClient.js`,
+  `sendArguments`; prompt and Cancel in `FE/client/directives/guacClientNotification.js`:
+  Cancel calls `client.disconnect()`). We write the value as `TextEncoder` UTF-8 bytes with
+  `ArrayBufferWriter` (same wire format; §4 explains the StringWriter bug).
+- guacd acks each `argv` stream with "Ready for updated parameter." / SUCCESS, or "Not
+  allowed." / CLIENT_FORBIDDEN (`SRV/libguac/argv.c`, `guac_argv_handler`).
+- `client.onargv(stream, mimetype, name)` carries current parameter values the server
+  sends, e.g. SSH's `color-scheme`, `font-name` and `font-size`
+  (`SRV/protocols/ssh/argv.c`, `guac_ssh_send_current_argv`), and values echoed after a
+  change for parameters registered with `GUAC_ARGV_OPTION_ECHO` (`SRV/libguac/argv.c`). The web client reads only `text/plain`, then opens an argument stream for that
+  name at once and treats the parameter as changeable only if that stream is acked with
+  success; a later change writes the new value to that stream and ends it
+  (`FE/client/types/ManagedArgument.js`). Without an `onargv` handler the library refuses
+  the stream with "Receiving argument values unsupported" / UNSUPPORTED.
+
+### 6.2 File transfer
+
+- Server-pushed files: `file,<stream>,<mimetype>,<filename>` → `client.onfile(stream,
+  mimetype, filename)`; without a handler the library acks "File transfer unsupported" /
+  UNSUPPORTED (`JS/Client.js`).
+- Filesystems: `filesystem,<object>,<name>` → `client.onfilesystem(object, name)` with a
+  `Guacamole.Object` (`JS/Object.js`); `undefine,<object>` → `object.onundefine`. The root
+  stream is `/` (`Guacamole.Object.ROOT_STREAM`); folder streams have the mimetype
+  `application/vnd.glyptodon.guacamole.stream-index+json`
+  (`Guacamole.Object.STREAM_INDEX_MIMETYPE`).
+- Listing a folder: `object.requestInputStream(name, cb)` sends `get,<object>,<name>`; the
+  server answers `body,<object>,<stream>,<mimetype>,<name>`. The web client refuses a wrong
+  mimetype with `ack "Unexpected mimetype" UNSUPPORTED`, else sends `ack "Ready" SUCCESS`,
+  reads the JSON and acks every blob with `"Received" SUCCESS`
+  (`FE/client/types/ManagedFilesystem.js`, `refresh`). The JSON maps each child's full
+  stream name to its mimetype; only names under `<folder>/` are used. guacd writes the next
+  part of the JSON on each ack (`SRV/protocols/rdp/ls.c`).
+- Downloads are ack-driven: guacd sends each blob (up to 4 KB for RDP) only after a SUCCESS
+  ack, and a non-success ack ends the stream (`SRV/protocols/rdp/download.c`,
+  `guac_rdp_download_ack_handler`). The web client does not read file data in band: it
+  fetches it over REST, `api/session/tunnels/<uuid>/streams/<index>/<filename>`
+  (`FE/rest/services/tunnelService.js`, `downloadStream`), and the web application then
+  intercepts the stream and sends the first ack itself (`JAVA/tunnel/OutputStreamInterceptingFilter.java`,
+  `handleInterceptedStream`). In band, the client must send that first `ack OK SUCCESS`;
+  `Guacamole.BlobReader` then acks every blob with "OK" / SUCCESS (`JS/BlobReader.js`).
+  OpenMobileGuac uses the in-band path (no same-origin REST channel), which costs one round
+  trip per blob.
+- A file under a filesystem is downloaded by requesting its stream name
+  (`ManagedFilesystem.downloadFile`); a disabled download sends no `body` at all
+  (`SRV/protocols/rdp/download.c` only logs), so the client needs a timeout.
+- Uploads: with a filesystem, `object.createOutputStream(mimetype, <folder> + '/' + <name>)`
+  (sends `put,<object>,<stream>,<mimetype>,<name>`); without one,
+  `client.createFileStream(mimetype, name)` (sends `file,...`) (`ManagedClient.uploadFile`,
+  `FE/client/types/ManagedFileUpload.js`). The web client waits for the first ack before
+  sending data. guacd acks the stream with "OK (STREAM BEGIN)", each blob with
+  "OK (DATA RECEIVED)" and the end with "OK (STREAM END)"; refusals are CLIENT_FORBIDDEN
+  "FAIL (UPLOAD DISABLED)" or "FAIL (CANNOT OPEN)", or SERVER_ERROR "FAIL (NO FS)"
+  (`SRV/protocols/rdp/upload.c`); SFTP uses "SFTP: Upload disabled" / CLIENT_FORBIDDEN
+  (`SRV/common-ssh/sftp.c`). In band, `Guacamole.BlobWriter` sends 6048-byte blobs, one per
+  ack (`JS/BlobWriter.js`, `JS/ArrayBufferWriter.js`); it has no abort, so Cancel detaches
+  it from the stream's acks and ends the stream (the remote keeps the partial file).
+- Error texts for upload status codes follow upstream `translations/en.json`
+  (`CLIENT.ERROR_UPLOAD_*`).
+- RDP printing arrives as an ordinary `file` stream with mimetype `application/pdf` and a
+  name from the document title plus `.pdf` (default `guacamole-print.pdf`,
+  `SRV/protocols/rdp/print-job.h`); it also waits for acks, and any non-success ack aborts
+  the job (`SRV/protocols/rdp/print-job.c`).
+- Terminal paste: guacd's terminal pastes its own clipboard buffer on Ctrl+Shift+V (keysym
+  `V` with Ctrl held) or a right/middle click (`SRV/terminal/terminal.c`). With
+  `disable-paste` the SSH clipboard handler is not installed (`SRV/protocols/ssh/user.c`),
+  so the buffer keeps the last terminal selection. The app therefore does not press
+  Ctrl+Shift+V automatically after sending the clipboard.
+
+### 6.3 Audio
+
+- `audio,<stream>,<mimetype>` → `client.onaudio(stream, mimetype)`; a falsy return falls back
+  to `Guacamole.AudioPlayer.getInstance`; a player gets `ack OK SUCCESS`, none
+  `ack "BAD TYPE" CLIENT_BAD_TYPE` (`JS/Client.js`). The web client does not set `onaudio`;
+  it only advertises `AudioPlayer.getSupportedTypes()` (`FE/client/services/guacAudio.js`).
+- `RawAudioPlayer` handles `audio/L8` and `audio/L16` with `rate` and `channels` parameters,
+  connects every buffer straight to the destination of one shared AudioContext
+  (`JS/AudioPlayer.js`, `JS/RawAudioFormat.js`, `JS/AudioContextFactory.js` singleton).
+  Mobile browsers create that context suspended until a user gesture. A per-session mute
+  therefore drops that session's audio blobs instead of suspending the shared context.
+
+### 6.4 Display statistics
+
+- `Guacamole.Display` computes frame statistics from `sync` timing when `statisticWindow`
+  is set: `processingLag`, `desktopFps`, `serverFps`, `clientFps`, `dropRate`
+  (`JS/Display.js`, `notifyFlushed`, `Guacamole.Display.Statistics`). Server `sync`
+  timestamps are in the server's clock, so they give no network latency. The WebSocket
+  tunnel's internal ping (`""`, `ping`, timestamp, echoed by the server) is handled inside
+  `JS/Tunnel.js` and not exposed, so round-trip time is not available to the app.
+
+### 6.5 Why a session ended
+
+RDP maps the remote disconnect reason to a status (`SRV/protocols/rdp/error.c`,
+`guac_rdp_client_abort`): forced disconnect / logged off / active-time limit →
+SESSION_CLOSED ("Forcibly disconnected.", "Logged off.", "Active session time limit
+exceeded."); idle limit → SESSION_TIMEOUT; another connection → SESSION_CONFLICT; a log off
+or disconnect by the remote user sends no error (the session just ends). Upstream's
+notification dialog auto-reconnects only for 0x0200, 0x0202, 0x0203, 0x0207, 0x0208, 0x0301
+(client) and 0x0308 (`guacClientNotification.js`, `CLIENT_AUTO_RECONNECT` /
+`TUNNEL_AUTO_RECONNECT`); the app is stricter for 0x0301 (a rejected sign-in would fail
+again).
+
+## 7. Not verified
 
 These need checking against a live 1.6.0 server (PLAN T0.4):
 
@@ -402,3 +526,5 @@ These need checking against a live 1.6.0 server (PLAN T0.4):
   all. On Android the message text is matched heuristically (see
   `app/src/core/http/NativeHttpClient.ts`).
 - Browser `fetch` cannot tell a TLS failure from an unreachable host.
+- Everything in §6 on a real guacd: the `required` prompt, in-band file transfer and its
+  speed, print jobs, audio, and the end-reason mapping.

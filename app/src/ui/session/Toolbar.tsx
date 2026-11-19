@@ -1,17 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import type { PointerMode } from '../../session/pointer/PointerModel.ts';
 import { ChromeButton } from './ChromeButton.tsx';
 import {
   IconChevronDown,
-  IconCombo,
   IconKeyboard,
-  IconKeys,
   IconMenu,
+  IconMore,
+  IconMultiTouch,
   IconPaste,
-  IconPower,
   IconTouch,
   IconTrackpad,
   IconView,
+  IconZoomIn,
+  IconZoomOut,
 } from './icons.tsx';
 
 export interface ToolbarProps {
@@ -20,54 +21,58 @@ export interface ToolbarProps {
   readonly pointerMode: PointerMode;
   readonly onTogglePointerMode: () => void;
   readonly onOpenView: () => void;
+  /** Shown in touch pass-through mode, where pinch goes to the remote. */
+  readonly onZoom?: (factor: number) => void;
+  /** Immersive: the collapsed handle becomes a thin edge grip. */
+  readonly immersive?: boolean;
   readonly keyboardActive: boolean;
   readonly onToggleKeyboard: () => void;
-  readonly keyBarOpen: boolean;
-  readonly onToggleKeyBar: () => void;
+  /** Hide the paste button (no clipboard path for this protocol). */
+  readonly showPaste?: boolean;
+  /** Accessible description of what Paste does for this protocol. */
+  readonly pasteHint?: string;
   readonly onPaste: () => void;
   readonly onTypeClipboard: () => void;
-  readonly onOpenCombos: () => void;
-  readonly onDisconnect: () => void;
+  readonly onOpenMore: () => void;
+  /** Small count on the More button (running transfers). */
+  readonly moreBadge?: number;
   /** Interaction anywhere in the toolbar (resets the auto-hide timer). */
   readonly onActivity: () => void;
 }
 
 const LONG_PRESS_MS = 500;
-const CONFIRM_MS = 3000;
 
 /**
- * Session toolbar: a compact bar at the bottom edge (thumb reach in portrait and
- * landscape) that collapses to a small handle. Buttons never take focus from the hidden
- * text field.
+ * Session toolbar: one compact row at the bottom edge (thumb reach in portrait and
+ * landscape) with pointer mode, keyboard, paste, view and More; everything else is in the
+ * More sheet. It collapses to a small handle on the right edge, above the bottom 60 px of
+ * the desktop (taskbars, status lines). Buttons never take focus from the hidden field.
  */
 export function Toolbar(props: ToolbarProps) {
-  const { expanded, onExpandedChange, pointerMode, keyboardActive, keyBarOpen, onActivity } = props;
-  const [confirmExit, setConfirmExit] = useState(false);
+  const { expanded, onExpandedChange, pointerMode, keyboardActive, onActivity } = props;
   const pressStart = useRef<number | null>(null);
   const longPressed = useRef(false);
-
-  useEffect(() => {
-    if (!confirmExit) return;
-    const t = setTimeout(() => setConfirmExit(false), CONFIRM_MS);
-    return () => clearTimeout(t);
-  }, [confirmExit]);
 
   if (!expanded) {
     return (
       <div className="omg-toolbar omg-toolbar--collapsed">
         <ChromeButton
-          className="omg-handle"
+          className={props.immersive ? 'omg-handle omg-handle--grip' : 'omg-handle'}
           aria-label="Show session toolbar"
           aria-expanded={false}
           onClick={() => onExpandedChange(true)}
         >
           <IconMenu />
+          {(props.moreBadge ?? 0) > 0 && <span className="omg-badge-dot" aria-hidden="true" />}
         </ChromeButton>
       </div>
     );
   }
 
   const trackpad = pointerMode === 'trackpad';
+  const touch = pointerMode === 'touch';
+  const modeLabel = trackpad ? 'Trackpad' : touch ? 'Multi-touch' : 'Touch';
+  const badge = props.moreBadge ?? 0;
   return (
     <div
       className="omg-toolbar"
@@ -81,24 +86,11 @@ export function Toolbar(props: ToolbarProps) {
           className={
             trackpad ? 'omg-tool omg-tool--mode-trackpad' : 'omg-tool omg-tool--mode-direct'
           }
-          aria-label={
-            trackpad
-              ? 'Pointer: trackpad. Switch to direct touch'
-              : 'Pointer: direct touch. Switch to trackpad'
-          }
+          aria-label={`Pointer: ${modeLabel}. Switch pointer mode`}
           onClick={props.onTogglePointerMode}
         >
-          {trackpad ? <IconTrackpad /> : <IconTouch />}
-          <span className="omg-tool__label">{trackpad ? 'Trackpad' : 'Touch'}</span>
-        </ChromeButton>
-        <ChromeButton
-          className="omg-tool"
-          aria-label="View mode and zoom"
-          aria-haspopup="dialog"
-          onClick={props.onOpenView}
-        >
-          <IconView />
-          <span className="omg-tool__label">View</span>
+          {trackpad ? <IconTrackpad /> : touch ? <IconMultiTouch /> : <IconTouch />}
+          <span className="omg-tool__label">{modeLabel}</span>
         </ChromeButton>
         <ChromeButton
           className={keyboardActive ? 'omg-tool omg-tool--on' : 'omg-tool'}
@@ -109,68 +101,84 @@ export function Toolbar(props: ToolbarProps) {
           <IconKeyboard />
           <span className="omg-tool__label">Keyboard</span>
         </ChromeButton>
-        <ChromeButton
-          className={keyBarOpen ? 'omg-tool omg-tool--on' : 'omg-tool'}
-          aria-label={keyBarOpen ? 'Hide extra keys' : 'Show extra keys'}
-          aria-pressed={keyBarOpen}
-          onClick={props.onToggleKeyBar}
-        >
-          <IconKeys />
-          <span className="omg-tool__label">Keys</span>
-        </ChromeButton>
-        <ChromeButton
-          className="omg-tool"
-          aria-label="Paste device clipboard to the remote. Long press to type it instead"
-          onPointerDown={() => {
-            pressStart.current = performance.now();
-            longPressed.current = false;
-          }}
-          onPointerUp={() => {
-            const start = pressStart.current;
-            pressStart.current = null;
-            if (start !== null && performance.now() - start >= LONG_PRESS_MS) {
-              longPressed.current = true;
-              props.onTypeClipboard();
-            }
-          }}
-          onPointerCancel={() => {
-            pressStart.current = null;
-          }}
-          onContextMenu={(e) => e.preventDefault()}
-          onClick={() => {
-            if (longPressed.current) {
+        {props.showPaste !== false && (
+          <ChromeButton
+            className="omg-tool"
+            aria-label={`${props.pasteHint ?? 'Paste device clipboard to the remote'}. Long press to type it instead`}
+            onPointerDown={() => {
+              pressStart.current = performance.now();
               longPressed.current = false;
-              return;
-            }
-            props.onPaste();
-          }}
+            }}
+            onPointerUp={() => {
+              const start = pressStart.current;
+              pressStart.current = null;
+              if (start !== null && performance.now() - start >= LONG_PRESS_MS) {
+                longPressed.current = true;
+                props.onTypeClipboard();
+              }
+            }}
+            onPointerCancel={() => {
+              pressStart.current = null;
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            onClick={() => {
+              if (longPressed.current) {
+                longPressed.current = false;
+                return;
+              }
+              props.onPaste();
+            }}
+          >
+            <IconPaste />
+            <span className="omg-tool__label">Paste</span>
+          </ChromeButton>
+        )}
+        {touch && props.onZoom && (
+          <>
+            <ChromeButton
+              className="omg-tool"
+              aria-label="Zoom in"
+              onClick={() => props.onZoom?.(1.25)}
+            >
+              <IconZoomIn />
+              <span className="omg-tool__label">Zoom</span>
+            </ChromeButton>
+            <ChromeButton
+              className="omg-tool"
+              aria-label="Zoom out"
+              onClick={() => props.onZoom?.(0.8)}
+            >
+              <IconZoomOut />
+              <span className="omg-tool__label">Out</span>
+            </ChromeButton>
+          </>
+        )}
+        <ChromeButton
+          className="omg-tool"
+          aria-label="View mode and zoom"
+          aria-haspopup="dialog"
+          onClick={props.onOpenView}
         >
-          <IconPaste />
-          <span className="omg-tool__label">Paste</span>
+          <IconView />
+          <span className="omg-tool__label">View</span>
         </ChromeButton>
         <ChromeButton
           className="omg-tool"
-          aria-label="Key combos"
-          aria-haspopup="dialog"
-          onClick={props.onOpenCombos}
-        >
-          <IconCombo />
-          <span className="omg-tool__label">Combos</span>
-        </ChromeButton>
-        <ChromeButton
-          className={
-            confirmExit
-              ? 'omg-tool omg-tool--danger omg-tool--confirm'
-              : 'omg-tool omg-tool--danger'
+          aria-label={
+            badge > 0
+              ? `More actions (${badge} transfer${badge === 1 ? '' : 's'} running)`
+              : 'More actions'
           }
-          aria-label={confirmExit ? 'Tap again to disconnect' : 'Disconnect'}
-          onClick={() => {
-            if (confirmExit) props.onDisconnect();
-            else setConfirmExit(true);
-          }}
+          aria-haspopup="dialog"
+          onClick={props.onOpenMore}
         >
-          <IconPower />
-          <span className="omg-tool__label">{confirmExit ? 'Sure?' : 'Exit'}</span>
+          <IconMore />
+          <span className="omg-tool__label">More</span>
+          {badge > 0 && (
+            <span className="omg-tool__badge" aria-hidden="true">
+              {badge}
+            </span>
+          )}
         </ChromeButton>
       </div>
       <ChromeButton

@@ -7,7 +7,9 @@ import { useNav } from '../nav/NavContext.ts';
 import { selectedServerId } from '../nav/navigation.ts';
 import { useServices } from '../services/context.ts';
 import { strings } from '../strings.ts';
+import { QuickConnect } from './QuickConnect.tsx';
 import { hostOf, isInsecureUrl } from './serverForm.ts';
+import { ShareLinkDialog } from './ShareLinkDialog.tsx';
 import { DEMO_SERVER_ID, useSavedProfiles } from './useServers.ts';
 
 /** Server list (SRV-1): Demo, the dev server (dev builds), then saved servers in user order. */
@@ -16,6 +18,7 @@ export function ServersScreen() {
   const services = useServices();
   const { profiles, reload } = useSavedProfiles();
   const [reordering, setReordering] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const selected = selectedServerId(nav.state);
   const s = strings.servers;
 
@@ -44,6 +47,7 @@ export function ServersScreen() {
               onClick={() => setReordering((r) => !r)}
             />
           ) : null}
+          <IconButton icon="link" label={s.openShareLink} onClick={() => setShareOpen(true)} />
           <IconButton
             icon="gear"
             label={strings.common.settings}
@@ -53,6 +57,10 @@ export function ServersScreen() {
         </>
       }
     >
+      <QuickConnect />
+      <h2 className="section-title">
+        <Icon name="server" size="1rem" /> {s.title}
+      </h2>
       <ul className="list" aria-label={s.title}>
         <li>
           <ServerRow
@@ -131,6 +139,7 @@ export function ServersScreen() {
           </button>
         </EmptyState>
       ) : null}
+      {shareOpen ? <ShareLinkDialog onClose={() => setShareOpen(false)} /> : null}
     </Screen>
   );
 }

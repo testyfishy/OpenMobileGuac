@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import { useProfilesVersion, useServices } from '../services/context.ts';
-import { DEMO_PROFILE_ID } from '../integration/demo.ts';
+import { DEMO_PROFILE_ID } from '../integration/demoProfile.ts';
 import { DEV_SERVER_ID } from '../services/devServer.ts';
 
 /** The built-in Demo server is virtual: never in `ProfileStore`, never touches the network. */

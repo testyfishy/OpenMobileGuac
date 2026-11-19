@@ -11,8 +11,18 @@
 import Guacamole from '../../vendor/guacamole-common-js';
 import { optimalDisplaySize } from '../../core/api/tunnel.ts';
 import { TunnelState, type TunnelLike } from '../../core/transport/TunnelLike.ts';
-import { GestureRecognizer, type Gesture } from '../../session/gesture/GestureRecognizer.ts';
 import {
+  GestureRecognizer,
+  type Gesture,
+  type PointerInput,
+} from '../../session/gesture/GestureRecognizer.ts';
+import {
+  HardwareKeyboard,
+  decideHardwareKey,
+  isModifierKey,
+} from '../../session/keys/HardwareKeyboard.ts';
+import {
+  KEYSYM,
   KeyModel,
   type Combo,
   type KeyEvent,
@@ -20,6 +30,7 @@ import {
   type ModifierState,
 } from '../../session/keys/KeyModel.ts';
 import {
+  caretResync,
   diffTextInput,
   initialTextInput,
   textInputKeyEvents,
@@ -30,8 +41,10 @@ import {
   wheelStates,
   type HapticHint,
   type MouseState,
+  type PointerMode,
   type PointerOutput,
 } from '../../session/pointer/PointerModel.ts';
+import { TouchPassthrough, type TouchContact } from '../../session/pointer/TouchPassthrough.ts';
 import {
   applyViewportCommands,
   createViewport,
@@ -53,20 +66,35 @@ import {
   type ViewportState,
 } from '../../session/viewport/Viewport.ts';
 import {
-  decideHardwareKey,
-  missingModifierKeysyms,
+  extraButtonCombo,
+  penButtons,
   pointerButtons,
   pointerKind,
   toGuacMouseTemplate,
   wheelDeltaPx,
 } from './inputMapping.ts';
+import {
+  argumentValues,
+  describeRequiredParams,
+  type RequiredField,
+} from '../../session/credentials/requiredParams.ts';
+import { ArgvTracker, sendArgumentValues, type MutableArgument } from './argv.ts';
+import { SessionAudio } from './audio.ts';
 import { readTextStream, writeTextStream } from './clipboardText.ts';
+import { deliverFile } from './fileSave.ts';
+import { isOnline, onAppResume, onNetworkChange } from './platform.ts';
+import { TransferManager } from './transfers.ts';
 import { computeLayout, cursorDrawScale, visualViewportInset } from './layout.ts';
-import { pointerConfigFromSettings, type SessionSettings } from './settings.ts';
+import {
+  gestureConfigFromSettings,
+  normalizeSessionSettings,
+  pointerConfigFromSettings,
+  type ResolvedSessionSettings,
+  type SessionSettings,
+} from './settings.ts';
 import {
   INITIAL_SESSION_MACHINE,
   reduceSession,
-  tunnelErrorMessage,
   type SessionEvent,
   type SessionMachine,
   type SessionPhase,
@@ -98,7 +126,23 @@ export interface SessionSnapshot {
   /** Height (px) of the stage covered by the soft keyboard, for docking the key bar. */
   readonly keyboardCover: number;
   readonly remoteSize: Size;
+  /** Touches the server accepts (RDP multi-touch, PTR-6); 0 = touch pass-through unavailable. */
+  readonly touchSupport: number;
+  /** A hardware key was seen recently (KEY-6): the soft keyboard is probably not shown. */
+  readonly hardwareKeyboard: boolean;
+  /** The hardware mouse is captured (pointer lock). */
+  readonly pointerLocked: boolean;
+  /** The server asked for these parameters (`required`); null when no prompt is open. */
+  readonly credentials: readonly RequiredField[] | null;
+  /** The session is shown (the `active` prop). */
+  readonly active: boolean;
+  /** Audio streams the server opened in this connection. */
+  readonly audioStreams: number;
+  /** Connection parameters the server lets the user change in session (`argv`). */
+  readonly mutableArguments: readonly MutableArgument[];
 }
+
+export type SessionLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface SessionControllerOptions {
   readonly createTunnel: () => TunnelLike;
@@ -106,27 +150,81 @@ export interface SessionControllerOptions {
   readonly haptic: (hint: HapticHint) => void;
   /** Text arrived from the remote clipboard. */
   readonly onRemoteClipboard: (text: string) => void;
+  /** Lifecycle log: never secrets, clipboard contents or typed text. */
+  readonly onLog?: (entry: { level: SessionLogLevel; message: string }) => void;
+  /** A small JPEG data URL of the remote screen. */
+  readonly onThumbnail?: (dataUrl: string) => void;
+  /** Short user-facing notice (toast), e.g. a finished download. */
+  readonly notify?: (text: string) => void;
+}
+
+/** Figures for the session info sheet. */
+export interface SessionInfo {
+  readonly remoteSize: Size;
+  /** Remote pixels → CSS pixels. */
+  readonly scale: number;
+  readonly tunnelType: string;
+  readonly connectedForMs: number | null;
+  readonly receivedBytes: number;
+  readonly receivedInstructions: number;
+  readonly sentBytes: number;
+  readonly sentInstructions: number;
+  /** `sync` instructions received (one per server frame). */
+  readonly frames: number;
+  /** From `Guacamole.Display.Statistics` (sync-based); null when not yet known. */
+  readonly processingLagMs: number | null;
+  readonly serverFps: number | null;
+  readonly clientFps: number | null;
+  readonly desktopFps: number | null;
+  readonly dropRate: number | null;
+  readonly tunnelState: string;
+  readonly audioContext: string;
+  readonly online: boolean;
 }
 
 const MATCH_SIZE_DEBOUNCE_MS = 400;
 const FOLLOW_MARGIN_PX = 48;
 const MOUSE_WHEEL_STEP_PX = 50;
+/** Wait before acting on a caret move in the hidden field (IMEs move it transiently). */
+const CARET_SETTLE_MS = 80;
+/** Large-cursor scale factor. */
+const LARGE_CURSOR_SCALE = 1.75;
+/** First thumbnail this long after connecting (the desktop has usually drawn by then). */
+const FIRST_THUMBNAIL_MS = 1500;
+/** At most one thumbnail per this interval while shown. */
+const THUMBNAIL_INTERVAL_MS = 30_000;
+const THUMBNAIL_MAX_WIDTH = 320;
+/** `Display.statisticWindow` (ms): frame statistics for the info sheet. */
+const STATISTIC_WINDOW_MS = 5000;
 
 type GuacClient = InstanceType<typeof Guacamole.Client>;
 
 export class SessionController {
   private opts: SessionControllerOptions | null = null;
-  private settings: SessionSettings;
+  private settings: ResolvedSessionSettings;
   private els: SessionElements | null = null;
 
   // Models
   private viewport: ViewportState;
   private readonly recognizer = new GestureRecognizer();
+  /** Split layout trackpad surface: always a trackpad. */
+  private readonly surfaceRecognizer = new GestureRecognizer();
+  private surface: HTMLElement | null = null;
+  private readonly surfaceCleanups: (() => void)[] = [];
   private readonly pointer: PointerModel;
   private readonly keys = new KeyModel();
+  private readonly hw = new HardwareKeyboard();
   private readonly wheel = new ScrollAccumulator(MOUSE_WHEEL_STEP_PX);
+  private readonly wheelX = new ScrollAccumulator(MOUSE_WHEEL_STEP_PX);
+  private readonly touches = new TouchPassthrough(0);
+  private touchSupport = 0;
+  private lastMouseButtons = 0;
+  private pointerLocked = false;
+  private hardwareKeyboardSeen = false;
   private baseline = initialTextInput();
   private composing = false;
+  private caretTimer: ReturnType<typeof setTimeout> | null = null;
+  private cursorHidden = false;
 
   // Connection
   private client: GuacClient | null = null;
@@ -138,6 +236,22 @@ export class SessionController {
   /** The server ended the session (`disconnect`/`error` instruction). */
   private serverClosed = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Fields of an open `required` prompt. */
+  private credentials: readonly RequiredField[] | null = null;
+  private active = true;
+  private readonly audio = new SessionAudio((m) => this.log('info', m));
+  private readonly argv = new ArgvTracker(() => this.publish());
+  /** File transfers (FIL-1); the screen subscribes to it directly. */
+  readonly transfers = new TransferManager({
+    deliver: (blob, name, print) => deliverFile(blob, name, { print }),
+    log: (level, message) => this.log(level, message),
+    notify: (text) => this.opts?.notify?.(text),
+  });
+  private thumbTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastThumbAt = 0;
+  private stats = emptyStats();
+  private displayStats: InstanceType<typeof Guacamole.Display.Statistics> | null = null;
+  private tunnelType = 'none';
 
   // Layout
   private stable: Size | null = null;
@@ -154,9 +268,6 @@ export class SessionController {
   private flingFrame: number | null = null;
   private flingLast = 0;
   private lastMouse: MouseState | null = null;
-  private readonly hwPressed = new Map<string, number>();
-  /** Modifiers synthesised for a chord key (see `missingModifierKeysyms`), by key id. */
-  private readonly hwSynth = new Map<string, number[]>();
   private cursorCanvas: HTMLCanvasElement | null = null;
   private cursorHotspot = { x: 0, y: 0 };
 
@@ -167,18 +278,36 @@ export class SessionController {
   private disposed = false;
 
   constructor(settings: SessionSettings) {
-    this.settings = settings;
+    this.settings = normalizeSessionSettings(settings);
     this.pointer = new PointerModel({
-      ...pointerConfigFromSettings(settings),
+      ...pointerConfigFromSettings(this.settings),
       followMarginPx: FOLLOW_MARGIN_PX,
     });
-    this.recognizer.setConfig(this.pointer.recognizerOptions());
+    this.configureRecognizers();
     this.viewport = createViewport({
       remote: { width: 0, height: 0 },
       screen: { width: 0, height: 0 },
-      mode: settings.fitMode,
+      mode: this.settings.fitMode,
     });
     this.snapshot = this.buildSnapshot();
+  }
+
+  /** Pointer mode in effect: touch pass-through falls back to direct when unsupported. */
+  private effectiveMode(): PointerMode {
+    const m = this.settings.pointerMode;
+    return m === 'touch' && this.touchSupport <= 0 ? 'direct' : m;
+  }
+
+  private configureRecognizers(): Gesture[] {
+    const g = gestureConfigFromSettings(this.settings);
+    const out = this.recognizer.setConfig({
+      ...g,
+      ...this.pointer.recognizerOptions(this.effectiveMode()),
+    });
+    out.push(
+      ...this.surfaceRecognizer.setConfig({ ...g, ...this.pointer.recognizerOptions('trackpad') }),
+    );
+    return out;
   }
 
   // =====================================================================================
@@ -199,6 +328,13 @@ export class SessionController {
       keyboardActive: this.els !== null && document.activeElement === this.els.field,
       keyboardCover: this.keyboardCover,
       remoteSize: this.viewport.remote,
+      touchSupport: this.touchSupport,
+      hardwareKeyboard: this.hardwareKeyboardSeen,
+      pointerLocked: this.pointerLocked,
+      credentials: this.credentials,
+      active: this.active,
+      audioStreams: this.audio.streamCount(),
+      mutableArguments: this.argv.arguments(),
     };
   }
 
@@ -212,6 +348,13 @@ export class SessionController {
       prev.keyboardCover === next.keyboardCover &&
       prev.remoteSize.width === next.remoteSize.width &&
       prev.remoteSize.height === next.remoteSize.height &&
+      prev.touchSupport === next.touchSupport &&
+      prev.hardwareKeyboard === next.hardwareKeyboard &&
+      prev.pointerLocked === next.pointerLocked &&
+      prev.credentials === next.credentials &&
+      prev.active === next.active &&
+      prev.audioStreams === next.audioStreams &&
+      prev.mutableArguments === next.mutableArguments &&
       (Object.keys(next.modifiers) as Modifier[]).every(
         (m) => prev.modifiers[m] === next.modifiers[m],
       );
@@ -232,9 +375,11 @@ export class SessionController {
     this.disposed = false;
     this.els = els;
     this.machine = INITIAL_SESSION_MACHINE;
+    if (!isOnline()) this.machine = reduceSession(this.machine, { type: 'network', online: false });
     this.stable = null;
     els.field.value = this.baseline;
     this.listen();
+    this.audio.listen();
     this.measure();
     this.connect();
   }
@@ -242,11 +387,86 @@ export class SessionController {
   /** Disconnect and remove every DOM listener and timer. Idempotent. */
   detach(): void {
     if (this.disposed || !this.els) return;
+    if (this.machine.phase.kind === 'connected') this.captureThumbnail();
     this.releaseInputs();
     this.teardownClient(true);
+    this.log('info', 'Session closed');
     this.clearTimers();
+    this.audio.unlisten();
     for (const c of this.cleanups.splice(0)) c();
     this.disposed = true;
+  }
+
+  /**
+   * Shown (true) or hidden behind the app (false). Hidden: stay connected, but release
+   * held keys and buttons, ignore all input, stop the fling loop and audio output; the
+   * shell owns any background timeout. Shown again: re-fit to the (maybe resized) stage.
+   */
+  setActive(active: boolean): void {
+    if (active === this.active) return;
+    if (!active) {
+      if (this.machine.phase.kind === 'connected') this.captureThumbnail();
+      this.releaseInputs();
+      const field = this.els?.field;
+      if (field && document.activeElement === field) field.blur();
+      this.exitPointerLock();
+      if (this.flingFrame !== null) cancelAnimationFrame(this.flingFrame);
+      this.flingFrame = null;
+      if (this.tickTimer) clearTimeout(this.tickTimer);
+      this.tickTimer = null;
+      if (this.caretTimer) clearTimeout(this.caretTimer);
+      this.caretTimer = null;
+    }
+    this.active = active;
+    this.audio.setActive(active);
+    this.log('debug', active ? 'Session shown' : 'Session hidden');
+    if (active) {
+      this.stable = null;
+      this.measure();
+      // Some WebViews settle the size of a re-shown element a frame later.
+      requestAnimationFrame(() => this.measure());
+      this.lastThumbAt = Date.now();
+    }
+    this.publish();
+  }
+
+  /** AUD-1: mute or unmute this session's audio. */
+  setAudioMuted(muted: boolean): void {
+    this.audio.setMuted(muted);
+  }
+
+  /** Change a connection parameter the server reported as changeable (`argv`). */
+  setArgument(name: string, value: string): boolean {
+    const ok = this.argv.setValue(name, value);
+    if (ok) this.log('info', `Connection parameter "${name}" changed`);
+    return ok;
+  }
+
+  /** Answer the server's `required` prompt. Values are sent once and not kept. */
+  submitCredentials(values: Readonly<Record<string, string>>): void {
+    const fields = this.credentials;
+    const client = this.client;
+    if (!fields || !client) return;
+    this.credentials = null;
+    sendArgumentValues(client, argumentValues(fields, values));
+    this.log('info', `Sent ${fields.length} requested parameter(s)`);
+    this.publish();
+  }
+
+  /** Cancel the prompt: disconnect cleanly, as the web client does. */
+  cancelCredentials(): void {
+    if (!this.credentials) return;
+    this.credentials = null;
+    this.log('info', 'Credential prompt cancelled');
+    this.disconnect();
+  }
+
+  private log(level: SessionLogLevel, message: string): void {
+    try {
+      this.opts?.onLog?.({ level, message });
+    } catch {
+      // never let logging break the session
+    }
   }
 
   /** Callbacks from the host. Set before `attach()`. */
@@ -268,6 +488,7 @@ export class SessionController {
 
   /** User pressed Disconnect. */
   disconnect(): void {
+    if (this.machine.phase.kind === 'connected') this.captureThumbnail();
     this.releaseInputs();
     this.dispatch({ type: 'user-disconnect' });
     this.teardownClient(true);
@@ -277,10 +498,46 @@ export class SessionController {
     const prev = this.machine.phase;
     this.machine = reduceSession(this.machine, e);
     const phase = this.machine.phase;
+    if (phase !== prev) this.logPhase(phase);
     if (phase !== prev && phase.kind === 'reconnecting' && e.type === 'closed') {
-      this.scheduleRetry(phase.delayMs);
+      if (phase.waitingForNetwork) {
+        if (this.retryTimer) clearTimeout(this.retryTimer);
+        this.retryTimer = null;
+      } else {
+        this.scheduleRetry(phase.delayMs);
+      }
     }
     this.publish();
+  }
+
+  private logPhase(phase: SessionPhase): void {
+    switch (phase.kind) {
+      case 'connecting':
+        this.log('info', 'Connecting');
+        break;
+      case 'connected':
+        this.log('info', 'Connected');
+        break;
+      case 'reconnecting':
+        if (phase.waitingForNetwork) {
+          this.log('warn', `Connection lost; waiting for the network (attempt ${phase.attempt})`);
+        } else {
+          this.log(
+            'warn',
+            `Connection lost; reconnect attempt ${phase.attempt} of ${phase.maxAttempts} in ${phase.delayMs} ms`,
+          );
+        }
+        break;
+      case 'error':
+        this.log(
+          'error',
+          `Session ended: ${phase.reason ?? 'error'}${phase.code !== null ? ` (0x${phase.code.toString(16).padStart(4, '0')})` : ''}: ${phase.message}`,
+        );
+        break;
+      case 'disconnected':
+        this.log('info', phase.byServer ? 'The server ended the session' : 'Disconnected');
+        break;
+    }
   }
 
   private scheduleRetry(delayMs: number): void {
@@ -289,6 +546,45 @@ export class SessionController {
       this.retryTimer = null;
       if (!this.disposed && this.machine.phase.kind === 'reconnecting') this.connect();
     }, delayMs);
+  }
+
+  /** Network back / app resumed: retry a pending reconnect now instead of after the backoff. */
+  private retrySoon(why: string): void {
+    if (this.disposed) return;
+    const phase = this.machine.phase;
+    if (phase.kind === 'reconnecting') {
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+      this.log('info', `${why}: reconnecting now`);
+      this.connect();
+    } else if (
+      phase.kind === 'error' &&
+      this.machine.everConnected &&
+      (phase.reason === 'network' || phase.code === null)
+    ) {
+      // Gave up while the network was gone: one fresh round of attempts.
+      this.log('info', `${why}: trying again`);
+      this.machine = {
+        ...INITIAL_SESSION_MACHINE,
+        everConnected: true,
+        offline: this.machine.offline,
+      };
+      this.connect();
+    }
+  }
+
+  private onNetwork(online: boolean): void {
+    this.log(online ? 'info' : 'warn', online ? 'Network online' : 'Network offline');
+    this.dispatch({ type: 'network', online });
+    if (online) this.retrySoon('Network back');
+  }
+
+  private onResume(): void {
+    const t = this.tunnel;
+    if (this.machine.phase.kind === 'connected' && t && t.state === TunnelState.UNSTABLE) {
+      this.log('warn', 'Resumed with an unstable tunnel');
+    }
+    this.retrySoon('App resumed');
   }
 
   private connect(): void {
@@ -313,31 +609,46 @@ export class SessionController {
     const client = new Guacamole.Client(tunnel as unknown as InstanceType<typeof Guacamole.Tunnel>);
     this.tunnel = tunnel;
     this.client = client;
+    this.tunnelType = describeTunnel(tunnel);
     const live = () => gen === this.generation && !this.disposed;
+    this.countTraffic(tunnel, live);
 
     tunnel.onerror = (status) => {
       if (!live()) return;
+      this.log('warn', `Tunnel error 0x${status.code.toString(16).padStart(4, '0')}`);
       this.dispatch({
         type: 'error',
         code: status.code,
         message: status.message,
-        display: tunnelErrorMessage(status.code, status.message),
+        source: 'tunnel',
       });
     };
     tunnel.onstatechange = (state) => {
-      if (!live() || state !== TunnelState.CLOSED) return;
-      const intentional =
-        this.closingOnPurpose || (this.serverClosed && this.machine.lastError === null);
-      this.dispatch({ type: 'closed', intentional });
+      if (!live()) return;
+      if (state === TunnelState.UNSTABLE) this.log('warn', 'Tunnel unstable (no data for a while)');
+      if (state !== TunnelState.CLOSED) return;
+      const byServer =
+        !this.closingOnPurpose && this.serverClosed && this.machine.lastError === null;
+      const intentional = this.closingOnPurpose || byServer;
+      this.dispatch({ type: 'closed', intentional, byServer });
       this.releaseInputs();
+      this.transfers.detachClient();
+      this.credentials = null;
       // The client does not follow a tunnel close on its own; stop its keep-alive.
       this.closingOnPurpose = true;
       client.disconnect();
+      this.publish();
     };
     client.onerror = (status) => {
       if (!live()) return;
       this.serverClosed = true;
-      this.dispatch({ type: 'error', code: status.code, message: status.message });
+      this.log('warn', `Server error 0x${status.code.toString(16).padStart(4, '0')}`);
+      this.dispatch({
+        type: 'error',
+        code: status.code,
+        message: status.message,
+        source: 'client',
+      });
     };
     client.onstatechange = (state) => {
       if (!live()) return;
@@ -349,6 +660,35 @@ export class SessionController {
         this.serverClosed = true;
       }
     };
+    // Server credential prompt (SRV-11): `required` arrives while the client is WAITING,
+    // before the first frame (`Client.js` handler "required").
+    client.onrequired = (names) => {
+      if (!live()) return;
+      const fields = describeRequiredParams(names);
+      this.log('info', `Server requested: ${fields.map((f) => f.name).join(', ')}`);
+      this.credentials = fields.length > 0 ? fields : null;
+      this.publish();
+    };
+    client.onsync = () => {
+      if (!live()) return;
+      this.stats.frames++;
+      if (
+        this.active &&
+        this.machine.phase.kind === 'connected' &&
+        Date.now() - this.lastThumbAt >= THUMBNAIL_INTERVAL_MS
+      ) {
+        this.captureThumbnail();
+      }
+    };
+    this.audio.install(client);
+    this.transfers.install(client);
+    this.argv.install(client);
+    // PTR-6: the server declares multi-touch support per layer (RDP with touch enabled), as
+    // the web client's ManagedClient records it.
+    this.setTouchSupport(0);
+    client.onmultitouch = (_layer, touches) => {
+      if (live()) this.setTouchSupport(touches);
+    };
     client.onclipboard = (stream, mimetype) => {
       if (!live() || !/^text\//.test(mimetype)) return;
       // Raw bytes, decoded once at the end: upstream StringReader garbles emoji.
@@ -359,6 +699,13 @@ export class SessionController {
 
     const display = client.getDisplay();
     display.scale(1);
+    // Frame statistics computed by the library from `sync` timing (Display.js
+    // `notifyFlushed`), for the info sheet.
+    this.displayStats = null;
+    display.statisticWindow = STATISTIC_WINDOW_MS;
+    display.onstatistics = (s) => {
+      if (live()) this.displayStats = s;
+    };
     const el = display.getElement();
     els.displayHost.replaceChildren(el);
     // Our overlay draws the cursor; hide the library's software cursor layer, which
@@ -407,8 +754,25 @@ export class SessionController {
     if (!client) return;
     this.closingOnPurpose = onPurpose;
     client.onclipboard = null;
+    client.onmultitouch = null;
     client.onstatechange = null;
     client.onerror = null;
+    client.onrequired = null;
+    client.onsync = null;
+    client.onaudio = null;
+    client.onargv = null;
+    const display = client.getDisplay();
+    display.onstatistics = null;
+    display.statisticWindow = 0;
+    this.transfers.detachClient();
+    this.audio.reset();
+    this.argv.reset();
+    if (this.credentials) {
+      this.credentials = null;
+      this.publish();
+    }
+    if (this.thumbTimer) clearTimeout(this.thumbTimer);
+    this.thumbTimer = null;
     try {
       client.disconnect();
     } catch {
@@ -425,13 +789,123 @@ export class SessionController {
     this.lastMouse = null;
     this.updateCursor();
     this.scheduleMatchSize();
+    this.credentials = null;
+    this.stats.connectedAt = Date.now();
+    // The first thumbnail comes from the timer below, not from the next `sync`.
+    this.lastThumbAt = Date.now();
+    if (this.thumbTimer) clearTimeout(this.thumbTimer);
+    this.thumbTimer = setTimeout(() => {
+      this.thumbTimer = null;
+      this.captureThumbnail();
+    }, FIRST_THUMBNAIL_MS);
+    this.publish();
+  }
+
+  // =====================================================================================
+  // Thumbnails, statistics, info
+
+  /** `onThumbnail`: a JPEG at most 320 px wide from `Display.flatten()`. Never throws. */
+  private captureThumbnail(): void {
+    const cb = this.opts?.onThumbnail;
+    const client = this.client;
+    if (!cb || !client) return;
+    this.lastThumbAt = Date.now();
+    try {
+      const display = client.getDisplay();
+      if (display.getWidth() <= 0 || display.getHeight() <= 0) return;
+      const src = display.flatten();
+      if (src.width <= 0 || src.height <= 0) return;
+      const k = Math.min(1, THUMBNAIL_MAX_WIDTH / src.width);
+      const out = document.createElement('canvas');
+      out.width = Math.max(1, Math.round(src.width * k));
+      out.height = Math.max(1, Math.round(src.height * k));
+      const ctx = out.getContext('2d');
+      if (!ctx) return;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, out.width, out.height);
+      ctx.drawImage(src, 0, 0, out.width, out.height);
+      const url = out.toDataURL('image/jpeg', 0.7);
+      if (url.startsWith('data:image/jpeg')) cb(url);
+    } catch {
+      // Tainted or lost canvas: no thumbnail this time.
+    }
+  }
+
+  /** Count protocol traffic: wraps the tunnel's instruction handler and sender. */
+  private countTraffic(tunnel: TunnelLike, live: () => boolean): void {
+    this.stats = emptyStats();
+    const stats = this.stats;
+    const inner = tunnel.oninstruction;
+    if (inner) {
+      tunnel.oninstruction = (opcode, args) => {
+        if (live()) {
+          stats.rxInstr++;
+          stats.rxBytes += instructionLength(opcode, args);
+        }
+        inner(opcode, args);
+      };
+    }
+    const send = tunnel.sendMessage.bind(tunnel);
+    tunnel.sendMessage = (...elements: unknown[]) => {
+      if (live()) {
+        stats.txInstr++;
+        stats.txBytes += elements.reduce<number>((n, e) => n + String(e).length + 3, 0);
+      }
+      send(...elements);
+    };
+  }
+
+  /** A fresh snapshot of figures for the info sheet. */
+  getInfo = (): SessionInfo => {
+    const s = this.displayStats;
+    const num = (v: number | null | undefined) =>
+      typeof v === 'number' && Number.isFinite(v) ? v : null;
+    const t = this.tunnel;
+    return {
+      remoteSize: this.viewport.remote,
+      scale: scaleOf(this.viewport),
+      tunnelType: this.tunnelType,
+      connectedForMs:
+        this.machine.phase.kind === 'connected' && this.stats.connectedAt > 0
+          ? Date.now() - this.stats.connectedAt
+          : null,
+      receivedBytes: this.stats.rxBytes,
+      receivedInstructions: this.stats.rxInstr,
+      sentBytes: this.stats.txBytes,
+      sentInstructions: this.stats.txInstr,
+      frames: this.stats.frames,
+      processingLagMs: num(s?.processingLag),
+      serverFps: num(s?.serverFps),
+      clientFps: num(s?.clientFps),
+      desktopFps: num(s?.desktopFps),
+      dropRate: num(s?.dropRate),
+      tunnelState: t ? tunnelStateName(t.state) : 'closed',
+      audioContext: this.audio.contextState(),
+      online: isOnline(),
+    };
+  };
+
+  private setTouchSupport(n: number): void {
+    const next = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    if (next === this.touchSupport) return;
+    const wasMode = this.effectiveMode();
+    this.touchSupport = next;
+    this.touches.setMaxTouches(next);
+    if (this.effectiveMode() !== wasMode) this.onModeChanged();
+    this.publish();
   }
 
   private clearTimers(): void {
-    for (const t of [this.retryTimer, this.tickTimer, this.matchSizeTimer]) {
-      if (t) clearTimeout(t);
-    }
-    this.retryTimer = this.tickTimer = this.matchSizeTimer = null;
+    const timers = [
+      this.retryTimer,
+      this.tickTimer,
+      this.matchSizeTimer,
+      this.caretTimer,
+      this.thumbTimer,
+    ];
+    for (const t of timers) if (t) clearTimeout(t);
+    this.retryTimer = this.tickTimer = this.matchSizeTimer = this.caretTimer = null;
+    this.thumbTimer = null;
     if (this.flingFrame !== null) cancelAnimationFrame(this.flingFrame);
     this.flingFrame = null;
   }
@@ -439,27 +913,48 @@ export class SessionController {
   // =====================================================================================
   // Settings
 
-  private applySettings(next: SessionSettings): void {
+  private applySettings(input: SessionSettings): void {
     const prev = this.settings;
+    const next = normalizeSessionSettings(input);
     this.settings = next;
     if (prev.fitMode !== next.fitMode) {
       this.setViewport(setMode(this.viewport, next.fitMode));
     }
-    if (
-      prev.pointerMode !== next.pointerMode ||
-      prev.pointerSpeed !== next.pointerSpeed ||
-      prev.naturalScroll !== next.naturalScroll
-    ) {
-      const out = this.pointer.setConfig(pointerConfigFromSettings(next), this.viewport);
-      this.applyPointerOutput(out);
-      if (prev.pointerMode !== next.pointerMode) {
-        this.recognizer.reset(performance.now());
-        this.recognizer.setConfig(this.pointer.recognizerOptions());
-        if (next.pointerMode === 'trackpad') this.bringPointerIntoView();
-        this.updateCursor();
-      }
+    const prevMode =
+      prev.pointerMode === 'touch' && this.touchSupport <= 0 ? 'direct' : prev.pointerMode;
+    const pc = pointerConfigFromSettings(next);
+    const pcPrev = pointerConfigFromSettings(prev);
+    const pointerChanged = (Object.keys(pc) as (keyof typeof pc)[]).some(
+      (k) => pc[k] !== pcPrev[k],
+    );
+    if (pointerChanged) {
+      this.applyPointerOutput(this.pointer.setConfig(pc, this.viewport));
     }
+    if (prevMode !== this.effectiveMode()) {
+      this.onModeChanged();
+    } else {
+      const gc = gestureConfigFromSettings(next);
+      const gcPrev = gestureConfigFromSettings(prev);
+      const gestureChanged = (Object.keys(gc) as (keyof typeof gc)[]).some(
+        (k) => gc[k] !== gcPrev[k],
+      );
+      if (gestureChanged || pc.tapDrag !== pcPrev.tapDrag)
+        this.handleGestures(this.configureRecognizers());
+    }
+    if (prev.largeCursor !== next.largeCursor) this.updateCursor();
+    if (prev.pointerLock && !next.pointerLock) this.exitPointerLock();
     if (!prev.matchDeviceSize && next.matchDeviceSize) this.scheduleMatchSize();
+  }
+
+  /** The effective pointer mode changed: drop in-flight input and reconfigure. */
+  private onModeChanged(): void {
+    this.handleGestures(this.recognizer.reset(performance.now()));
+    this.sendTouches(this.touches.releaseAll());
+    this.applyPointerOutput(this.pointer.releaseAll(this.viewport));
+    this.handleGestures(this.configureRecognizers());
+    if (this.effectiveMode() === 'trackpad') this.bringPointerIntoView();
+    this.exitPointerLock();
+    this.updateCursor();
   }
 
   // =====================================================================================
@@ -467,6 +962,14 @@ export class SessionController {
 
   resetZoom(): void {
     this.setViewport(resetToMode(this.viewport));
+  }
+
+  /** Toolbar zoom (needed in touch pass-through mode, where pinch goes to the remote). */
+  zoomBy(factor: number): void {
+    const vis = visibleRect(this.viewport);
+    this.setViewport(
+      zoomAt(this.viewport, factor, { x: vis.x + vis.width / 2, y: vis.y + vis.height / 2 }),
+    );
   }
 
   /** Height of the key bar docked above the keyboard / bottom edge (0 when hidden). */
@@ -510,7 +1013,8 @@ export class SessionController {
   /** Re-measure the stage, safe area, keyboard and key bar, and relayout. */
   measure = (): void => {
     const els = this.els;
-    if (!els || this.disposed) return;
+    // Hidden: the stage may be 0×0; re-fit when shown again (setActive).
+    if (!els || this.disposed || !this.active) return;
     const rect = els.stage.getBoundingClientRect();
     this.measured = { width: rect.width, height: rect.height };
     const vv = window.visualViewport;
@@ -670,44 +1174,104 @@ export class SessionController {
   private setCursorImage(canvas: HTMLCanvasElement | null, hx: number, hy: number): void {
     const el = this.els?.cursor;
     if (!el) return;
+    // A fully transparent image means the remote hid its cursor (or sent an empty one).
+    this.cursorHidden = canvas !== null && isFullyTransparent(canvas);
     this.cursorCanvas = canvas;
     this.cursorHotspot = canvas ? { x: hx, y: hy } : { x: 0, y: 0 };
     const img = el.querySelector<HTMLElement>('[data-cursor-image]');
-    const fallback = el.querySelector<HTMLElement>('[data-cursor-fallback]');
-    if (img) {
-      img.replaceChildren(...(canvas ? [canvas] : []));
-      img.style.display = canvas ? 'block' : 'none';
-    }
-    if (fallback) fallback.style.display = canvas ? 'none' : 'block';
+    if (img) img.replaceChildren(...(canvas ? [canvas] : []));
     this.updateCursor();
   }
 
+  /**
+   * DSP-6: the server image when it has one; the fallback arrow when there is none, or in
+   * trackpad mode when the server image is fully transparent (the user must see where the
+   * pointer is). In direct mode a transparent server cursor stays hidden.
+   */
   private updateCursor(): void {
     const els = this.els;
     if (!els) return;
     const vp = this.viewport;
     const connected = this.client !== null && vp.remote.width > 0;
+    const mode = this.effectiveMode();
+    const trackpadLike = mode === 'trackpad' || this.surface !== null || this.pointerLocked;
+    const showImage = this.cursorCanvas !== null && !this.cursorHidden;
+    const showFallback = !showImage && (this.cursorCanvas === null || trackpadLike);
+    const img = els.cursor.querySelector<HTMLElement>('[data-cursor-image]');
+    const fallback = els.cursor.querySelector<HTMLElement>('[data-cursor-fallback]');
+    if (img) img.style.display = showImage ? 'block' : 'none';
+    if (fallback) fallback.style.display = showFallback ? 'block' : 'none';
     const remotePoint = this.lastMouse ?? this.pointer.getPointer(vp);
     const s = remoteToScreen(vp, remotePoint);
-    const k = cursorDrawScale(scaleOf(vp));
-    const hx = this.cursorCanvas ? this.cursorHotspot.x : 0;
-    const hy = this.cursorCanvas ? this.cursorHotspot.y : 0;
+    const k = cursorDrawScale(scaleOf(vp)) * (this.settings.largeCursor ? LARGE_CURSOR_SCALE : 1);
+    const hx = showImage ? this.cursorHotspot.x : 0;
+    const hy = showImage ? this.cursorHotspot.y : 0;
     els.cursor.style.transform = `translate3d(${s.x - hx * k}px, ${s.y - hy * k}px, 0) scale(${k})`;
-    els.cursor.dataset.mode = this.settings.pointerMode;
-    els.cursor.style.visibility = connected ? 'visible' : 'hidden';
+    els.cursor.dataset.mode = trackpadLike ? 'trackpad' : mode;
+    els.cursor.dataset.large = this.settings.largeCursor ? 'true' : 'false';
+    els.cursor.style.visibility = connected && mode !== 'touch' ? 'visible' : 'hidden';
   }
 
   // =====================================================================================
   // Sending
 
+  /**
+   * Send mouse states. Runs of `withShift` states (horizontal wheel) are wrapped in a
+   * Shift press/release, unless Shift is already held (sticky lock or hardware key).
+   */
   private sendMouse(states: readonly MouseState[]): void {
     if (states.length === 0) return;
     const client = this.client;
+    let shiftPressed = false;
+    const shiftHeld = () => {
+      const held = new Set([...this.keys.heldKeysyms(), ...this.hw.held()]);
+      return held.has(KEYSYM.Shift_L) || held.has(KEYSYM.Shift_R);
+    };
     for (const s of states) {
+      const prev = this.lastMouse;
+      const newBits =
+        s.up ||
+        s.down ||
+        (s.left && !(prev?.left ?? false)) ||
+        (s.middle && !(prev?.middle ?? false)) ||
+        (s.right && !(prev?.right ?? false));
+      if (newBits) {
+        // Text held by commit-on-word goes first; lazy hardware Ctrl/Alt apply to the
+        // click / drag / wheel (Ctrl+click, Ctrl+wheel, Alt+drag).
+        this.flushText();
+        const mods = this.hw.flush();
+        if (mods.length > 0) this.sendKeyEvents(mods);
+      }
+      if (s.withShift && !shiftPressed && !shiftHeld()) {
+        client?.sendKeyEvent(1, KEYSYM.Shift_L);
+        shiftPressed = true;
+      } else if (!s.withShift && shiftPressed) {
+        client?.sendKeyEvent(0, KEYSYM.Shift_L);
+        shiftPressed = false;
+      }
       if (client) client.sendMouseState(new Guacamole.Mouse.State(toGuacMouseTemplate(s)), false);
       this.lastMouse = s;
     }
+    if (shiftPressed) client?.sendKeyEvent(0, KEYSYM.Shift_L);
     this.updateCursor();
+  }
+
+  private sendTouches(contacts: readonly TouchContact[]): void {
+    const client = this.client;
+    if (!client) return;
+    for (const c of contacts) {
+      const state = new Guacamole.Touch.State({
+        id: c.id,
+        x: c.x,
+        y: c.y,
+        radiusX: c.radiusX,
+        radiusY: c.radiusY,
+        angle: c.angle,
+      });
+      // Touch.State turns force 0 into 1 (`template.force || 1.0`): assign afterwards.
+      state.force = c.force;
+      client.sendTouchState(state, false);
+    }
   }
 
   sendKeyEvents(events: readonly KeyEvent[]): void {
@@ -718,6 +1282,7 @@ export class SessionController {
 
   /** Key bar / named key with sticky modifiers applied. */
   pressKey(name: string | number): void {
+    this.flushText();
     this.sendKeyEvents(this.keys.pressKey(name));
   }
 
@@ -726,11 +1291,13 @@ export class SessionController {
   }
 
   runCombo(combo: Combo): void {
+    this.flushText();
     this.sendKeyEvents(this.keys.runCombo(combo));
   }
 
-  /** CLP-3: type text as keystrokes. */
+  /** CLP-3 / text input bar: type text as keystrokes. */
   typeText(text: string): void {
+    this.flushText();
     this.sendKeyEvents(this.keys.typeText(text));
   }
 
@@ -760,35 +1327,57 @@ export class SessionController {
     if (this.settings.haptics) for (const h of out.haptics) this.opts?.haptic(h);
   }
 
-  private handleGestures(gestures: readonly Gesture[]): void {
-    for (const g of gestures) this.applyPointerOutput(this.pointer.handle(g, this.viewport));
+  private handleGestures(gestures: readonly Gesture[], fromSurface = false): void {
+    for (const g of gestures) {
+      if (g.type === 'pending-tap' && g.phase === 'start') this.flushBeforeClick();
+      if (fromSurface) {
+        // The trackpad surface does not zoom the display (its coordinates are not the
+        // display's).
+        if (g.type === 'pinch') continue;
+        this.applyPointerOutput(this.pointer.handle(g, this.viewport, 'trackpad'));
+      } else {
+        if (g.type === 'tap' || g.type === 'two-finger-tap' || g.type === 'three-finger-tap') {
+          this.flushBeforeClick();
+        }
+        this.applyPointerOutput(this.pointer.handle(g, this.viewport));
+      }
+    }
     this.scheduleTick();
+  }
+
+  /** Before a click: send text held by commit-on-word and press lazy hardware modifiers. */
+  private flushBeforeClick(): void {
+    this.flushText();
+    const mods = this.hw.flush();
+    if (mods.length > 0) this.sendKeyEvents(mods);
   }
 
   private scheduleTick(): void {
     if (this.tickTimer) clearTimeout(this.tickTimer);
     this.tickTimer = null;
-    const deadline = this.recognizer.nextDeadline();
+    const a = this.recognizer.nextDeadline();
+    const b = this.surfaceRecognizer.nextDeadline();
+    const deadline = a === null ? b : b === null ? a : Math.min(a, b);
     if (deadline === null) return;
     const delay = Math.max(0, deadline - performance.now());
     this.tickTimer = setTimeout(() => {
       this.tickTimer = null;
-      this.handleGestures(this.recognizer.tick(performance.now()));
+      const now = performance.now();
+      const fromSurface = this.surfaceRecognizer.tick(now);
+      this.handleGestures(this.recognizer.tick(now));
+      this.handleGestures(fromSurface, true);
     }, delay + 1);
   }
 
   private releaseInputs(): void {
     const client = this.client;
-    const released: KeyEvent[] = [...this.keys.releaseAll()];
-    for (const ks of this.hwPressed.values()) released.push({ keysym: ks, pressed: false });
-    for (const list of this.hwSynth.values()) {
-      for (const ks of list) released.push({ keysym: ks, pressed: false });
-    }
-    this.hwPressed.clear();
-    this.hwSynth.clear();
-    if (client) for (const e of released) client.sendKeyEvent(0, e.keysym);
+    const released: KeyEvent[] = [...this.hw.releaseAll(), ...this.keys.releaseAll()];
+    if (client) for (const e of released) client.sendKeyEvent(e.pressed ? 1 : 0, e.keysym);
+    this.sendTouches(this.touches.releaseAll());
     this.handleGestures(this.recognizer.reset(performance.now()));
+    this.handleGestures(this.surfaceRecognizer.reset(performance.now()), true);
     this.applyPointerOutput(this.pointer.releaseAll(this.viewport));
+    this.lastMouseButtons = 0;
     this.publish();
   }
 
@@ -821,30 +1410,59 @@ export class SessionController {
     if (!field) return;
     this.baseline = initialTextInput();
     field.value = this.baseline;
-    const end = field.value.length;
-    try {
-      field.setSelectionRange(end, end);
-    } catch {
-      // ignore
-    }
+    caretToEnd(field);
   }
 
-  private processField(composing: boolean): void {
+  private processField(composing: boolean, flush = false): void {
     const field = this.els?.field;
     if (!field) return;
-    const update = diffTextInput(this.baseline, field.value, composing);
+    const update = diffTextInput(this.baseline, field.value, composing, {
+      commit: this.settings.textInputMode,
+      flush,
+    });
     const events = textInputKeyEvents(update, this.keys);
     this.baseline = update.baseline;
-    if (update.reset) {
-      field.value = update.baseline;
-      const end = field.value.length;
-      try {
-        field.setSelectionRange(end, end);
-      } catch {
-        // ignore
-      }
-    }
+    if (update.reset) field.value = update.baseline;
+    if (update.reset || !composing) caretToEnd(field);
     this.sendKeyEvents(events);
+  }
+
+  /** Commit-on-word: send the word still held in the field (before other keys / clicks). */
+  private flushText(): void {
+    if (this.settings.textInputMode !== 'word' || this.composing) return;
+    const field = this.els?.field;
+    if (!field || field.value === this.baseline) return;
+    this.processField(false, true);
+  }
+
+  /**
+   * KEY-2 robustness: the caret of the hidden field was moved (iOS space-bar trackpad,
+   * selection handles). After it settles, turn a collapsed move into Left presses and
+   * reset the field, or collapse a selection back to the end (see `caretResync`).
+   */
+  private scheduleCaretCheck(): void {
+    if (this.caretTimer) clearTimeout(this.caretTimer);
+    const field = this.els?.field;
+    if (!field || document.activeElement !== field || this.composing) return;
+    const value = field.value;
+    this.caretTimer = setTimeout(() => {
+      this.caretTimer = null;
+      if (document.activeElement !== field || this.composing || field.value !== value) return;
+      if (field.value !== this.baseline) this.flushText();
+      const r = caretResync(
+        field.value,
+        field.selectionStart ?? field.value.length,
+        field.selectionEnd ?? field.value.length,
+        this.composing,
+      );
+      if (r.arrows < 0) {
+        const events: KeyEvent[] = [];
+        for (let i = 0; i < -r.arrows; i++) events.push(...this.keys.pressKey('Left'));
+        this.sendKeyEvents(events);
+      }
+      if (r.reset) this.resetField();
+      else if (r.restoreCaret) caretToEnd(field);
+    }, CARET_SETTLE_MS);
   }
 
   // =====================================================================================
@@ -882,6 +1500,7 @@ export class SessionController {
     const pointerHandler = (type: 'down' | 'move' | 'up' | 'cancel') => (e: PointerEvent) => {
       // Keep focus on the hidden field and stop browser gestures/selection.
       if (e.cancelable) e.preventDefault();
+      if (!this.active) return;
       const kind = pointerKind(e.pointerType);
       if (type === 'down') {
         try {
@@ -890,22 +1509,39 @@ export class SessionController {
           // Synthetic pointers cannot be captured.
         }
       }
-      const p = localPoint(e);
       if (kind === 'mouse') {
-        const b = pointerButtons(type === 'cancel' ? 0 : e.buttons);
-        this.applyPointerOutput(this.pointer.handleHardwareMouse({ ...p, ...b }, this.viewport));
+        this.hardwareMouse(e, type, localPoint(e));
         return;
       }
-      this.handleGestures(
-        this.recognizer.handle({
-          id: e.pointerId,
-          type,
-          x: p.x,
-          y: p.y,
-          timeMs: performance.now(),
-          pointerType: kind,
-        }),
-      );
+      if (kind === 'pen') {
+        // Stylus: a precise absolute pointer in every mode (hover moves, tip = left,
+        // barrel = right).
+        const b = penButtons(type === 'cancel' || type === 'up' ? 0 : e.buttons);
+        if (b.left || b.right) this.flushBeforeClick();
+        this.applyPointerOutput(
+          this.pointer.handleHardwareMouse({ ...localPoint(e), ...b }, this.viewport),
+        );
+        return;
+      }
+      if (this.effectiveMode() === 'touch') {
+        const p = localPoint(e);
+        this.sendTouches(
+          this.touches.handle(
+            {
+              id: e.pointerId,
+              type,
+              x: p.x,
+              y: p.y,
+              width: e.width,
+              height: e.height,
+              pressure: e.pressure,
+            },
+            this.viewport,
+          ),
+        );
+        return;
+      }
+      this.handleGestures(this.recognizer.handle(toPointerInput(e, type, localPoint(e), kind)));
     };
     this.on(layer, 'pointerdown', pointerHandler('down'));
     this.on(layer, 'pointermove', pointerHandler('move'));
@@ -921,30 +1557,31 @@ export class SessionController {
     this.on(layer, 'contextmenu', prevent);
     this.on(layer, 'dblclick', prevent);
     this.on(layer, 'selectstart', prevent);
+    // Back / forward mouse buttons must not navigate the WebView.
+    this.on(layer, 'auxclick', prevent);
+    this.on(layer, 'mouseup', (e) => {
+      if (e.button === 3 || e.button === 4) e.preventDefault();
+    });
     this.on(
       layer,
       'wheel',
       (e) => {
-        e.preventDefault();
-        const p = localPoint(e);
-        const dy = wheelDeltaPx(e.deltaY, e.deltaMode, this.viewport.screen.height);
-        if (e.ctrlKey) {
-          // Desktop trackpad pinch arrives as ctrl+wheel: zoom the view, not the remote.
-          this.setViewport(zoomAt(this.viewport, Math.exp(-dy / 200), p));
-          return;
-        }
-        const notches = this.wheel.add(dy);
-        if (notches === 0) return;
-        const out = this.pointer.handleHardwareMouse(
-          { ...p, ...pointerButtons(e.buttons) },
-          this.viewport,
-        );
-        this.sendMouse(out.mouse);
-        const base = this.lastMouse;
-        if (base) this.sendMouse(wheelStates(base, notches));
+        if (this.active) this.hardwareWheel(e, localPoint(e));
+        else if (e.cancelable) e.preventDefault();
       },
       { passive: false },
     );
+
+    // ---- Pointer lock (hardware mouse, trackpad mode, opt-in)
+    const onLockChange = () => {
+      const locked = document.pointerLockElement === layer;
+      if (locked === this.pointerLocked) return;
+      this.pointerLocked = locked;
+      this.updateCursor();
+      this.publish();
+    };
+    document.addEventListener('pointerlockchange', onLockChange);
+    this.cleanups.push(() => document.removeEventListener('pointerlockchange', onLockChange));
 
     // ---- Hidden text field
     const field = els.field;
@@ -965,55 +1602,61 @@ export class SessionController {
       this.publish();
     });
     this.on(field, 'blur', () => {
+      this.flushText();
       this.composing = false;
       this.keys.clearOneShot();
       this.measure();
       this.publish();
     });
+    // Caret moved without an input (iOS space-bar cursor, selection handles).
+    this.on(field, 'select', () => this.scheduleCaretCheck());
+    const onSelection = () => {
+      if (this.active && document.activeElement === field) this.scheduleCaretCheck();
+    };
+    document.addEventListener('selectionchange', onSelection);
+    this.cleanups.push(() => document.removeEventListener('selectionchange', onSelection));
 
-    // ---- Hardware keyboard (document level)
+    // ---- Hardware keyboard (document level, KEY-6)
     const keydown = (e: KeyboardEvent) => {
-      if (this.disposed || !this.isConnected()) return;
+      // Hidden session (`active` false): the document belongs to the app shell.
+      if (this.disposed || !this.active || !this.isConnected()) return;
       const active = document.activeElement;
       const fieldFocused = active === field;
       if (!fieldFocused && active instanceof HTMLElement && els.chromeRoot.contains(active)) {
-        return; // typing into or operating the chrome (buttons, combo text field)
+        return; // typing into or operating the chrome (buttons, text input bar)
       }
       if (!fieldFocused && isEditable(active)) return;
       // A menu (dialog) is open: its own keys (Escape) must not reach the remote.
       if (els.chromeRoot.querySelector('[role="dialog"]')) return;
-      const d = decideHardwareKey(e, fieldFocused);
-      if (d.action !== 'send') return;
-      e.preventDefault();
+      if (
+        e.keyCode !== 229 &&
+        e.key !== 'Unidentified' &&
+        e.key !== 'Process' &&
+        !this.hardwareKeyboardSeen
+      ) {
+        this.hardwareKeyboardSeen = true;
+        this.publish();
+      }
+      // Sticky one-shot modifiers from the key bar wrap the next hardware key.
       const hasOneShot = Object.values(this.keys.modifiers()).includes('once');
       if (hasOneShot && !isModifierKey(e.key)) {
-        if (!e.repeat) this.pressKey(d.keysym);
+        const d = decideHardwareKey(
+          { ...pickKey(e), altGraph: e.getModifierState?.('AltGraph') ?? false },
+          fieldFocused,
+        );
+        if (d.action !== 'send') return;
+        e.preventDefault();
+        if (!e.repeat) {
+          this.flushBeforeClick();
+          this.pressKey(d.keysym);
+        }
         return;
       }
-      const id = e.code || e.key;
-      if (!isModifierKey(e.key) && !e.repeat) {
-        const held = new Set([...this.hwPressed.values(), ...this.keys.heldKeysyms()]);
-        const synth = missingModifierKeysyms(e, held);
-        if (synth.length > 0) {
-          this.hwSynth.set(id, synth);
-          for (const ks of synth) this.client?.sendKeyEvent(1, ks);
-        }
-      }
-      this.hwPressed.set(id, d.keysym);
-      this.client?.sendKeyEvent(1, d.keysym);
+      this.hardwareKey(e, 'down', fieldFocused);
     };
     const keyup = (e: KeyboardEvent) => {
-      const id = e.code || e.key;
-      const ks = this.hwPressed.get(id);
-      if (ks === undefined) return;
-      e.preventDefault();
-      this.hwPressed.delete(id);
-      this.client?.sendKeyEvent(0, ks);
-      const synth = this.hwSynth.get(id);
-      if (synth) {
-        this.hwSynth.delete(id);
-        for (const m of [...synth].reverse()) this.client?.sendKeyEvent(0, m);
-      }
+      if (this.disposed || !this.active) return;
+      this.hardwareKey(e, 'up', document.activeElement === field);
     };
     document.addEventListener('keydown', keydown, true);
     document.addEventListener('keyup', keyup, true);
@@ -1029,6 +1672,14 @@ export class SessionController {
     };
     document.addEventListener('visibilitychange', onVisibility);
     this.cleanups.push(() => document.removeEventListener('visibilitychange', onVisibility));
+
+    // ---- Network and app lifecycle (DSP-9): reconnect at once when the network returns
+    const net = onNetworkChange((online) => this.onNetwork(online));
+    const resume = onAppResume(() => this.onResume());
+    this.cleanups.push(
+      () => net.dispose(),
+      () => resume.dispose(),
+    );
 
     // ---- Layout sources: container size, orientation/fold, visual viewport, safe area
     const ro = new ResizeObserver(() => this.measure());
@@ -1051,6 +1702,165 @@ export class SessionController {
     }
   }
 
+  private hardwareKey(e: KeyboardEvent, type: 'down' | 'up', fieldFocused: boolean): void {
+    const r = this.hw.handle(
+      {
+        ...pickKey(e),
+        type,
+        shiftKey: e.shiftKey,
+        repeat: e.repeat,
+        altGraph: e.getModifierState?.('AltGraph') ?? false,
+      },
+      {
+        fieldFocused,
+        heldElsewhere: this.keys.heldKeysyms(),
+        adjust: (ks) => this.keys.applyModifiers(ks),
+      },
+    );
+    if (r.handled) e.preventDefault();
+    const m = this.lastMouse;
+    if (type === 'down' && this.hw.hasPending() && m && (m.left || m.middle || m.right)) {
+      // A modifier pressed mid-drag applies at once (e.g. Ctrl to copy while dragging).
+      r.events.push(...this.hw.flush());
+    }
+    if (r.events.length === 0) return;
+    if (type === 'down' && !r.toField) this.flushText();
+    this.sendKeyEvents(r.events);
+  }
+
+  /** PTR-5: hardware mouse (absolute, or relative under pointer lock). */
+  private hardwareMouse(
+    e: PointerEvent,
+    type: 'down' | 'move' | 'up' | 'cancel',
+    p: { x: number; y: number },
+  ): void {
+    const buttons = type === 'cancel' ? 0 : e.buttons;
+    const b = pointerButtons(buttons);
+    const newlyPressed = (buttons & 7 & ~this.lastMouseButtons) !== 0;
+    if (newlyPressed) this.flushBeforeClick();
+    const extra = extraButtonCombo(this.lastMouseButtons, buttons);
+    this.lastMouseButtons = buttons;
+    if (extra.length > 0) this.sendKeyEvents(extra);
+    const layer = this.els?.gestureLayer;
+    if (
+      type === 'down' &&
+      layer &&
+      !this.pointerLocked &&
+      this.settings.pointerLock &&
+      this.effectiveMode() === 'trackpad' &&
+      typeof layer.requestPointerLock === 'function'
+    ) {
+      try {
+        const req = layer.requestPointerLock() as unknown;
+        if (req instanceof Promise) req.catch(() => undefined);
+      } catch {
+        // Not allowed here (e.g. iOS): stay absolute.
+      }
+    }
+    if (this.pointerLocked) {
+      this.applyPointerOutput(
+        this.pointer.handleRelativeMouse({ dx: e.movementX, dy: e.movementY, ...b }, this.viewport),
+      );
+      return;
+    }
+    this.applyPointerOutput(this.pointer.handleHardwareMouse({ ...p, ...b }, this.viewport));
+  }
+
+  /** Wheel with pixel / line / page deltas; horizontal deltas become Shift + wheel. */
+  private hardwareWheel(e: WheelEvent, p: { x: number; y: number }): void {
+    e.preventDefault();
+    const dy = wheelDeltaPx(e.deltaY, e.deltaMode, this.viewport.screen.height);
+    const dx = wheelDeltaPx(e.deltaX, e.deltaMode, this.viewport.screen.width);
+    if (e.ctrlKey) {
+      // Desktop trackpad pinch arrives as ctrl+wheel: zoom the view, not the remote.
+      this.setViewport(zoomAt(this.viewport, Math.exp(-dy / 200), p));
+      return;
+    }
+    const ny = this.wheel.add(dy);
+    const nx = this.settings.horizontalScroll ? this.wheelX.add(dx) : 0;
+    if (ny === 0 && nx === 0) return;
+    if (!this.pointerLocked) {
+      const out = this.pointer.handleHardwareMouse(
+        { ...p, ...pointerButtons(e.buttons) },
+        this.viewport,
+      );
+      this.sendMouse(out.mouse);
+    }
+    const base = this.lastMouse ?? {
+      ...this.pointer.getPointer(this.viewport),
+      left: false,
+      middle: false,
+      right: false,
+      up: false,
+      down: false,
+    };
+    this.sendMouse([...wheelStates(base, ny), ...wheelStates(base, nx, true)]);
+  }
+
+  private exitPointerLock(): void {
+    if (this.pointerLocked && typeof document.exitPointerLock === 'function') {
+      document.exitPointerLock();
+    }
+  }
+
+  /**
+   * DSP-8 split layout: attach (or detach with null) the trackpad surface below the
+   * display. Its gestures always drive the pointer like a trackpad.
+   */
+  setTrackpadSurface(el: HTMLElement | null): void {
+    for (const c of this.surfaceCleanups.splice(0)) c();
+    this.handleGestures(this.surfaceRecognizer.reset(performance.now()), true);
+    this.surface = el;
+    this.updateCursor();
+    if (!el) return;
+    const handler = (type: 'down' | 'move' | 'up' | 'cancel') => (e: PointerEvent) => {
+      if (e.cancelable) e.preventDefault();
+      if (!this.active) return;
+      if (type === 'down') {
+        try {
+          el.setPointerCapture(e.pointerId);
+        } catch {
+          // ignore
+        }
+      }
+      const r = el.getBoundingClientRect();
+      const p = { x: e.clientX - r.left, y: e.clientY - r.top };
+      const kind = pointerKind(e.pointerType);
+      if (kind === 'mouse') {
+        // A hardware mouse on the surface moves relatively, like a real trackpad.
+        const b = pointerButtons(type === 'cancel' ? 0 : e.buttons);
+        this.applyPointerOutput(
+          this.pointer.handleRelativeMouse(
+            { dx: e.movementX, dy: e.movementY, ...b },
+            this.viewport,
+          ),
+        );
+        return;
+      }
+      this.handleGestures(this.surfaceRecognizer.handle(toPointerInput(e, type, p, 'touch')), true);
+    };
+    const add = <K extends keyof HTMLElementEventMap>(
+      type: K,
+      fn: (e: HTMLElementEventMap[K]) => void,
+      o?: AddEventListenerOptions,
+    ) => {
+      el.addEventListener(type, fn as EventListener, o);
+      this.surfaceCleanups.push(() => el.removeEventListener(type, fn as EventListener, o));
+    };
+    add('pointerdown', handler('down'));
+    add('pointermove', handler('move'));
+    add('pointerup', handler('up'));
+    add('pointercancel', handler('cancel'));
+    const prevent = (e: Event) => {
+      if (e.cancelable) e.preventDefault();
+    };
+    add('touchstart', prevent, { passive: false });
+    add('touchmove', prevent, { passive: false });
+    add('contextmenu', prevent);
+    add('mousedown', prevent);
+    if (this.effectiveMode() !== 'trackpad') this.bringPointerIntoView();
+  }
+
   /** Native keyboard events (Capacitor Keyboard plugin). */
   setNativeKeyboard(open: boolean, height: number): void {
     this.nativeKeyboardOpen = open;
@@ -1065,8 +1875,49 @@ export class SessionController {
   }
 }
 
-function isModifierKey(key: string): boolean {
-  return key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta' || key === 'OS';
+function toPointerInput(
+  e: PointerEvent,
+  type: PointerInput['type'],
+  p: { x: number; y: number },
+  kind: PointerInput['pointerType'],
+): PointerInput {
+  return { id: e.pointerId, type, x: p.x, y: p.y, timeMs: performance.now(), pointerType: kind };
+}
+
+function pickKey(e: KeyboardEvent) {
+  return {
+    key: e.key,
+    code: e.code,
+    keyCode: e.keyCode,
+    ctrlKey: e.ctrlKey,
+    altKey: e.altKey,
+    metaKey: e.metaKey,
+    shiftKey: e.shiftKey,
+    isComposing: e.isComposing,
+  };
+}
+
+function caretToEnd(field: HTMLTextAreaElement): void {
+  const end = field.value.length;
+  if (field.selectionStart === end && field.selectionEnd === end) return;
+  try {
+    field.setSelectionRange(end, end);
+  } catch {
+    // ignore
+  }
+}
+
+/** Whether every pixel of the cursor image is transparent (remote hid its cursor). */
+function isFullyTransparent(canvas: HTMLCanvasElement): boolean {
+  try {
+    const ctx = canvas.getContext('2d');
+    if (!ctx || canvas.width === 0 || canvas.height === 0) return true;
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let i = 3; i < data.length; i += 4) if ((data[i] ?? 0) !== 0) return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isEditable(el: Element | null): boolean {
@@ -1074,6 +1925,54 @@ function isEditable(el: Element | null): boolean {
   return (
     el.isContentEditable || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
   );
+}
+
+interface TrafficStats {
+  rxBytes: number;
+  rxInstr: number;
+  txBytes: number;
+  txInstr: number;
+  frames: number;
+  connectedAt: number;
+}
+
+function emptyStats(): TrafficStats {
+  return { rxBytes: 0, rxInstr: 0, txBytes: 0, txInstr: 0, frames: 0, connectedAt: 0 };
+}
+
+/** Approximate wire length of an instruction ("<len>.<value>," per element). */
+function instructionLength(opcode: string, args: readonly string[]): number {
+  let n = opcode.length + 3;
+  for (const a of args) n += a.length + 3;
+  return n;
+}
+
+/** Readable tunnel type for the info sheet. */
+function describeTunnel(tunnel: TunnelLike): string {
+  try {
+    if (tunnel instanceof Guacamole.ChainedTunnel) return 'Chained (WebSocket, then HTTP)';
+    if (tunnel instanceof Guacamole.WebSocketTunnel) return 'WebSocket';
+    if (tunnel instanceof Guacamole.HTTPTunnel) return 'HTTP (long polling)';
+  } catch {
+    // ignore
+  }
+  const name = (tunnel as { constructor?: { name?: string } }).constructor?.name ?? '';
+  if (/demo/i.test(name)) return 'In-app demo';
+  if (/socket/i.test(name)) return 'WebSocket';
+  return name ? `Custom (${name})` : 'Custom';
+}
+
+function tunnelStateName(state: number): string {
+  switch (state) {
+    case TunnelState.CONNECTING:
+      return 'connecting';
+    case TunnelState.OPEN:
+      return 'open';
+    case TunnelState.UNSTABLE:
+      return 'unstable';
+    default:
+      return 'closed';
+  }
 }
 
 function errorText(err: unknown): string {

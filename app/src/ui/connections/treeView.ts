@@ -1,6 +1,7 @@
 import type { Connection, ConnectionGroup, ConnectionTree } from '../../core/models/Connection.ts';
 import type { ConnectionRef } from '../../core/storage/ProfileStore.ts';
 import type { IconName } from '../components/Icon.tsx';
+import type { SessionTarget } from '../nav/navigation.ts';
 import { strings } from '../strings.ts';
 
 /** Pure helpers for the connection browser (CON-1…CON-3). */
@@ -106,4 +107,111 @@ export function protocolLabel(protocol: string): string {
     strings.protocols[key] ??
     (protocol ? protocol.toUpperCase() : (strings.protocols['other'] ?? 'Remote'))
   );
+}
+
+// ---- targets, sorting, lookup (CON-5, CON-6, sort options) ------------------------------
+
+export function targetOf(c: Connection): SessionTarget {
+  return {
+    dataSource: c.dataSource,
+    identifier: c.identifier,
+    type: 'c',
+    name: c.name,
+    protocol: c.protocol,
+  };
+}
+
+/** A balancing group is connected to with `GUAC_TYPE=g`; the server picks a member. */
+export function targetOfGroup(g: ConnectionGroup): SessionTarget {
+  const protocols = new Set(
+    allConnections({ dataSources: [{ dataSource: g.dataSource, root: g }] }).map(
+      (m) => m.connection.protocol,
+    ),
+  );
+  return {
+    dataSource: g.dataSource,
+    identifier: g.identifier,
+    type: 'g',
+    name: g.name,
+    protocol: protocols.size === 1 ? ([...protocols][0] ?? '') : '',
+  };
+}
+
+export function isBalancing(g: ConnectionGroup): boolean {
+  return g.type === 'BALANCING';
+}
+
+/** Every group (any depth) with its path, outermost first. */
+export function allGroups(
+  tree: ConnectionTree,
+): { group: ConnectionGroup; path: readonly string[] }[] {
+  const out: { group: ConnectionGroup; path: readonly string[] }[] = [];
+  const visit = (group: ConnectionGroup, path: readonly string[]): void => {
+    for (const g of group.childConnectionGroups) {
+      out.push({ group: g, path });
+      visit(g, [...path, g.name]);
+    }
+  };
+  for (const ds of tree.dataSources) visit(ds.root, []);
+  return out;
+}
+
+/** Resolves a link's connection (or balancing group) in the tree. */
+export function findTarget(
+  tree: ConnectionTree,
+  identifier: string,
+  dataSource: string | undefined,
+  type: 'c' | 'g',
+): SessionTarget | undefined {
+  if (type === 'g') {
+    const hit = allGroups(tree).find(
+      ({ group }) =>
+        group.identifier === identifier &&
+        (dataSource === undefined || group.dataSource === dataSource),
+    );
+    return hit ? targetOfGroup(hit.group) : undefined;
+  }
+  const hit = allConnections(tree).find(
+    ({ connection }) =>
+      connection.identifier === identifier &&
+      (dataSource === undefined || connection.dataSource === dataSource),
+  );
+  return hit ? targetOf(hit.connection) : undefined;
+}
+
+export type SortMode = 'server' | 'name' | 'protocol' | 'recent';
+
+const collator = (): Intl.Collator =>
+  new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+
+/**
+ * Sorts connections for display. `server` keeps the server's order; `recent` puts recently
+ * used ones first (newest first) and the rest by name. Stable.
+ */
+export function sortConnections<T extends { readonly connection: Connection }>(
+  items: readonly T[],
+  mode: SortMode,
+  lastUsed: ReadonlyMap<string, number> = new Map(),
+): T[] {
+  if (mode === 'server') return [...items];
+  const c = collator();
+  const byName = (a: T, b: T) => c.compare(a.connection.name, b.connection.name);
+  const sorted = [...items];
+  if (mode === 'name') return sorted.sort(byName);
+  if (mode === 'protocol') {
+    return sorted.sort(
+      (a, b) =>
+        c.compare(protocolLabel(a.connection.protocol), protocolLabel(b.connection.protocol)) ||
+        byName(a, b),
+    );
+  }
+  const at = (x: T) => lastUsed.get(refKey(refOf(x.connection))) ?? -1;
+  return sorted.sort((a, b) => at(b) - at(a) || byName(a, b));
+}
+
+/** Sorts groups by name unless the server order is wanted. */
+export function sortGroups(groups: readonly ConnectionGroup[], mode: SortMode): ConnectionGroup[] {
+  if (mode === 'server') return [...groups];
+  const c = collator();
+  return [...groups].sort((a, b) => c.compare(a.name, b.name));
 }

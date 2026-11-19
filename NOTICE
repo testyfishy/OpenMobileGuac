@@ -17,9 +17,16 @@ Runtime dependencies bundled into the app (app/package.json "dependencies"):
   React, React DOM (react, react-dom, scheduler)   MIT License
     Copyright (c) Meta Platforms, Inc. and affiliates.
   Capacitor (@capacitor/core, @capacitor/android, @capacitor/ios, and the
-  official plugins @capacitor/app, clipboard, haptics, keyboard, preferences,
-  status-bar)                                      MIT License
+  official plugins @capacitor/app, clipboard, filesystem, haptics, keyboard,
+  preferences, share, status-bar)                  MIT License
     Copyright (c) 2017-present Drifty Co.
+  @capacitor/privacy-screen 2.x, @capacitor/inappbrowser 4.x
+                                                   MIT License
+    Copyright (c) Ionic and OutSystems. App-switcher privacy screen (app lock)
+    and the in-app browser used for single sign-on.
+  @aparajita/capacitor-biometric-auth 10.x         MIT License
+    Copyright 2020-present Aparajita Fishman.
+    Face ID / Touch ID / fingerprint / device-credential prompt (app lock).
   @aparajita/capacitor-secure-storage 8.x          MIT License
     Copyright 2020-present Aparajita Fishman.
     iOS Keychain / Android Keystore storage for saved passwords and session tokens.

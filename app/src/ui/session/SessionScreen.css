@@ -771,3 +771,550 @@
     transform: translateY(-6px);
   }
 }
+
+/* ---- Cursor options ------------------------------------------------------------------ */
+
+.omg-cursor[data-large='true'] {
+  filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000);
+}
+
+.omg-cursor[data-large='true'][data-mode='direct'] {
+  opacity: 0.8;
+}
+
+/* ---- Split layout (DSP-8): display on top, trackpad surface below --------------------- */
+
+.omg-session[data-split='on'] .omg-stage {
+  bottom: auto;
+  height: var(--omg-split-top, 58%);
+}
+
+.omg-trackpad {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--omg-split-top, 58%);
+  bottom: 0;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.06), transparent 70%),
+    var(--omg-bg, #0d0f12);
+  border-top: 1px solid var(--_border);
+}
+
+.omg-trackpad__hint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--_muted);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* ---- Immersive: the collapsed toolbar handle becomes a thin edge grip ------------------ */
+
+.omg-handle--grip {
+  width: 18px;
+  height: 64px;
+  min-width: 18px;
+  border-radius: 9px 0 0 9px;
+  opacity: 0.35;
+  margin-right: calc(-10px - env(safe-area-inset-right, 0px));
+  transition: opacity var(--_dur);
+}
+
+.omg-handle--grip svg {
+  width: 14px;
+  height: 14px;
+}
+
+.omg-handle--grip:active,
+.omg-handle--grip:focus-visible {
+  opacity: 0.9;
+}
+
+/* ---- Text input bar (KEY-2 fallback) ------------------------------------------------- */
+
+.omg-textbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px calc(env(safe-area-inset-right, 0px) + 6px) 6px
+    calc(env(safe-area-inset-left, 0px) + 6px);
+  background: var(--_surface);
+  border-top: 1px solid var(--_border);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.omg-session[data-keyboard='closed'] .omg-keybar-slot > .omg-textbar:last-child {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
+}
+
+.omg-textbar__input {
+  flex: 1;
+}
+
+.omg-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- Input options sheet --------------------------------------------------------------- */
+
+.omg-section {
+  margin-top: 14px;
+}
+
+.omg-section:first-child {
+  margin-top: 0;
+}
+
+.omg-section__title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--_muted);
+}
+
+.omg-field {
+  margin-top: 12px;
+}
+
+.omg-label--row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.omg-value {
+  color: var(--_text);
+  font-variant-numeric: tabular-nums;
+}
+
+.omg-range {
+  width: 100%;
+  min-height: 32px;
+  accent-color: var(--_accent);
+}
+
+.omg-segmented {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.omg-seg {
+  flex: 1 1 0;
+  min-width: 96px;
+  border-color: var(--_border);
+  background: transparent;
+  font-size: 14px;
+}
+
+.omg-seg--on {
+  border-color: var(--_accent);
+  background: color-mix(in srgb, var(--_accent) 22%, transparent);
+}
+
+/* ---- Key bar editor -------------------------------------------------------------------- */
+
+.omg-key--combo {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.omg-kbe-rows {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.omg-kbe-row {
+  padding: 6px;
+  border: 1px solid var(--_border);
+  border-radius: var(--_radius);
+}
+
+.omg-kbe-row--on {
+  border-color: var(--_accent);
+}
+
+.omg-kbe-row__head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.omg-kbe-row__select {
+  flex: 1;
+  justify-content: flex-start;
+  min-height: 36px;
+}
+
+.omg-kbe-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.omg-kbe-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.omg-kbe-key__actions {
+  display: inline-flex;
+  border: 1px solid var(--_border);
+  border-radius: calc(var(--_radius) - 2px);
+}
+
+/* ---- Compact toolbar: collapsed handle above the bottom 60 px (taskbar, status line) ---- */
+
+.omg-toolbar--collapsed {
+  position: relative;
+  margin-bottom: calc(var(--omg-handle-lift, 64px) + env(safe-area-inset-bottom, 0px));
+}
+
+.omg-session[data-keyboard='open'] .omg-toolbar--collapsed,
+.omg-session[data-split='on'] .omg-toolbar--collapsed {
+  /* Above the keyboard / key bar the desktop's bottom edge is not under the handle. */
+  margin-bottom: 8px;
+}
+
+.omg-handle {
+  position: relative;
+}
+
+.omg-badge-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--_accent);
+}
+
+.omg-tool {
+  position: relative;
+}
+
+.omg-tool__badge {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--_accent);
+  color: var(--_accent-text);
+  font-size: 10.5px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+/* ---- More sheet tiles ------------------------------------------------------------------ */
+
+.omg-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+}
+
+.omg-tile {
+  flex-direction: column;
+  gap: 4px;
+  min-height: 78px;
+  padding: 10px 6px;
+  border-color: var(--_border);
+  background: transparent;
+  text-align: center;
+}
+
+.omg-tile__label {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.omg-tile__hint {
+  font-size: 11.5px;
+  color: var(--_muted);
+}
+
+.omg-tile--on {
+  border-color: var(--_accent);
+  background: color-mix(in srgb, var(--_accent) 18%, transparent);
+}
+
+.omg-tile--danger {
+  color: var(--_danger);
+}
+
+.omg-tile--danger.omg-tile--on {
+  background: var(--_danger);
+  border-color: var(--_danger);
+  color: #fff;
+}
+
+@media (max-height: 480px) {
+  .omg-tiles {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+
+  .omg-tile {
+    min-height: 56px;
+    flex-direction: row;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .omg-tile__hint {
+    display: none;
+  }
+}
+
+/* ---- Lists, transfers, file browser ----------------------------------------------------- */
+
+.omg-sheet--tall {
+  height: min(78%, 640px);
+}
+
+.omg-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.omg-list__item {
+  justify-content: flex-start;
+  width: 100%;
+  gap: 10px;
+  padding: 6px 10px;
+  border-color: var(--_border);
+  background: transparent;
+  text-align: left;
+}
+
+.omg-list__icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--_muted);
+}
+
+.omg-list__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.omg-list__tag {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--_border);
+  font-size: 11px;
+  color: var(--_muted);
+}
+
+.omg-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 10px;
+}
+
+.omg-crumb {
+  min-height: 36px;
+  padding: 0 8px;
+  background: transparent;
+  font-size: 14px;
+}
+
+.omg-crumb + .omg-crumb::before {
+  content: '/';
+  margin-right: 6px;
+  color: var(--_muted);
+}
+
+.omg-crumb[aria-current] {
+  font-weight: 600;
+}
+
+.omg-transfer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--_border);
+  border-radius: var(--_radius);
+}
+
+.omg-transfer__body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.omg-transfer__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.omg-transfer__status {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--_muted);
+}
+
+.omg-progress {
+  position: relative;
+  display: block;
+  height: 4px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--_surface-2);
+}
+
+.omg-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--_accent);
+  transition: width var(--_dur);
+}
+
+.omg-progress[data-indeterminate='true'] > span {
+  animation: omg-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes omg-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+.omg-btn--small {
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+/* ---- Prompt, clipboard, info -------------------------------------------------------------- */
+
+.omg-sheet--prompt .omg-input {
+  width: 100%;
+}
+
+.omg-prompt__intro {
+  margin-top: 0;
+}
+
+.omg-prompt__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.omg-sheet__actions--end {
+  justify-content: flex-end;
+}
+
+.omg-textarea {
+  display: block;
+  width: 100%;
+  min-height: 88px;
+  padding: 10px 12px;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+}
+
+.omg-masked {
+  -webkit-text-security: disc;
+}
+
+.omg-clip-preview {
+  max-height: 140px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--_border);
+  border-radius: calc(var(--_radius) - 2px);
+  background: var(--omg-bg, #0d0f12);
+  font:
+    13.5px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.omg-info {
+  margin: 0;
+  display: grid;
+  gap: 0;
+}
+
+.omg-info__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--_border);
+  font-size: 14px;
+}
+
+.omg-info__row dt {
+  color: var(--_muted);
+}
+
+.omg-info__row dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Hidden session: nothing of the chrome is shown or focusable ------------------------- */
+
+.omg-chrome[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omg-progress[data-indeterminate='true'] > span {
+    animation: none;
+  }
+}

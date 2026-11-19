@@ -1,4 +1,6 @@
 import type { SessionSettings } from '../integration/session.ts';
+import { INPUT_SETTING_KEYS, sanitizeSessionSettingsPatch } from '../session/settings.ts';
+import { parseLanguagePreference, type LanguagePreference } from '../i18n/locale.ts';
 import { parseThemePreference, type ThemePreference } from '../theme/theme.ts';
 
 /**
@@ -11,16 +13,54 @@ import { parseThemePreference, type ThemePreference } from '../theme/theme.ts';
 
 export type SessionSettingsPatch = Partial<SessionSettings>;
 
+export type ConnectionSort = 'server' | 'name' | 'protocol' | 'recent';
+
+export interface LockSettings {
+  /** SRV-6: biometric / device-credential gate. */
+  readonly enabled: boolean;
+  /** Lock again after this many seconds in the background (0 = every time). */
+  readonly afterSeconds: number;
+}
+
 export interface AppSettings {
   readonly theme: ThemePreference;
   /** Only the session fields the user changed from the built-in defaults. */
   readonly sessionDefaults: SessionSettingsPatch;
+  readonly language: LanguagePreference;
+  readonly lock: LockSettings;
+  /** T2.1: disconnect open sessions after this long in the background; `null` = never. */
+  readonly backgroundDisconnectSeconds: number | null;
+  /** MUL-1: how many sessions may be open at once. */
+  readonly maxSessions: number;
+  /** CON-4: keep a small picture of the last screen per connection. */
+  readonly thumbnails: boolean;
+  readonly connectionSort: ConnectionSort;
+  /** First-run introduction seen. */
+  readonly onboardingDone: boolean;
+  /** Diagnostics: hide host names when copying/sharing the log. */
+  readonly logHideHosts: boolean;
 }
 
-export const DEFAULT_APP_SETTINGS: AppSettings = { theme: 'system', sessionDefaults: {} };
+export const LOCK_AFTER_CHOICES = [0, 30, 60, 300, 900] as const;
+export const BACKGROUND_DISCONNECT_CHOICES = [30, 60, 300, 900, null] as const;
+export const MAX_SESSIONS_MIN = 1;
+export const MAX_SESSIONS_MAX = 6;
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  theme: 'system',
+  sessionDefaults: {},
+  language: 'system',
+  lock: { enabled: false, afterSeconds: 60 },
+  backgroundDisconnectSeconds: 60,
+  maxSessions: 3,
+  thumbnails: true,
+  connectionSort: 'server',
+  onboardingDone: false,
+  logHideHosts: true,
+};
 
 const FIT_MODES = ['fit-screen', 'fit-width', 'fit-height', 'one-to-one'] as const;
-const POINTER_MODES = ['direct', 'trackpad'] as const;
+const POINTER_MODES = ['direct', 'trackpad', 'touch'] as const;
 const BOOLEAN_KEYS = [
   'matchDeviceSize',
   'naturalScroll',
@@ -64,18 +104,29 @@ export function sanitizeSessionPatch(raw: unknown): SessionSettingsPatch {
   if (Array.isArray(combos) && combos.every((c) => typeof c === 'string')) {
     out.customCombos = [...(combos as string[])];
   }
+  // The session screen's own input options: its sanitiser knows their types and ranges.
+  const input = sanitizeSessionSettingsPatch(raw) as Record<string, unknown>;
+  const target = out as Record<string, unknown>;
+  for (const key of INPUT_SETTING_KEYS) {
+    if (key in input && input[key] !== undefined) target[key] = input[key];
+  }
   return out;
 }
 
-/** defaults ← global ← connection. Each layer is sanitized first. */
+/**
+ * defaults ← global ← connection, or defaults ← global ← server ← connection when a
+ * per-server layer is given. Each layer is sanitized first.
+ */
 export function mergeSessionSettings(
   defaults: SessionSettings,
   global: unknown,
   connection: unknown,
+  server?: unknown,
 ): SessionSettings {
   return {
     ...defaults,
     ...sanitizeSessionPatch(global),
+    ...sanitizeSessionPatch(server),
     ...sanitizeSessionPatch(connection),
   };
 }
@@ -105,10 +156,136 @@ export function diffFromDefaults(
   return out as SessionSettingsPatch;
 }
 
+function pick<T>(raw: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(raw as T) ? (raw as T) : fallback;
+}
+
+function parseLock(raw: unknown): LockSettings {
+  const d = DEFAULT_APP_SETTINGS.lock;
+  if (!isRecord(raw)) return d;
+  return {
+    enabled: typeof raw['enabled'] === 'boolean' ? raw['enabled'] : d.enabled,
+    afterSeconds: pick(raw['afterSeconds'], LOCK_AFTER_CHOICES, d.afterSeconds as 60),
+  };
+}
+
 export function parseAppSettings(raw: unknown): AppSettings {
-  if (!isRecord(raw)) return DEFAULT_APP_SETTINGS;
+  const d = DEFAULT_APP_SETTINGS;
+  if (!isRecord(raw)) return d;
+  const max = raw['maxSessions'];
   return {
     theme: parseThemePreference(raw['theme']),
     sessionDefaults: sanitizeSessionPatch(raw['sessionDefaults']),
+    language: parseLanguagePreference(raw['language']),
+    lock: parseLock(raw['lock']),
+    backgroundDisconnectSeconds: pick(
+      raw['backgroundDisconnectSeconds'],
+      BACKGROUND_DISCONNECT_CHOICES,
+      d.backgroundDisconnectSeconds as 60,
+    ),
+    maxSessions:
+      typeof max === 'number' && Number.isInteger(max)
+        ? Math.min(MAX_SESSIONS_MAX, Math.max(MAX_SESSIONS_MIN, max))
+        : d.maxSessions,
+    thumbnails: typeof raw['thumbnails'] === 'boolean' ? raw['thumbnails'] : d.thumbnails,
+    connectionSort: pick(
+      raw['connectionSort'],
+      ['server', 'name', 'protocol', 'recent'] as const,
+      d.connectionSort,
+    ),
+    onboardingDone:
+      typeof raw['onboardingDone'] === 'boolean' ? raw['onboardingDone'] : d.onboardingDone,
+    logHideHosts: typeof raw['logHideHosts'] === 'boolean' ? raw['logHideHosts'] : d.logHideHosts,
   };
+}
+
+/**
+ * Settings restored from a backup: everything except what is device-specific (the lock,
+ * which needs this device's biometrics, and whether the introduction was seen).
+ */
+export function settingsFromBackup(current: AppSettings, raw: unknown): AppSettings {
+  const parsed = parseAppSettings(raw);
+  return { ...parsed, lock: current.lock, onboardingDone: current.onboardingDone };
+}
+
+// ---- per-server options (stored by ProfileStore as JSON) --------------------------------
+
+export type SsoMode = 'webview' | 'app-callback';
+
+export interface ServerOptions {
+  /** Session-default overrides for this server (defaults ← global ← server ← connection). */
+  readonly sessionDefaults: SessionSettingsPatch;
+  readonly ssoMode: SsoMode;
+  /** SRV-9: fill in TOTP codes from the stored seed. */
+  readonly totpAutofill: boolean;
+  /** Field names the server asked for at the last sign-in (hints). */
+  readonly seenTotp: boolean;
+  readonly seenSso: boolean;
+}
+
+export const DEFAULT_SERVER_OPTIONS: ServerOptions = {
+  sessionDefaults: {},
+  ssoMode: 'webview',
+  totpAutofill: false,
+  seenTotp: false,
+  seenSso: false,
+};
+
+export function parseServerOptions(raw: unknown): ServerOptions {
+  const d = DEFAULT_SERVER_OPTIONS;
+  if (!isRecord(raw)) return d;
+  const bool = (k: keyof ServerOptions, fallback: boolean) =>
+    typeof raw[k] === 'boolean' ? (raw[k] as boolean) : fallback;
+  return {
+    sessionDefaults: sanitizeSessionPatch(raw['sessionDefaults']),
+    ssoMode: raw['ssoMode'] === 'app-callback' ? 'app-callback' : 'webview',
+    totpAutofill: bool('totpAutofill', d.totpAutofill),
+    seenTotp: bool('seenTotp', d.seenTotp),
+    seenSso: bool('seenSso', d.seenSso),
+  };
+}
+
+/** Plain JSON for `ProfileStore.setOptions`. */
+export function serverOptionsToJson(o: ServerOptions): Record<string, JsonLike> {
+  return {
+    sessionDefaults: { ...o.sessionDefaults } as Record<string, JsonLike>,
+    ssoMode: o.ssoMode,
+    totpAutofill: o.totpAutofill,
+    seenTotp: o.seenTotp,
+    seenSso: o.seenSso,
+  };
+}
+
+type JsonLike =
+  string | number | boolean | null | readonly JsonLike[] | { readonly [key: string]: JsonLike };
+
+/** Clipboard policy shortcut over the two session clipboard fields. */
+export type ClipboardPolicy = 'inherit' | 'both' | 'to-device' | 'off';
+
+export function clipboardPolicyOf(patch: SessionSettingsPatch): ClipboardPolicy {
+  const r = patch.clipboardRemoteToDevice;
+  const a = patch.clipboardAutoSendOnFocus;
+  if (r === undefined && a === undefined) return 'inherit';
+  if (r === true && a === true) return 'both';
+  if (r === true) return 'to-device';
+  return 'off';
+}
+
+export function applyClipboardPolicy(
+  patch: SessionSettingsPatch,
+  policy: ClipboardPolicy,
+): SessionSettingsPatch {
+  const { clipboardRemoteToDevice: _r, clipboardAutoSendOnFocus: _a, ...rest } = patch;
+  void _r;
+  void _a;
+  switch (policy) {
+    case 'inherit':
+      return rest;
+    case 'both':
+      return { ...rest, clipboardRemoteToDevice: true, clipboardAutoSendOnFocus: true };
+    case 'to-device':
+      return { ...rest, clipboardRemoteToDevice: true, clipboardAutoSendOnFocus: false };
+    case 'off':
+      return { ...rest, clipboardRemoteToDevice: false, clipboardAutoSendOnFocus: false };
+  }
 }

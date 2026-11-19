@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { KEYSYM, KeyModel } from './KeyModel.ts';
 import {
   DEFAULT_SENTINEL,
+  caretResync,
   diffTextInput,
   initialTextInput,
   textInputKeyEvents,
@@ -195,5 +196,99 @@ describe('textInputKeyEvents', () => {
     expect(
       textInputKeyEvents({ backspaces: 0, text: '', baseline: S, reset: false }, new KeyModel()),
     ).toEqual([]);
+  });
+});
+
+describe('commit-on-word mode (KEY-2 fallback)', () => {
+  const W = { commit: 'word' } as const;
+
+  it('holds a word until a boundary, then sends it whole', () => {
+    const { updates, remote } = session(
+      [
+        [S + 'h', false],
+        [S + 'he', false],
+        [S + 'hey', false],
+        [S + 'hey ', false],
+      ],
+      W,
+    );
+    expect(updates.slice(0, 3).map((u) => u.text)).toEqual(['', '', '']);
+    expect(updates[3]?.text).toBe('hey ');
+    expect(updates[3]?.reset).toBe(true);
+    expect(remote).toBe('hey ');
+  });
+
+  it('punctuation is a boundary; editing the held word sends nothing', () => {
+    const { updates, remote } = session(
+      [
+        [S + 'abc', false],
+        [S + 'ab', false],
+        [S + 'abx.', false],
+      ],
+      W,
+    );
+    expect(updates.map((u) => u.text)).toEqual(['', '', 'abx.']);
+    expect(remote).toBe('abx.');
+  });
+
+  it('Backspace into already-sent text is sent at once (with the held text)', () => {
+    const u = diffTextInput(S + 'ab', S + 'a', false, W);
+    expect([u.backspaces, u.text]).toEqual([1, '']);
+    const empty = diffTextInput(S, '', false, W);
+    expect([empty.backspaces, empty.reset]).toEqual([1, true]);
+  });
+
+  it('flush sends the held word (blur, key bar, click)', () => {
+    const u = diffTextInput(S, S + 'pass', false, { ...W, flush: true });
+    expect(u.text).toBe('pass');
+  });
+
+  it('holds composition until it ends', () => {
+    expect(diffTextInput(S, S + 'にほ', true, W).text).toBe('');
+    expect(diffTextInput(S, S + '日本 ', false, W).text).toBe('日本 ');
+  });
+
+  it('maxLength forces a send', () => {
+    const long = 'x'.repeat(10);
+    const u = diffTextInput(S, S + long, false, { ...W, maxLength: 10 });
+    expect(u.text).toBe(long);
+    expect(u.reset).toBe(true);
+  });
+});
+
+describe('caretResync (iOS space-bar cursor, selection changes)', () => {
+  it('caret at the end: nothing to do', () => {
+    const v = S + 'abc';
+    expect(caretResync(v, v.length, v.length, false)).toEqual({
+      arrows: 0,
+      restoreCaret: false,
+      reset: false,
+    });
+  });
+
+  it('collapsed caret moved left: re-sync to the sentinel, send nothing', () => {
+    const v = S + 'hello';
+    expect(caretResync(v, v.length - 2, v.length - 2, false)).toEqual({
+      arrows: 0,
+      restoreCaret: true,
+      reset: true,
+    });
+  });
+
+  it('followCaret: n Left presses, counted in code points, never past the sentinel', () => {
+    const v = S + 'hello';
+    expect(caretResync(v, v.length - 2, v.length - 2, false, S, true).arrows).toBe(-2);
+    const e = S + 'a😀b';
+    expect(caretResync(e, 0, 0, false, S, true).arrows).toBe(-3);
+  });
+
+  it('a selection is collapsed back without sending', () => {
+    const v = S + 'hello';
+    expect(caretResync(v, 1, 4, false)).toEqual({ arrows: 0, restoreCaret: true, reset: false });
+  });
+
+  it('does nothing while composing', () => {
+    const v = S + 'hello';
+    expect(caretResync(v, 2, 2, true).restoreCaret).toBe(false);
   });
 });

@@ -24,6 +24,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- openmobileguac://connect?... deep links (CON-5) and the SSO app callback (SRV-7). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="openmobileguac" />
+            </intent-filter>
+
         </activity>
 
         <provider

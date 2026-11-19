@@ -2,7 +2,7 @@ import { StrictMode, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
-import { detectImageMimetypes } from './ui/launch/mediaSupport.ts';
+import { detectImageMimetypes } from './ui/launch/imageSupport.ts';
 import { createAppServices } from './ui/services/AppServices.ts';
 import { applyTheme } from './ui/theme/applyTheme.ts';
 
@@ -36,8 +36,19 @@ async function boot(): Promise<void> {
 
   void detectImageMimetypes();
   const services = createAppServices();
+  // DIAG-1: uncaught errors go to the local log (message only; no stack, no data).
+  window.addEventListener('error', (e) => services.log.error('app', e.message || 'error'));
+  window.addEventListener('unhandledrejection', (e) =>
+    services.log.error('app', e.reason instanceof Error ? e.reason.message : 'unhandled rejection'),
+  );
   const initialSettings = await services.settings.load();
   applyTheme(initialSettings.theme, services.native);
+  // SRV-6: start locked before the first paint. LockGate re-checks device support and
+  // releases the lock if biometrics / a passcode are no longer available.
+  if (services.native && initialSettings.lock.enabled) {
+    services.lock.setEnabled(true);
+    services.lock.lock();
+  }
   root.render(
     <StrictMode>
       <App services={services} initialSettings={initialSettings} />

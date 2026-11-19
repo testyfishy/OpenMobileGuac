@@ -9,6 +9,7 @@ export interface ViewMenuProps {
   readonly protocol?: string;
   readonly onFitMode: (mode: FitMode) => void;
   readonly onResetZoom: () => void;
+  readonly onZoom: (factor: number) => void;
   readonly onMatchDeviceSize: (on: boolean) => void;
   readonly onClose: () => void;
 }
@@ -27,6 +28,7 @@ export function ViewMenu({
   protocol,
   onFitMode,
   onResetZoom,
+  onZoom,
   onMatchDeviceSize,
   onClose,
 }: ViewMenuProps) {
@@ -47,10 +49,17 @@ export function ViewMenu({
         ))}
       </div>
       <div className="omg-sheet__actions">
+        <ChromeButton className="omg-btn--ghost" onClick={() => onZoom(0.8)} aria-label="Zoom out">
+          Zoom −
+        </ChromeButton>
+        <ChromeButton className="omg-btn--ghost" onClick={() => onZoom(1.25)} aria-label="Zoom in">
+          Zoom +
+        </ChromeButton>
         <ChromeButton className="omg-btn--ghost" onClick={onResetZoom}>
           Reset zoom
         </ChromeButton>
       </div>
+      <p className="omg-muted">Tip: a three-finger double tap also resets the zoom.</p>
       <ChromeButton
         role="switch"
         aria-checked={matchDeviceSize}

@@ -96,6 +96,17 @@ export class GuacApi {
   }
 
   /**
+   * `POST api/tokens` with arbitrary parameters and no username/password: an SSO result
+   * (`id_token`, `ticket`, `state`) or a share-link `key` (SRV-7, CON-6).
+   */
+  async loginWithParameters(
+    profile: Pick<ServerProfile, 'baseUrl'>,
+    parameters: Readonly<Record<string, string>>,
+  ): Promise<AuthSession> {
+    return this.createToken(profile.baseUrl, { ...parameters });
+  }
+
+  /**
    * Re-validates a stored token with `POST api/tokens` and `token=<token>`, as the web client
    * does on page load (`updateCurrentToken`). Returns a fresh `AuthSession` with the current
    * data sources. Rejects with `session-expired` if the token is no longer valid.

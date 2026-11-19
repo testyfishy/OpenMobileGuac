@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { MemoryKeyValueStore } from '../core/storage/KeyValueStore.ts';
+import { ProfileStore, type JsonValue } from '../core/storage/ProfileStore.ts';
 import { GuacApiError } from '../core/api/errors.ts';
 import { parseConnectionGroup, type ConnectionTree } from '../core/models/Connection.ts';
 import { sharedTreeJson, treeJson } from '../core/testing/fixtures.ts';
@@ -12,11 +14,17 @@ import {
 import { describeError, describeGuacError } from './errors/errorMessages.ts';
 import { hasErrors, suggestName, urlUnchanged, validateServerForm } from './servers/serverForm.ts';
 import {
+  DEFAULT_APP_SETTINGS,
+  DEFAULT_SERVER_OPTIONS,
+  applyClipboardPolicy,
   applyConnectionPatch,
+  clipboardPolicyOf,
   diffFromDefaults,
   mergeSessionSettings,
   parseAppSettings,
+  parseServerOptions,
   sanitizeSessionPatch,
+  settingsFromBackup,
 } from './settings/settingsModel.ts';
 import type { SessionSettings } from './integration/session.ts';
 import { parseThemePreference, resolveTheme } from './theme/theme.ts';
@@ -209,10 +217,102 @@ describe('settings model', () => {
 
   it('parses app settings defensively', () => {
     expect(parseAppSettings({ theme: 'dark', sessionDefaults: { haptics: false } })).toEqual({
+      ...DEFAULT_APP_SETTINGS,
       theme: 'dark',
       sessionDefaults: { haptics: false },
     });
-    expect(parseAppSettings('junk')).toEqual({ theme: 'system', sessionDefaults: {} });
+    expect(parseAppSettings('junk')).toEqual(DEFAULT_APP_SETTINGS);
+    expect(
+      parseAppSettings({
+        language: 'es',
+        lock: { enabled: true, afterSeconds: 7 },
+        backgroundDisconnectSeconds: null,
+        maxSessions: 99,
+        thumbnails: false,
+        connectionSort: 'bogus',
+      }),
+    ).toMatchObject({
+      language: 'es',
+      lock: { enabled: true, afterSeconds: 60 },
+      backgroundDisconnectSeconds: null,
+      maxSessions: 6,
+      thumbnails: false,
+      connectionSort: 'server',
+    });
+  });
+
+  it('keeps the session input options and touch mode through ProfileStore', async () => {
+    const store = new ProfileStore(new MemoryKeyValueStore());
+    const ref = { dataSource: 'ds', identifier: '1', type: 'c' } as const;
+    const patch = applyConnectionPatch(undefined, {
+      pointerMode: 'touch',
+      longPressMs: 650,
+      twoFingerDrag: 'pan',
+      textInputMode: 'word',
+      keyBarLayout: [['Esc', 'Tab']],
+    });
+    await store.setConnectionSettings('p', ref, patch as Record<string, JsonValue>);
+    const loaded = applyConnectionPatch(await store.getConnectionSettings('p', ref), {});
+    expect(loaded).toMatchObject({
+      pointerMode: 'touch',
+      longPressMs: 650,
+      twoFingerDrag: 'pan',
+      textInputMode: 'word',
+      keyBarLayout: [['Esc', 'Tab']],
+    });
+    expect(
+      sanitizeSessionPatch({ twoFingerDrag: 'bogus', pointerMode: 'nope' }),
+    ).not.toHaveProperty('pointerMode');
+  });
+
+  it('restores settings from a backup without the device-specific lock', () => {
+    const current = {
+      ...DEFAULT_APP_SETTINGS,
+      lock: { enabled: true, afterSeconds: 0 },
+      onboardingDone: true,
+    };
+    const restored = settingsFromBackup(current, { theme: 'light', lock: { enabled: false } });
+    expect(restored).toMatchObject({
+      theme: 'light',
+      lock: { enabled: true, afterSeconds: 0 },
+      onboardingDone: true,
+    });
+  });
+
+  it('parses per-server options and maps clipboard policies', () => {
+    expect(
+      parseServerOptions({
+        ssoMode: 'app-callback',
+        totpAutofill: true,
+        sessionDefaults: { fitMode: 'fit-width', bad: 1 },
+      }),
+    ).toEqual({
+      ...DEFAULT_SERVER_OPTIONS,
+      ssoMode: 'app-callback',
+      totpAutofill: true,
+      sessionDefaults: { fitMode: 'fit-width' },
+    });
+    expect(parseServerOptions(null)).toEqual(DEFAULT_SERVER_OPTIONS);
+    const p = applyClipboardPolicy({ fitMode: 'fit-width' }, 'to-device');
+    expect(p).toEqual({
+      fitMode: 'fit-width',
+      clipboardRemoteToDevice: true,
+      clipboardAutoSendOnFocus: false,
+    });
+    expect(clipboardPolicyOf(p)).toBe('to-device');
+    expect(clipboardPolicyOf(applyClipboardPolicy(p, 'inherit'))).toBe('inherit');
+    expect(clipboardPolicyOf(applyClipboardPolicy(p, 'off'))).toBe('off');
+    expect(clipboardPolicyOf(applyClipboardPolicy(p, 'both'))).toBe('both');
+  });
+
+  it('layers server options between global and connection settings', () => {
+    const merged = mergeSessionSettings(
+      defaults,
+      { fitMode: 'fit-width' },
+      { haptics: false },
+      { fitMode: 'one-to-one', haptics: true },
+    );
+    expect(merged).toMatchObject({ fitMode: 'one-to-one', haptics: false });
   });
 
   it('resolves themes', () => {

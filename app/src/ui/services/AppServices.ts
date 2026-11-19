@@ -1,4 +1,7 @@
 import { GuacApi } from '../../core/api/GuacApi.ts';
+import { Logger } from '../../core/diagnostics/log.ts';
+import { LoggingHttpClient } from '../../core/diagnostics/LoggingHttpClient.ts';
+import { LockService } from '../lock/LockService.ts';
 import type { HttpClient } from '../../core/http/HttpClient.ts';
 import {
   createHttpClient,
@@ -12,6 +15,7 @@ import type { SecureStore } from '../../core/storage/SecureStore.ts';
 import { AuthService } from './AuthService.ts';
 import { getDevServer, type DevServer } from './devServer.ts';
 import { SettingsStore } from './SettingsStore.ts';
+import { strings } from '../strings.ts';
 
 /** How secrets are kept on this platform, for the UI to say so honestly (SRV-3). */
 export type SecretStorageKind = 'secure' | 'insecure-dev' | 'memory';
@@ -30,11 +34,16 @@ export interface AppServices {
   readonly auth: AuthService;
   readonly settings: SettingsStore;
   readonly devServer: DevServer | undefined;
+  /** Local-only diagnostics log (DIAG-1). */
+  readonly log: Logger;
+  /** Biometric / device-credential app lock (SRV-6). */
+  readonly lock: LockService;
 }
 
 export function createAppServices(): AppServices {
   const native = isNativePlatform();
-  const http = createHttpClient();
+  const log = new Logger();
+  const http = new LoggingHttpClient(createHttpClient(), log);
   const kv = createKeyValueStore();
   const secure = createSecureStore();
   const secretStorage: SecretStorageKind = secure.protectedAtRest
@@ -45,9 +54,16 @@ export function createAppServices(): AppServices {
   const profiles = new ProfileStore(kv, { secureStore: secure });
   const api = new GuacApi(http, { timeoutMs: 20_000 });
   const probeApi = new GuacApi(http, { timeoutMs: 6_000 });
-  const auth = new AuthService(api, secure, profiles);
+  const auth = new AuthService(api, secure, profiles, log);
   const devServer = getDevServer();
   if (devServer) auth.setVirtualPassword(devServer.profile.id, devServer.password);
+  const lock = new LockService();
+  // SRV-6(b): the one gate before any saved credential is used to sign in. The prompt text
+  // is read at call time so it follows the current language.
+  auth.setCredentialGate(() =>
+    lock.ensureUnlocked(strings.lock.credentialReason, strings.lock.cancel),
+  );
+  log.info('app', `started (${native ? 'native' : 'web'}, secrets: ${secretStorage})`);
   return {
     native,
     http,
@@ -60,5 +76,7 @@ export function createAppServices(): AppServices {
     auth,
     settings: new SettingsStore(kv),
     devServer,
+    log,
+    lock,
   };
 }

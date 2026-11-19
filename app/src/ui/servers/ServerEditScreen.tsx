@@ -20,6 +20,9 @@ import {
   type ServerFormValues,
 } from './serverForm.ts';
 import { useServerProfile } from './useServers.ts';
+import { ConnectionTestPanel, ServerOptionsSection, TotpSeedSection } from './ServerExtras.tsx';
+import { useSessions } from '../sessions/SessionsContext.ts';
+import { useToast } from '../components/toastContext.ts';
 
 /** Add / edit a server (SRV-1, SRV-2). Editing an unknown id shows the add form. */
 export function ServerEditScreen({ serverId }: { serverId?: string }) {
@@ -57,13 +60,16 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
   const [submitError, setSubmitError] = useState<UiError | undefined>();
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [hasSavedPassword, setHasSavedPassword] = useState(false);
+  const sessions = useSessions();
+  const toast = useToast();
 
   useEffect(() => {
     if (!profile?.rememberPassword) return;
     let live = true;
-    void services.auth.loadSecrets(profile).then((s) => {
-      if (live) setHasSavedPassword(s.password !== null);
+    void services.auth.hasSavedPassword(profile).then((has) => {
+      if (live) setHasSavedPassword(has);
     });
     return () => {
       live = false;
@@ -107,6 +113,7 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
         ? await services.profiles.update(profile.id, fields)
         : await services.profiles.add(fields);
       if (profile && urlChanged) {
+        sessions.closeServer(profile.id);
         await services.auth.reset(profile.id);
         await services.settings.setHttpWarningDismissed(profile.id, false);
       }
@@ -128,11 +135,28 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
   const onDelete = async () => {
     if (!profile) return;
     setConfirmDelete(false);
+    sessions.closeServer(profile.id);
     await services.auth.forgetToken(profile.id);
     await services.profiles.remove(profile.id);
     await services.settings.setHttpWarningDismissed(profile.id, false);
     bump();
     nav.open({ name: 'servers' });
+  };
+
+  const onDuplicate = async () => {
+    if (!profile) return;
+    const copy = await services.profiles.duplicate(profile.id, f.duplicateName(profile.name));
+    bump();
+    nav.open({ name: 'server-edit', serverId: copy.id });
+  };
+
+  const onClearCredentials = async () => {
+    if (!profile) return;
+    setConfirmClear(false);
+    sessions.closeServer(profile.id);
+    await services.auth.clearCredentials(profile.id);
+    setHasSavedPassword(false);
+    toast.show(f.credentialsCleared);
   };
 
   const typedInsecure = /^\s*http:\/\//i.test(values.url) || (editing && isInsecureUrl(values.url));
@@ -198,7 +222,30 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
           <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
             {busy ? f.checking : strings.common.save}
           </button>
-          {editing ? (
+          <ConnectionTestPanel url={values.url} />
+        </div>
+      </form>
+      {profile ? (
+        <div className="form server-extras">
+          <ServerOptionsSection profile={profile} />
+          <TotpSeedSection profile={profile} />
+          <div className="form-actions">
+            <button
+              type="button"
+              className="btn btn-block"
+              onClick={() => void onDuplicate()}
+              disabled={busy}
+            >
+              <Icon name="copy" /> {f.duplicate}
+            </button>
+            <button
+              type="button"
+              className="btn btn-block"
+              onClick={() => setConfirmClear(true)}
+              disabled={busy}
+            >
+              <Icon name="key" /> {f.clearCredentials}
+            </button>
             <button
               type="button"
               className="btn btn-danger-ghost btn-block"
@@ -207,9 +254,32 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
             >
               <Icon name="trash" /> {f.deleteServer}
             </button>
-          ) : null}
+          </div>
         </div>
-      </form>
+      ) : null}
+      {confirmClear && profile ? (
+        <Dialog
+          title={f.clearCredentialsTitle}
+          tone="warning"
+          onCancel={() => setConfirmClear(false)}
+          actions={
+            <>
+              <button type="button" className="btn" onClick={() => setConfirmClear(false)}>
+                {strings.common.cancel}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => void onClearCredentials()}
+              >
+                {strings.common.remove}
+              </button>
+            </>
+          }
+        >
+          <p>{f.clearCredentialsBody}</p>
+        </Dialog>
+      ) : null}
       {confirmDelete && profile ? (
         <Dialog
           title={f.deleteTitle(profile.name)}

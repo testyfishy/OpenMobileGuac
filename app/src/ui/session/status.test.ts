@@ -1,0 +1,87 @@
+import { describe, expect, it } from 'vitest';
+import {
+  INITIAL_SESSION_MACHINE,
+  STATUS,
+  classifyStatus,
+  endHeading,
+  reduceSession,
+  statusMessage,
+  type SessionEvent,
+  type SessionMachine,
+} from './status.ts';
+
+const run = (events: SessionEvent[], m: SessionMachine = INITIAL_SESSION_MACHINE) =>
+  events.reduce((acc, e) => reduceSession(acc, e), m);
+const connected = [{ type: 'connect' }, { type: 'connected' }] as const satisfies SessionEvent[];
+
+describe('end reasons', () => {
+  it('distinguishes the guacd session codes and RDP messages', () => {
+    expect(classifyStatus(STATUS.SESSION_CONFLICT)).toBe('kicked');
+    expect(classifyStatus(STATUS.SESSION_TIMEOUT)).toBe('idle');
+    expect(classifyStatus(STATUS.SESSION_CLOSED, 'Forcibly disconnected.')).toBe('server-closed');
+    expect(classifyStatus(STATUS.SESSION_CLOSED, 'Logged off.')).toBe('logged-off');
+    expect(classifyStatus(STATUS.UPSTREAM_NOT_FOUND)).toBe('network');
+    expect(endHeading('kicked', true)).toBe('Signed in elsewhere');
+  });
+
+  it('labels 0x0301 by source', () => {
+    expect(statusMessage(STATUS.CLIENT_UNAUTHORIZED, undefined, 'client')).toMatch(
+      /rejected the sign-in/,
+    );
+    expect(statusMessage(STATUS.CLIENT_UNAUTHORIZED, undefined, 'tunnel')).toMatch(/Sign in/);
+  });
+
+  it('does not retry terminal causes and gives a tailored heading', () => {
+    for (const [code, heading] of [
+      [STATUS.SESSION_CONFLICT, 'Signed in elsewhere'],
+      [STATUS.SESSION_TIMEOUT, 'Session timed out'],
+      [STATUS.SESSION_CLOSED, 'Disconnected by the server'],
+    ] as const) {
+      const m = run([
+        ...connected,
+        { type: 'error', code, source: 'client' },
+        { type: 'closed', intentional: false },
+      ]);
+      expect(m.phase).toMatchObject({ kind: 'error', heading });
+    }
+  });
+
+  it('keeps the first error of an attempt', () => {
+    const m = run([
+      ...connected,
+      { type: 'error', code: STATUS.SESSION_CONFLICT, source: 'client' },
+      { type: 'error', code: STATUS.UPSTREAM_NOT_FOUND, source: 'tunnel' },
+      { type: 'closed', intentional: false },
+    ]);
+    expect(m.phase).toMatchObject({ kind: 'error', code: STATUS.SESSION_CONFLICT });
+  });
+
+  it('reports a server-side end without an error as disconnected by the server', () => {
+    const m = run([...connected, { type: 'closed', intentional: true, byServer: true }]);
+    expect(m.phase).toEqual({ kind: 'disconnected', byServer: true });
+  });
+});
+
+describe('network awareness', () => {
+  it('waits for the network instead of burning attempts while offline', () => {
+    let m = run([
+      ...connected,
+      { type: 'network', online: false },
+      { type: 'error', code: STATUS.UPSTREAM_NOT_FOUND, source: 'tunnel' },
+      { type: 'closed', intentional: false },
+    ]);
+    expect(m.phase).toMatchObject({ kind: 'reconnecting', attempt: 1, waitingForNetwork: true });
+    m = run([{ type: 'network', online: true }], m);
+    expect(m.phase).toMatchObject({ kind: 'reconnecting', waitingForNetwork: false });
+    expect(m.offline).toBe(false);
+  });
+
+  it('says the device is offline when a first connection fails offline', () => {
+    const m = run([
+      { type: 'network', online: false },
+      { type: 'connect' },
+      { type: 'closed', intentional: false },
+    ]);
+    expect(m.phase).toMatchObject({ kind: 'error', message: 'This device is offline.' });
+  });
+});

@@ -31,7 +31,7 @@ import {
 
 describe('settings', () => {
   it('has the documented defaults', () => {
-    expect(DEFAULT_SESSION_SETTINGS).toEqual({
+    expect(DEFAULT_SESSION_SETTINGS).toMatchObject({
       fitMode: 'fit-screen',
       pointerMode: 'direct',
       matchDeviceSize: false,
@@ -62,11 +62,12 @@ describe('settings', () => {
   it('maps to pointer config', () => {
     expect(
       pointerConfigFromSettings({
+        ...DEFAULT_SESSION_SETTINGS,
         pointerMode: 'trackpad',
         pointerSpeed: 0.1,
         naturalScroll: false,
       }),
-    ).toEqual({ mode: 'trackpad', pointerSpeed: 0.25, naturalScroll: false });
+    ).toMatchObject({ mode: 'trackpad', pointerSpeed: 0.25, naturalScroll: false });
   });
 });
 

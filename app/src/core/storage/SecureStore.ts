@@ -21,10 +21,13 @@ export interface SecureStore {
 export const secretKeys = {
   password: (profileId: string): string => `profile/${profileId}/password`,
   authToken: (profileId: string): string => `profile/${profileId}/authToken`,
+  /** Optional stored TOTP seed (SRV-9), as an `otpauth://totp` URI. */
+  totpSeed: (profileId: string): string => `profile/${profileId}/totpSeed`,
   /** Every secret key for a profile, for deletion. */
   all: (profileId: string): string[] => [
     secretKeys.password(profileId),
     secretKeys.authToken(profileId),
+    secretKeys.totpSeed(profileId),
   ],
 } as const;
 

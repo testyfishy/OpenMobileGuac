@@ -8,7 +8,20 @@ import { decideBack, initialNavState, navReducer, type Route } from './navigatio
  * and Escape on desktop/hardware keyboards. Registering a `backButton` listener disables the
  * default behaviour, so at the root the app minimises itself.
  */
-export function NavProvider({ children, native }: { children: ReactNode; native: boolean }) {
+export function NavProvider({
+  children,
+  native,
+  sessionVisible,
+}: {
+  children: ReactNode;
+  native: boolean;
+  /** While a remote session is on screen, Escape belongs to the remote desktop. */
+  sessionVisible?: () => boolean;
+}) {
+  const sessionVisibleRef = useRef(sessionVisible);
+  useEffect(() => {
+    sessionVisibleRef.current = sessionVisible;
+  });
   const [state, dispatch] = useReducer(navReducer, undefined, initialNavState);
   const interceptors = useRef<(() => boolean)[]>([]);
   const stateRef = useRef(state);
@@ -48,9 +61,14 @@ export function NavProvider({ children, native }: { children: ReactNode; native:
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
-      // In a session Escape belongs to the remote desktop.
-      const top = stateRef.current.stack[stateRef.current.stack.length - 1]?.route;
-      if (top?.name === 'session') return;
+      // In a session Escape belongs to the remote desktop (its dialogs handle their own).
+      // Only the app's own dialogs and sheets (above the session) take it then.
+      if (
+        sessionVisibleRef.current?.() &&
+        !document.querySelector('.sheet-backdrop, .dialog-backdrop')
+      ) {
+        return;
+      }
       back();
     };
     window.addEventListener('keydown', onKey);

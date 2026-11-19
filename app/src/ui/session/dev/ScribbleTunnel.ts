@@ -23,7 +23,7 @@ const OVER = 0xe;
 
 export interface ScribbleLogEntry {
   readonly time: number;
-  readonly kind: 'mouse' | 'key' | 'clipboard' | 'size' | 'connect' | 'other';
+  readonly kind: 'mouse' | 'key' | 'clipboard' | 'size' | 'connect' | 'file' | 'argv' | 'other';
   readonly text: string;
 }
 
@@ -129,8 +129,11 @@ export class ScribbleTunnel implements TunnelLike {
       this.setUUID('scribble-' + Math.random().toString(36).slice(2, 10));
       this.setState(TunnelState.OPEN);
       this.send(['name', 'Scribble desktop']);
-      this.drawDesktop();
-      this.sendCursorImage();
+      this.beforeDesktop(() => {
+        this.drawDesktop();
+        this.sendCursorImage();
+        this.afterDesktop();
+      });
     }, this.connectDelayMs);
   }
 
@@ -155,10 +158,26 @@ export class ScribbleTunnel implements TunnelLike {
     this.record('clipboard', `remote copied ${JSON.stringify(text)}`);
   }
 
+  /** Hook: runs after the handshake, before the first frame (e.g. a `required` prompt). */
+  protected beforeDesktop(draw: () => void): void {
+    draw();
+  }
+
+  /** Hook: runs after the first frame. */
+  protected afterDesktop(): void {}
+
+  /** Hook: handle an instruction from the client first; return true when consumed. */
+  protected handleExtra(opcode: string, args: readonly string[]): boolean {
+    void opcode;
+    void args;
+    return false;
+  }
+
   sendMessage(...elements: unknown[]): void {
     if (!this.isConnected()) return;
     const [opcode, ...rest] = elements.map((e) => String(e));
     if (opcode === undefined) return;
+    if (this.handleExtra(opcode, rest)) return;
     switch (opcode) {
       case 'mouse':
         this.onMouse(rest);
@@ -238,7 +257,7 @@ export class ScribbleTunnel implements TunnelLike {
     this.sync();
   }
 
-  private drawDesktop(): void {
+  protected drawDesktop(): void {
     const w = this.width;
     const h = this.height;
     this.send(['size', '0', String(w), String(h)]);
@@ -315,11 +334,11 @@ export class ScribbleTunnel implements TunnelLike {
     this.send(['cfill', String(mask), String(layer), String(r), String(g), String(b), '255']);
   }
 
-  private sync(): void {
+  protected sync(): void {
     this.send(['sync', String(++this.syncCounter)]);
   }
 
-  private send(instruction: string[]): void {
+  protected send(instruction: string[]): void {
     this.queue.push(instruction);
     if (this.flushScheduled) return;
     this.flushScheduled = true;
@@ -334,7 +353,7 @@ export class ScribbleTunnel implements TunnelLike {
     }, 0);
   }
 
-  private record(kind: ScribbleLogEntry['kind'], text: string): void {
+  protected record(kind: ScribbleLogEntry['kind'], text: string): void {
     this.log.push({ time: Date.now() - this.startTime, kind, text });
     if (this.log.length > 200) this.log.splice(0, this.log.length - 200);
     this.onlog?.(this.log);
