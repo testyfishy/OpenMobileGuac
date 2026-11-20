@@ -43,10 +43,35 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Keep sessions connected in the background (Android only, off by default; see
+             docs/release.md, "Foreground service"). From
+             @capawesome-team/capacitor-android-foreground-service. Started only while the
+             setting is on and at least one remote session is open. -->
+        <service
+            android:name="io.capawesome.capacitorjs.plugins.foregroundservice.AndroidForegroundService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a remote desktop session that the user opened connected while the app is in the background, so the remote session is not dropped when the user switches apps or the screen turns off. Runs only while the user has turned this on and a session is open; the notification shows the session count and a Disconnect all action." />
+        </service>
+        <receiver
+            android:name="io.capawesome.capacitorjs.plugins.foregroundservice.NotificationActionBroadcastReceiver"
+            android:exported="false" />
     </application>
 
     <!-- Permissions -->
 
     <!-- Required for REST calls and the Guacamole WebSocket tunnel. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Background keep-alive (setting, off by default): the foreground service, its Android 14+
+         type permission, and the notification it must show (runtime prompt on Android 13+,
+         asked when the user turns the setting on). The plugin holds a partial wake lock
+         while the service runs, so WAKE_LOCK is required. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 </manifest>

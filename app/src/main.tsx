@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { detectImageMimetypes } from './ui/launch/imageSupport.ts';
-import { createAppServices } from './ui/services/AppServices.ts';
+import { createAppServices, type AppServiceOverrides } from './ui/services/AppServices.ts';
 // By file path, not through ui/session/index.ts, so the session screen stays code-split.
 import { sweepDownloadCache } from './ui/session/downloadCache.ts';
 import { applyTheme } from './ui/theme/applyTheme.ts';
@@ -36,10 +36,21 @@ async function boot(): Promise<void> {
     }
   }
 
+  // Dev only: ?harness=admin runs the app against an in-memory fake server with connection
+  // management (ui/admin/dev). Same pattern as above: DEV guard + glob, so releases drop it.
+  let overrides: AppServiceOverrides | undefined;
+  if (import.meta.env.DEV && new URLSearchParams(location.search).get('harness') === 'admin') {
+    const loaders = import.meta.glob<{
+      createAdminHarness: (p: URLSearchParams) => AppServiceOverrides;
+    }>('./ui/admin/dev/adminHarness.ts');
+    const load = Object.values(loaders)[0];
+    if (load) overrides = (await load()).createAdminHarness(new URLSearchParams(location.search));
+  }
+
   void detectImageMimetypes();
   // Files received in an earlier run and handed to the share sheet (downloads, print jobs).
   void sweepDownloadCache();
-  const services = createAppServices();
+  const services = createAppServices(overrides);
   // DIAG-1: uncaught errors go to the local log (message only; no stack, no data).
   window.addEventListener('error', (e) => services.log.error('app', e.message || 'error'));
   window.addEventListener('unhandledrejection', (e) =>

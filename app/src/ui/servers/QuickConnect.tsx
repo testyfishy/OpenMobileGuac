@@ -8,6 +8,7 @@ import { useNav } from '../nav/NavContext.ts';
 import { useAppSettings, useProfilesVersion, useServices } from '../services/context.ts';
 import { sameTarget } from '../sessions/sessionModel.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
+import { demoVisible } from '../settings/settingsModel.ts';
 import { strings } from '../strings.ts';
 import { hostOf } from './serverForm.ts';
 
@@ -35,12 +36,15 @@ export function QuickConnect() {
   useEffect(() => {
     let live = true;
     void (async () => {
+      const saved = await services.profiles.list();
       const servers = [
-        { id: DEMO_PROFILE_ID, name: strings.servers.demoName },
+        ...(demoVisible(settings.showDemo, saved.length)
+          ? [{ id: DEMO_PROFILE_ID, name: strings.servers.demoName }]
+          : []),
         ...(services.devServer
           ? [{ id: services.devServer.profile.id, name: strings.servers.devName }]
           : []),
-        ...(await services.profiles.list()).map((p) => ({
+        ...saved.map((p) => ({
           id: p.id,
           name: p.name || hostOf(p.baseUrl),
         })),
@@ -66,7 +70,15 @@ export function QuickConnect() {
     return () => {
       live = false;
     };
-  }, [services.profiles, services.devServer, settings.thumbnails, version, sessionCount, activeId]);
+  }, [
+    services.profiles,
+    services.devServer,
+    settings.thumbnails,
+    settings.showDemo,
+    version,
+    sessionCount,
+    activeId,
+  ]);
 
   if (items.length === 0) return null;
 

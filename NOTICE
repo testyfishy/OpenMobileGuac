@@ -33,6 +33,11 @@ Runtime dependencies bundled into the app (app/package.json "dependencies"):
   @capacitor-community/keep-awake 8.x              MIT License
     Copyright (c) 2019 The keep-awake developers.
     Keeps the screen on during a remote session (native builds only).
+  @capawesome-team/capacitor-android-foreground-service 8.x
+                                                   MIT License
+    Copyright (c) 2022 Robin Genz.
+    Android foreground service and notification for the optional "keep sessions
+    connected in the background" setting (Android only).
   tslib (dependency of @capacitor/core)            0BSD License
     Copyright (c) Microsoft Corporation.
 

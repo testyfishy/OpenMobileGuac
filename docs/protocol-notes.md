@@ -528,3 +528,292 @@ These need checking against a live 1.6.0 server (PLAN T0.4):
 - Browser `fetch` cannot tell a TLS failure from an unreachable host.
 - Everything in §6 on a real guacd: the `required` prompt, in-band file transfer and its
   speed, print jobs, audio, and the end-reason mapping.
+- Everything in §8 (connection management): no request in §8 has been sent to a real
+  server. The dev harness's fake server encodes this document's reading of the source, so it
+  checks the app's wiring, not protocol correctness. Also unverified: the identifier in the
+  create response (§8.1) and the permission sets of read-only extensions (§8.3). In particular the exact JSON for `null` attribute values, `Date` fields in history
+  and active connections, and the error bodies of a failed `PATCH`.
+
+## 8. Connection management (create, edit, clone, move, delete)
+
+Implemented in `app/src/core/api/GuacAdminApi.ts` (models in `app/src/core/models/Admin.ts`)
+and `app/src/ui/admin/`. Extra path abbreviations:
+
+- `JDBC/` = `extensions/guacamole-auth-jdbc/modules/guacamole-auth-jdbc-base/src/main/java/org/apache/guacamole/auth/jdbc/`
+  (the database extension; it is the writable connection store this section was checked
+  against. Other extensions were not reviewed.)
+- `PROTO/` = `guacamole-ext/src/main/resources/org/apache/guacamole/protocols/`
+- `GUACD/` = `apache/guacamole-server` at `1.6.0`, `src/protocols/`
+
+All URLs below are under `api/session/data/{dataSource}/` (`JAVA/rest/session/UserContextResource.java`
+mounts `self`, `activeConnections`, `connections`, `connectionGroups`, `history` and `schema`),
+take the `Guacamole-Token` header, and send and receive `application/json`
+(`@Consumes`/`@Produces` on the resources).
+
+### 8.1 Connections
+
+| Operation | Request | Response | Source |
+|---|---|---|---|
+| Get | `GET connections/{id}` | `APIConnection` (no `parameters`) | `FE/rest/services/connectionService.js` `getConnection`; `JAVA/rest/directory/DirectoryObjectResource.java` `@GET getObject` |
+| Get parameters | `GET connections/{id}/parameters` | `{ [name]: value }` | `connectionService.getConnectionParameters`; `JAVA/rest/connection/ConnectionResource.java` `getConnectionParameters` |
+| Create | `POST connections` with an `APIConnection` without `identifier` | the posted object with `identifier` filled in (inferred; see below) | `connectionService.saveConnection` (no identifier → POST, then `connection.identifier = newConnection.identifier`); `JAVA/rest/directory/DirectoryResource.java` `@POST createObject` returns `object`, whose identifier the directory set through `APIConnectionWrapper.setIdentifier` |
+| Update | `PUT connections/{id}` with the full `APIConnection` | `204` no body | `saveConnection` (identifier → PUT); `DirectoryObjectResource` `@PUT updateObject` (`void`) |
+| Delete | `DELETE connections/{id}` | `204` | `connectionService.deleteConnection`; `DirectoryObjectResource` `@DELETE deleteObject` |
+| History | `GET connections/{id}/history` | `APIConnectionRecord[]`, newest first, at most 1000 | `connectionService.getConnectionHistory`; `ConnectionResource.getConnectionHistory` sorts by `START_DATE` descending; `JAVA/rest/history/ActivityRecordSetResource.java` (`MAXIMUM_HISTORY_SIZE = 1000`) |
+| Batch | `PATCH connections` with `[{op, path, value}]` | `{ patches: [...] }` | `connectionService.patchConnections`; `DirectoryResource.patchObjects`. Not used by the app. |
+
+The identifier in the create response is inferred: the web client reads
+`newConnection.identifier`, and `createObject` returns the posted object, which shares state with
+the `APIConnectionWrapper` the directory receives (its `setIdentifier` writes through). That the
+database extension calls `setIdentifier` on the added object was not read. The app treats a
+response without an identifier as an invalid response, and the change may still have been made.
+
+The body (`JAVA/rest/connection/APIConnection.java`, `@JsonIgnoreProperties(ignoreUnknown = true)`):
+
+```json
+{
+  "parentIdentifier": "ROOT",
+  "name": "Office PC",
+  "protocol": "rdp",
+  "parameters": { "hostname": "host.example", "port": "3389", "color-depth": "16" },
+  "attributes": { "max-connections": "", "guacd-hostname": "" }
+}
+```
+
+What the server does with it, and what that means for the client:
+
+- **Update is a full replace.** `ConnectionObjectTranslator.applyExternalChanges` builds a new
+  configuration from `object.getProtocol()` and `object.getParameters()` and also sets
+  `parentIdentifier`, `name` and `attributes` from the body. Tree nodes carry no parameters
+  (§2.1), so **every update, including a move, first loads `GET connections/{id}` and
+  `…/parameters`, changes what it needs, and sends all five fields.** The app never PUTs an
+  object built from the tree.
+- **Always send `attributes`.** `DirectoryObjectTranslator.filterAttributes` calls
+  `attributes.get(...)` on the posted map without a null check, and keeps only names that the
+  data source's connection-attribute schema (§8.4) defines.
+- **Empty means unset.** The database stores no row for a parameter whose value is null or
+  empty (`JDBC/connection/ConnectionService.java`, `getParameterModels`), so `""` and an
+  absent key are equivalent. Values longer than 4096 characters are refused with
+  `BAD_REQUEST`, key `CONNECTION_PARAMETERS.DATABASE_PARAMETER_VALUE_TOO_LONG`
+  (`CONNECTION_PARAMETER_VALUE_LIMIT`).
+- **Validation errors are `BAD_REQUEST`** (`GuacamoleClientException`): blank name
+  ("Connection names must not be blank."), and a name already used in the same parent
+  ("The connection "…" already exists."), in `JDBC/connection/ConnectionService.java`
+  `beforeCreate` / `beforeUpdate`. There is no separate conflict type; the app shows the
+  server's message.
+- **Reading parameters needs UPDATE.** `ConnectionResource.getConnectionParameters` throws
+  `GuacamoleSecurityException` unless the user has system `ADMINISTER` or `UPDATE` on that
+  connection. The database extension also returns an empty map without `UPDATE`
+  (`ConnectionService.retrieveParameters`, used by `ModeledGuacamoleConfiguration.getParameters`).
+
+**Passwords.** With `UPDATE`, the database extension returns every stored parameter as
+stored, passwords included (`retrieveParameters` copies each `ConnectionParameterModel`
+value; nothing is masked). The web client relies on that: its edit screen binds the returned
+map to the form, shows `PASSWORD` fields as `type=password` inputs with a show/hide toggle
+(`FE/form/templates/passwordField.html`, `FE/form/controllers/passwordFieldController.js`),
+and saves the whole map back (`manageConnectionController.saveConnection`). So upstream
+does **not** hide existing passwords from an editor. The task assumption that "existing
+passwords are not returned as-is" does not hold for the database extension. Another
+extension could implement `getParameters` differently. A PUT always replaces the map, so if
+such an extension omitted passwords, saving would clear them. The app's editor shows password
+fields masked with a show/hide toggle, saves the map exactly as shown, and its clone screen
+says which password fields were copied and that any others must be entered again.
+
+**Clone** (`FE/manage/controllers/manageConnectionController.js`, `loadClonedConnection` and
+`cloneConnection`): the web client navigates to `#/manage/{ds}/connections/?clone={id}`,
+loads the source connection **and its parameters**, deletes `identifier`, starts with an
+empty history, and saves the result as a new connection with `POST`, so the copy carries
+whatever the parameters endpoint returned (passwords included, see above). It does not
+rename the copy; the app pre-fills "Copy of …" because names must be unique per parent.
+Only `canCloneObject = exists && (isAdmin || canCreate)` gates it upstream
+(`FE/manage/types/ManagementPermissions.js`). Loading parameters also needs `UPDATE` (above),
+so the app requires both.
+
+**New connection** (`loadSkeletonConnection`): `{ protocol: 'vnc', parentIdentifier: <?parent> }`
+with empty parameters. The app starts with no protocol picked instead.
+
+### 8.2 Connection groups (folders)
+
+| Operation | Request | Source |
+|---|---|---|
+| Get | `GET connectionGroups/{id}` | `FE/rest/services/connectionGroupService.js` `getConnectionGroup` |
+| Create | `POST connectionGroups` (no `identifier`; response carries it) | `saveConnectionGroup` |
+| Update | `PUT connectionGroups/{id}` | `saveConnectionGroup` |
+| Delete | `DELETE connectionGroups/{id}` | `deleteConnectionGroup` |
+
+Body (`JAVA/rest/connectiongroup/APIConnectionGroup.java`, `ignoreUnknown`, `NON_NULL`):
+`{ parentIdentifier, name, type: "ORGANIZATIONAL" | "BALANCING", attributes }`.
+`ConnectionGroupObjectTranslator.applyExternalChanges` sets exactly `name`,
+`parentIdentifier`, `type` and `attributes` (filtered by the group-attribute schema), so an
+update also has to send all of them.
+
+- Validation (`JDBC/connectiongroup/ConnectionGroupService.java`): blank name and duplicate
+  name in the same parent are `BAD_REQUEST`. Moving a group into itself **or any descendant**
+  is refused: `beforeUpdate` walks up from the new parent and throws
+  `GuacamoleUnsupportedException("A connection group may not contain itself.")`. The app's
+  folder picker never offers those targets.
+- **Deleting a folder deletes everything in it.** The database schema declares
+  `parent_id … REFERENCES guacamole_connection_group … ON DELETE CASCADE` for both groups and
+  connections (`extensions/guacamole-auth-jdbc/modules/guacamole-auth-jdbc-mysql/schema/001-create-schema.sql`).
+  The delete confirmation says so and counts what the app can see.
+- `ROOT` is the root group's identifier in the tree (§2) and in `parentIdentifier`.
+
+### 8.3 Permissions
+
+| | |
+|---|---|
+| Request | `GET self/effectivePermissions` |
+| Response | `APIPermissionSet`: `{ connectionPermissions, connectionGroupPermissions, sharingProfilePermissions, activeConnectionPermissions, userPermissions, userGroupPermissions: { [id]: Type[] }, systemPermissions: Type[] }` |
+| Object types | `READ`, `UPDATE`, `DELETE`, `ADMINISTER` |
+| System types | `ADMINISTER`, `AUDIT`, `CREATE_USER`, `CREATE_USER_GROUP`, `CREATE_CONNECTION`, `CREATE_CONNECTION_GROUP`, `CREATE_SHARING_PROFILE` |
+
+Sources: `FE/rest/services/permissionService.js` (`getEffectivePermissionsResourceURL` uses
+`self/effectivePermissions` for the current user because the user may not exist as an object
+in that data source); `JAVA/rest/user/UserResource.java` `@Path("effectivePermissions")`;
+`JAVA/rest/permission/APIPermissionSet.java`; `FE/rest/types/PermissionSet.js`
+(`ObjectPermissionType`, `SystemPermissionType`).
+
+Permissions are **per data source**: the web client fetches one set per entry of
+`availableDataSources` (`FE/navigation/services/userPageService.js`,
+`generateSettingsPages`). The app offers management in a data source only if that set
+grants something below. A source that grants no create, update, delete or administer
+permission gets no management UI. **Unverified:** that the read-only upstream extensions
+(LDAP, JSON, header) grant none; their permission sets were not read. A failure or `NOT_FOUND` for one source hides
+management there and nothing else.
+
+How the web client decides (mirrored in `app/src/ui/admin/permissions.ts`):
+
+- It ignores `UPDATE` on `ROOT` before deciding anything
+  (`PermissionSet.removeConnectionGroupPermission(…, UPDATE, ROOT)` in
+  `userPageService.js` and `FE/settings/directives/guacSettingsConnections.js`).
+- Manage connections at all: `ADMINISTER`, `CREATE_CONNECTION` or `CREATE_CONNECTION_GROUP`,
+  or any `UPDATE`/`DELETE`/`ADMINISTER` on a connection or group (`userPageService.js`).
+- New connection: `ADMINISTER` or `CREATE_CONNECTION`. New group: `ADMINISTER` or
+  `CREATE_CONNECTION_GROUP` (`guacSettingsConnections.js`, `canCreateConnections`,
+  `canCreateConnectionGroups`).
+- Per object (`FE/manage/types/ManagementPermissions.js`, `fromPermissionSet`): save =
+  `isAdmin || (!exists && canCreate) || UPDATE`; delete = `exists && (isAdmin || DELETE)`;
+  clone = `exists && (isAdmin || canCreate)`.
+- The server additionally checks the parent folders. Creating, moving or deleting an
+  object needs `UPDATE` on every parent group it changes, unless the user is privileged
+  (`JDBC/base/ModeledChildDirectoryObjectService.java`, `canUpdateModifiedParents`). The
+  database models the root as a null parent, so the root is never checked. The app's folder
+  picker therefore offers the top level, plus groups where the user is an administrator or
+  has `UPDATE`. The web client filters its location chooser by `ADMINISTER` instead
+  (`manageConnectionController`, `getConnectionGroupTree(…, [ADMINISTER])`).
+- A `403` is still possible (permissions changed after loading). Admin calls follow a
+  `PERMISSION_DENIED` with `HEAD api/session` (§1.3): if the session is still valid the
+  error is `permission-denied` and the app hides management for that data source; if not, it
+  is `session-expired` as before.
+
+### 8.4 Schema: protocols, forms and fields
+
+| Request | Response | Source |
+|---|---|---|
+| `GET schema/protocols` | `{ [name]: ProtocolInfo }` | `FE/rest/services/schemaService.js` `getProtocols`; `JAVA/rest/schema/SchemaResource.java` `getProtocols` returns `LocalEnvironment.getProtocols()` |
+| `GET schema/connectionAttributes` | `Form[]` | `getConnectionAttributes` |
+| `GET schema/connectionGroupAttributes` | `Form[]` | `getConnectionGroupAttributes` |
+
+- `ProtocolInfo` = `{ name, connectionForms: Form[], sharingProfileForms: Form[] }`
+  (`FE/rest/types/Protocol.js`; the built-in definitions are `PROTO/rdp.json`, `vnc.json`,
+  `ssh.json`, `telnet.json`, `kubernetes.json`; guacd extensions can add more).
+- `Form` = `{ name, fields: Field[] }`; `Field` = `{ name, type, options? }`
+  (`FE/rest/types/Form.js`, `Field.js`; `EXT/form/Field.java`). The web client's field
+  templates (`FE/form/services/formService.js`, `fieldTypes`) cover `TEXT`, `EMAIL`,
+  `NUMERIC`, `BOOLEAN`, `USERNAME`, `PASSWORD`, `ENUM`, `MULTILINE`, `TIMEZONE`, `LANGUAGE`,
+  `DATE`, `TIME`, `REDIRECT` and `TERMINAL_COLOR_SCHEME`.
+- Value semantics from the field controllers (`FE/form/controllers/`):
+  - `BOOLEAN` is on when the value equals `options[0]` (`"true"` in every built-in
+    protocol), and off is `""`, not `"false"` (`checkboxFieldController.js`).
+  - `NUMERIC` is a string holding a number, with `""` for unset (`numberFieldController.js`).
+  - `ENUM` offers exactly `options`. `""` (the first option in the built-in protocols) means
+    "server default" (`selectFieldController.js`).
+  - `PASSWORD` is a masked text input with a show/hide toggle.
+  - `TERMINAL_COLOR_SCHEME` lists named schemes as options but also accepts a custom scheme
+    string. The app treats it as an `ENUM` plus free text.
+- Attribute forms in the database extension:
+  - Connections (`JDBC/connection/ModeledConnection.java`, `ATTRIBUTES`):
+    - `concurrency`: `max-connections` and `max-connections-per-user`, both NUMERIC.
+    - `load-balancing`: `weight` (NUMERIC) and `failover-only` (BOOLEAN `"true"`).
+    - `guacd`: `guacd-hostname` (TEXT), `guacd-port` (NUMERIC) and `guacd-encryption` (ENUM
+      `""`/`none`/`ssl`).
+  - Groups (`JDBC/connectiongroup/ModeledConnectionGroup.java`): `concurrency`, with
+    `max-connections`, `max-connections-per-user` and `enable-session-affinity` (BOOLEAN
+    `"true"`).
+  - `getAttributes` puts every one of these names in the map, with `null` for unset ones.
+    The parser drops nulls (§2.1).
+- The web client shows, for an existing object, only attributes present in its map
+  (`manageConnection.html`, `model-only="!managementPermissions.canChangeAllAttributes"`;
+  `FE/form/directives/form.js`, `isVisible`). The database extension always includes every
+  attribute, so the app shows the whole attribute schema.
+- **Labels.** The web client translates, it does not hard-code labels:
+  - Field header: `<NS>.FIELD_HEADER_<NAME>` (`FE/form/directives/formField.js`,
+    `getFieldHeader`).
+  - Option: `<NS>.FIELD_OPTION_<NAME>_<VALUE or EMPTY>`.
+  - Section: `<NS>.SECTION_HEADER_<FORM>` (`FE/form/directives/form.js`).
+  - `<NS>` is `PROTOCOL_<PROTOCOL>` for parameters (`Protocol.getNamespace`), and
+    `CONNECTION_ATTRIBUTES` or `CONNECTION_GROUP_ATTRIBUTES` for attributes
+    (`manageConnection.html`, `manageConnectionGroup.html`).
+  - Canonicalising replaces every run of non-alphanumerics with `_` and upper-cases
+    (`FE/locale/services/translationStringService.js`, `canonicalize`), so `color-depth`
+    becomes `COLOR_DEPTH`.
+  - English values end in a colon ("Color depth:") and may be links of the form
+    `@:NAMESPACE.KEY` (angular-translate). See `guacamole/src/main/frontend/src/translations/en.json`.
+- **Server translations at runtime.** `GET translations/{languageKey}.json`, relative to the
+  base URL and without a token, returns the server's merged table, including extension
+  strings such as `CONNECTION_ATTRIBUTES`. Sources: `FE/locale/services/translationLoader.js`
+  (`url: 'translations/' + key + '.json'`) and `JAVA/extension/ExtensionModule.java`
+  (`serve("/translations/" + languageKey + ".json")`); the available keys come from
+  `GET api/languages` (§1.5). The app loads the table for its UI language (falling back to
+  `en`), strips the trailing colon and resolves `@:` links. When a key is missing or the
+  fetch fails, it derives a label from the name (`enable-wallpaper` → "Enable wallpaper").
+  No upstream translation text is copied into this repository.
+
+### 8.5 Active connections and history
+
+| Operation | Request | Source |
+|---|---|---|
+| List | `GET activeConnections` → `{ [activeId]: APIActiveConnection }` (optional `permission=` filter) | `FE/rest/services/activeConnectionService.js` `getActiveConnections`; `DirectoryResource.getObjects` |
+| Disconnect | `PATCH activeConnections` with `[{ "op": "remove", "path": "/<activeId>" }]` | `activeConnectionService.deleteActiveConnections`; `DirectoryResource.patchObjects`. On failure the server answers with an error body that carries `patches` outcomes. |
+
+- `APIActiveConnection` (`JAVA/rest/activeconnection/APIActiveConnection.java`) has
+  `identifier`, `connectionIdentifier`, `startDate`, `remoteHost`, `username` and
+  `connectable`. The app filters the list by `connectionIdentifier` to show one
+  connection's sessions.
+- Who may disconnect, in the database extension: a privileged user or one with `DELETE` on
+  that active connection (`JDBC/activeconnection/ActiveConnectionService.java`,
+  `deleteObject` / `hasObjectPermissions`), which otherwise throws "Permission denied.". The
+  web client's session list does not check this itself; it offers Delete for any selected
+  session (`FE/settings/directives/guacSettingsSessions.js`, `canDeleteSessions`). The app
+  shows Disconnect for system `ADMINISTER` or `DELETE` in `activeConnectionPermissions`.
+- `PATCH` needs an atomic directory (`DirectoryResource.patchObjects` refuses otherwise). The
+  database extension's directories are atomic: `JDBC/base/JDBCDirectory.java`,
+  `tryAtomically`, runs the operation in a transaction with `atomic = true`.
+- `APIConnectionRecord` (`JAVA/rest/history/APIActivityRecord.java`,
+  `APIConnectionRecord.java`) has `startDate`, `endDate`, `remoteHost`, `username`,
+  `active`, `identifier`, `uuid`, `attributes`, `logs`, `connectionIdentifier`,
+  `connectionName`, `sharingProfileIdentifier` and `sharingProfileName`.
+- **Unverified:** the date fields use Jackson's default `Date` serialisation (epoch
+  milliseconds), as for `lastActive` in §2.1. The parser accepts a number or an ISO string.
+
+### 8.6 Bandwidth-relevant parameters (presets)
+
+The "Performance & quality" presets set only parameters that exist in the 1.6.0 protocol
+definitions:
+
+- RDP, form `display` (`PROTO/rdp.json`): `color-depth` (`8`/`16`/`24`/`32`),
+  `force-lossless` and `resize-method` (`reconnect`/`display-update`).
+- RDP, form `performance`: `enable-wallpaper`, `enable-theming`, `enable-font-smoothing`,
+  `enable-full-window-drag`, `enable-desktop-composition`, `enable-menu-animations`,
+  `disable-bitmap-caching`, `disable-offscreen-caching`, `disable-glyph-caching` and
+  `disable-gfx`.
+- RDP, form `device-redirection`: `disable-audio`. **RDP has no `enable-audio` in 1.6.0.**
+- VNC (`PROTO/vnc.json`): `color-depth`, `force-lossless`, `cursor` (`local`/`remote`),
+  `compress-level` and `quality-level` (`0`–`9`), `encodings` (all in `display`), and
+  `enable-audio` (in `audio`).
+- guacd: with the RDP graphics pipeline (GFX) enabled, which is the default, guacd uses
+  32 bpp whatever `color-depth` says (`GUACD/rdp/settings.c`, `RDP_GFX_REQUIRED_DEPTH = 32`;
+  without GFX the default depth is `RDP_DEFAULT_DEPTH = 16`). A lower colour depth therefore
+  only applies with `disable-gfx` set, so the low-bandwidth preset sets both.
+- guacd: VNC `compress-level` and `quality-level` default to -1, which means the VNC
+  library's own default (`GUACD/vnc/settings.c`).

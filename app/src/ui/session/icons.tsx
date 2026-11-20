@@ -69,6 +69,17 @@ export function IconKeys() {
   );
 }
 
+/** Key set switcher: two stacked key rows with a swap arrow. */
+export function IconKeySets() {
+  return (
+    <Svg>
+      <rect x="3" y="5" width="12" height="5" rx="1.2" />
+      <rect x="3" y="14" width="12" height="5" rx="1.2" />
+      <path d="M19 6v12M17 8l2-2 2 2M17 16l2 2 2-2" />
+    </Svg>
+  );
+}
+
 export function IconPaste() {
   return (
     <Svg>
@@ -314,6 +325,89 @@ export function IconShield() {
     <Svg>
       <path d="M12 3.5l7 2.5v5.5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" />
       <path d="M9 12l2 2 4-4" />
+    </Svg>
+  );
+}
+
+/** Keyboard with a down chevron: hide the soft keyboard. */
+export function IconKeyboardHide() {
+  return (
+    <Svg>
+      <rect x="2.5" y="3.5" width="19" height="11" rx="2" />
+      <path d="M6 7.5h.01M9 7.5h.01M12 7.5h.01M15 7.5h.01M18 7.5h.01M9 11h6" />
+      <path d="M9 18l3 3 3-3" />
+    </Svg>
+  );
+}
+
+export function IconZoomReset() {
+  return (
+    <Svg>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M20 20l-4.4-4.4" />
+      <path d="M8.5 11h5" />
+      <path d="M3 4.5V8h3.5" />
+    </Svg>
+  );
+}
+
+export function IconToolbar() {
+  return (
+    <Svg>
+      <rect x="3" y="14" width="18" height="6" rx="2" />
+      <path d="M7 17h.01M12 17h.01M17 17h.01" />
+      <path d="M5 4h14M5 8h9" />
+    </Svg>
+  );
+}
+
+export function IconScroll() {
+  return (
+    <Svg>
+      <path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4" />
+    </Svg>
+  );
+}
+
+export function IconCursorLarge() {
+  return (
+    <Svg>
+      <path d="M6 3l12 8.5-5.2 1.1 3.2 6.4-2.6 1.3-3.2-6.4L6 18z" />
+    </Svg>
+  );
+}
+
+export function IconTextBar() {
+  return (
+    <Svg>
+      <rect x="2.5" y="7" width="19" height="10" rx="2" />
+      <path d="M7 10v4M6 10h2M6 14h2" />
+    </Svg>
+  );
+}
+
+export function IconSplit() {
+  return (
+    <Svg>
+      <rect x="3.5" y="3" width="17" height="18" rx="2" />
+      <path d="M3.5 12h17" />
+    </Svg>
+  );
+}
+
+export function IconFullscreen() {
+  return (
+    <Svg>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+    </Svg>
+  );
+}
+
+export function IconDrag() {
+  return (
+    <Svg>
+      <path d="M12 3v6M12 15v6M3 12h6M15 12h6" />
+      <path d="M9.5 5.5L12 3l2.5 2.5M9.5 18.5L12 21l2.5-2.5M5.5 9.5L3 12l2.5 2.5M18.5 9.5L21 12l-2.5 2.5" />
     </Svg>
   );
 }

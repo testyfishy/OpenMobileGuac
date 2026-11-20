@@ -5,7 +5,8 @@ import { Icon } from '../components/Icon.tsx';
 import { IconButton, Screen } from '../components/Screen.tsx';
 import { useNav } from '../nav/NavContext.ts';
 import { selectedServerId } from '../nav/navigation.ts';
-import { useServices } from '../services/context.ts';
+import { useAppSettings, useServices } from '../services/context.ts';
+import { demoVisible } from '../settings/settingsModel.ts';
 import { strings } from '../strings.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { QuickConnect } from './QuickConnect.tsx';
@@ -23,6 +24,8 @@ export function ServersScreen() {
   const { profiles, reload } = useSavedProfiles();
   const shares = useShareProfiles();
   const sessions = useSessions();
+  const { settings } = useAppSettings();
+  const showDemo = demoVisible(settings.showDemo, profiles?.length);
   const [reordering, setReordering] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const selected = selectedServerId(nav.state);
@@ -68,18 +71,20 @@ export function ServersScreen() {
         <Icon name="server" size="1rem" /> {s.title}
       </h2>
       <ul className="list" aria-label={s.title}>
-        <li>
-          <ServerRow
-            id={DEMO_SERVER_ID}
-            name={s.demoName}
-            subtitle={s.demoSubtitle}
-            badge={s.demoBadge}
-            badgeKind="demo"
-            icon="play"
-            selected={selected === DEMO_SERVER_ID}
-            onOpen={() => openServer(DEMO_SERVER_ID)}
-          />
-        </li>
+        {showDemo ? (
+          <li>
+            <ServerRow
+              id={DEMO_SERVER_ID}
+              name={s.demoName}
+              subtitle={s.demoSubtitle}
+              badge={s.demoBadge}
+              badgeKind="demo"
+              icon="play"
+              selected={selected === DEMO_SERVER_ID}
+              onOpen={() => openServer(DEMO_SERVER_ID)}
+            />
+          </li>
+        ) : null}
         {services.devServer ? (
           <li>
             <ServerRow

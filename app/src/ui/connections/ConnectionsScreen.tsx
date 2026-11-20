@@ -5,6 +5,8 @@ import type { ConnectionTree } from '../../core/models/Connection.ts';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import { findSsoRedirect, type SsoRedirect } from '../../core/sso/sso.ts';
 import { parseTotpInput, serializeTotp, type TotpParams } from '../../core/totp/totp.ts';
+import { AdminProvider } from '../admin/AdminProvider.tsx';
+import { AdminAddButton, AdminNotice } from '../admin/EntryPoints.tsx';
 import { authFlowReducer, initialAuthFlow, isBusy } from '../auth/authFlow.ts';
 import { HttpWarningDialog } from '../auth/HttpWarningDialog.tsx';
 import { LoginForm } from '../auth/LoginForm.tsx';
@@ -347,13 +349,14 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   const loadingTree = authenticated && tree.nonce !== treeNonce;
   const canStoreSeed = seedsAllowed;
 
-  return (
+  const screen = (
     <Screen
       title={title}
       onBack={nav.back}
       actions={
         authenticated ? (
           <>
+            <AdminAddButton />
             <IconButton
               icon="refresh"
               label={strings.common.refresh}
@@ -386,6 +389,7 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
                 : strings.login.anonymous}
             </p>
           ) : null}
+          <AdminNotice />
           {tree.error && !loadingTree ? (
             <ErrorBanner error={tree.error}>
               <button type="button" className="btn btn-small" onClick={refresh}>
@@ -449,5 +453,11 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
         />
       ) : null}
     </Screen>
+  );
+  // Connection management (ui/admin): offered only where the account has the permissions.
+  return (
+    <AdminProvider session={session} tree={tree.tree} onChanged={refresh}>
+      {screen}
+    </AdminProvider>
   );
 }

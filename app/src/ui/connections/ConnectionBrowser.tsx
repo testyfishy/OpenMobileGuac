@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState, type ReactNode, type TouchEvent } from 'react';
 import type { Connection, ConnectionGroup, ConnectionTree } from '../../core/models/Connection.ts';
 import type { ConnectionRef } from '../../core/storage/ProfileStore.ts';
+import { useShowsEmptyGroups } from '../admin/AdminContext.ts';
+import { AdminGroupButton } from '../admin/EntryPoints.tsx';
 import { EmptyState } from '../components/Feedback.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { strings } from '../strings.ts';
@@ -61,6 +63,11 @@ export function ConnectionBrowser({
   flat,
 }: ConnectionBrowserProps) {
   const c = strings.connections;
+  // Connection management lists empty folders where the account may manage them.
+  const showsEmpty = useShowsEmptyGroups();
+  const keepGroup = (g: ConnectionGroup) => groupHasContent(g) || showsEmpty(g.dataSource);
+  const keepSource = (root: ConnectionGroup) =>
+    groupHasContent(root) || root.childConnectionGroups.some(keepGroup);
   const favKeys = useMemo(() => new Set(favourites.map(refKey)), [favourites]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const toggleGroup = (key: string) =>
@@ -108,11 +115,12 @@ export function ConnectionBrowser({
     );
   }
 
-  if (isTreeEmpty(tree)) return <EmptyState icon="folder" title={c.empty} />;
+  if (isTreeEmpty(tree) && !tree.dataSources.some((d) => keepSource(d.root)))
+    return <EmptyState icon="folder" title={c.empty} />;
 
   const favList = resolveRefs(tree, favourites);
   const recentList = resolveRefs(tree, recents).slice(0, RECENTS_SHOWN);
-  const multiSource = !flat && tree.dataSources.filter((d) => groupHasContent(d.root)).length > 1;
+  const multiSource = !flat && tree.dataSources.filter((d) => keepSource(d.root)).length > 1;
 
   return (
     <>
@@ -129,7 +137,7 @@ export function ConnectionBrowser({
         </Section>
       ) : null}
       {tree.dataSources
-        .filter((d) => groupHasContent(d.root))
+        .filter((d) => keepSource(d.root))
         .map((d) => (
           <Section
             key={d.dataSource}
@@ -146,6 +154,7 @@ export function ConnectionBrowser({
               openKeys={openKeys}
               onToggleGroup={toggleGroup}
               onConnectGroup={onConnectGroup}
+              keepGroup={keepGroup}
               renderConnection={(m, depth) => row(m, false, 't', depth)}
             />
           </Section>
@@ -183,6 +192,7 @@ function GroupChildren({
   openKeys,
   onToggleGroup,
   onConnectGroup,
+  keepGroup = groupHasContent,
   renderConnection,
 }: {
   group: ConnectionGroup;
@@ -194,6 +204,7 @@ function GroupChildren({
   openKeys: ReadonlySet<string> | undefined;
   onToggleGroup: (key: string) => void;
   onConnectGroup: ((g: ConnectionGroup) => void) | undefined;
+  keepGroup?: (g: ConnectionGroup) => boolean;
   renderConnection: (m: ConnectionMatch, depth: number) => ReactNode;
 }) {
   const connections = sortConnections(
@@ -203,7 +214,7 @@ function GroupChildren({
   );
   return (
     <>
-      {sortGroups(group.childConnectionGroups.filter(groupHasContent), sort).map((g) => {
+      {sortGroups(group.childConnectionGroups.filter(keepGroup), sort).map((g) => {
         const key = groupKey(g);
         const open = expanded.has(key);
         const label = open
@@ -244,6 +255,7 @@ function GroupChildren({
                   <Icon name="play" />
                 </button>
               ) : null}
+              <AdminGroupButton group={g} />
             </div>
             {open ? (
               <ul className="list nested">
@@ -257,6 +269,7 @@ function GroupChildren({
                   openKeys={openKeys}
                   onToggleGroup={onToggleGroup}
                   onConnectGroup={onConnectGroup}
+                  keepGroup={keepGroup}
                   renderConnection={renderConnection}
                 />
               </ul>

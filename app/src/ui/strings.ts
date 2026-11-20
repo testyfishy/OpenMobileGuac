@@ -1,3 +1,4 @@
+import { setAdminLocale } from './admin/adminStrings.ts';
 import { en, type Strings } from './i18n/en.ts';
 import { es } from './i18n/es.ts';
 import type { Locale } from './i18n/locale.ts';
@@ -29,6 +30,7 @@ export function setActiveLocale(locale: Locale): void {
   active = locale;
   strings = TABLES[locale];
   setSessionStrings(SESSION_TABLES[locale]);
+  setAdminLocale(locale);
   if (typeof document !== 'undefined') document.documentElement.lang = locale;
 }
 

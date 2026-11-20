@@ -62,6 +62,12 @@ export class LockService {
     return this.locked;
   }
 
+  /** Unlocked within `RECENT_MS` (or the lock is off): saved secrets may be read without a prompt. */
+  recentlyUnlocked(): boolean {
+    if (!this.enabled) return true;
+    return !this.locked && this.now() - this.lastUnlockAt < RECENT_MS;
+  }
+
   /** True while a system prompt is open or just closed (it can trigger pause/resume). */
   promptActive(): boolean {
     return this.inFlight !== null || this.now() - this.promptEndedAt < 1500;

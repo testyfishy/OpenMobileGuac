@@ -54,7 +54,16 @@ export function SessionHarness({
   features,
   onTunnel,
 }: SessionHarnessProps = {}): JSX.Element {
-  const [settings, setSettings] = useState<SessionSettings>(DEFAULT_SESSION_SETTINGS);
+  // `?legacy=1`: settings as stored before key sets (a per-connection layout and text combos).
+  const [settings, setSettings] = useState<SessionSettings>(() =>
+    typeof location !== 'undefined' && new URLSearchParams(location.search).has('legacy')
+      ? {
+          ...DEFAULT_SESSION_SETTINGS,
+          keyBarLayout: [['Esc', 'F2', 'combo:Ctrl+Alt+Delete']],
+          customCombos: ['Ctrl+Shift+Esc', 'Ctrl+K, Ctrl+C'],
+        }
+      : DEFAULT_SESSION_SETTINGS,
+  );
   const [run, setRun] = useState(0);
   const [exited, setExited] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);

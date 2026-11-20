@@ -1,20 +1,24 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
   backupFileName,
-  createBackup,
   decryptSecrets,
-  encryptSecrets,
   parseBackup,
   planRestore,
   type BackupFile,
   type BackupSecrets,
   type RestoreMode,
 } from '../../core/backup/backup.ts';
-import type { JsonValue } from '../../core/storage/ProfileStore.ts';
-import { secretKeys } from '../../core/storage/SecureStore.ts';
+import {
+  AUTO_BACKUP_KEEP_MAX,
+  AUTO_BACKUP_KEEP_MIN,
+  BACKUP_FREQUENCIES,
+  nextDueAt,
+  type BackupFrequency,
+  type StoredBackup,
+} from '../../core/backup/schedule.ts';
 import { Dialog } from '../components/Dialog.tsx';
 import { ErrorBanner, InfoBanner } from '../components/Feedback.tsx';
-import { Segmented, TextField, Toggle } from '../components/Form.tsx';
+import { RangeField, Segmented, TextField, Toggle } from '../components/Form.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { Screen } from '../components/Screen.tsx';
 import { useNav } from '../nav/NavContext.ts';
@@ -23,19 +27,49 @@ import { haptic, saveTextFile } from '../services/native.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { settingsFromBackup } from '../settings/settingsModel.ts';
 import { strings } from '../strings.ts';
+import {
+  buildBackup,
+  createBackupVault,
+  listStoredBackups,
+  loadAutoState,
+  loadBackupPassphrase,
+  runAutoBackup,
+  setBackupPassphrase,
+  type AutoBackupState,
+  type BackupVault,
+} from './backupService.ts';
 
 const MIN_PASSPHRASE = 8;
+
+/** A backup file chosen from the device's stored backups, handed to the restore section. */
+interface Loaded {
+  readonly name: string;
+  readonly text: string;
+  /** Changes on every load, so loading the same file again re-parses it. */
+  readonly seq: number;
+}
 
 /** SRV-10: export and restore servers, favourites, recents and settings as JSON. */
 export function BackupScreen() {
   const nav = useNav();
   const b = strings.backup;
+  const services = useServices();
+  const vault = useMemo(() => createBackupVault(services.kv), [services.kv]);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const importRef = useRef<HTMLElement>(null);
   return (
     <Screen title={b.title} onBack={nav.back}>
       <div className="form settings">
         <p className="muted">{b.intro}</p>
         <ExportSection />
-        <ImportSection />
+        <AutoSection
+          vault={vault}
+          onRestore={(name, text) => {
+            setLoaded((l) => ({ name, text, seq: (l?.seq ?? 0) + 1 }));
+            setTimeout(() => importRef.current?.scrollIntoView({ block: 'start' }), 0);
+          }}
+        />
+        <ImportSection key={loaded?.seq ?? 0} loaded={loaded} sectionRef={importRef} />
       </div>
     </Screen>
   );
@@ -62,42 +96,20 @@ function ExportSection() {
     setBusy(true);
     setMessage(undefined);
     try {
-      const profiles = await services.profiles.exportAll();
-      let secrets;
-      if (withSecrets) {
-        // Reading saved secrets goes through the same unlock as signing in.
-        if (
-          !(await services.lock.ensureUnlocked(strings.lock.credentialReason, strings.lock.cancel))
-        ) {
-          return;
-        }
-        const plain: Record<string, { password?: string; totpSeed?: string }> = {};
-        for (const p of profiles) {
-          const id = p.profile.id;
-          const password = await services.secure.get(secretKeys.password(id)).catch(() => null);
-          const totpSeed = await services.secure.get(secretKeys.totpSeed(id)).catch(() => null);
-          if (password || totpSeed) {
-            plain[id] = { ...(password ? { password } : {}), ...(totpSeed ? { totpSeed } : {}) };
-          }
-        }
-        secrets = await encryptSecrets(plain, pass);
+      // Reading saved secrets goes through the same unlock as signing in.
+      if (
+        withSecrets &&
+        !(await services.lock.ensureUnlocked(strings.lock.credentialReason, strings.lock.cancel))
+      ) {
+        return;
       }
       const now = Date.now();
-      const { lock: _lock, onboardingDone: _seen, ...portable } = settings;
-      void _lock;
-      void _seen;
-      const file = createBackup({
-        profiles,
-        settings: JSON.parse(JSON.stringify(portable)) as Record<string, JsonValue>,
-        appVersion: __APP_VERSION__,
-        now,
-        ...(secrets ? { secrets } : {}),
-      });
+      const built = await buildBackup(services, settings, withSecrets ? pass : null, now);
       const name = backupFileName(now);
-      const ok = await saveTextFile(name, JSON.stringify(file, null, 2));
+      const ok = await saveTextFile(name, JSON.stringify(built.file, null, 2));
       services.log.info(
         'backup',
-        `export ${ok ? 'saved' : 'failed'} (${profiles.length} servers, secrets: ${withSecrets})`,
+        `export ${ok ? 'saved' : 'failed'} (${built.servers} servers, secrets: ${withSecrets})`,
       );
       haptic(ok ? 'success' : 'error');
       setMessage(
@@ -159,22 +171,340 @@ function ExportSection() {
   );
 }
 
-function ImportSection() {
+function formatWhen(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/** Scheduled automatic backups: settings, passphrase, "Back up now" and the stored files. */
+function AutoSection({
+  vault,
+  onRestore,
+}: {
+  vault: BackupVault;
+  onRestore: (name: string, text: string) => void;
+}) {
+  const services = useServices();
+  const { settings, update } = useAppSettings();
+  const b = strings.backup;
+  const auto = settings.autoBackup;
+  const [state, setState] = useState<AutoBackupState>({ lastAt: null });
+  const [stored, setStored] = useState<StoredBackup[]>([]);
+  const [hasPass, setHasPass] = useState(false);
+  const [editPass, setEditPass] = useState(false);
+  const [pass, setPass] = useState('');
+  const [pass2, setPass2] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | undefined>();
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const [now, setNow] = useState(() => Date.now());
+
+  const load = useCallback(
+    () =>
+      Promise.all([
+        loadAutoState(services.kv),
+        listStoredBackups(vault),
+        loadBackupPassphrase(services),
+      ]),
+    [services, vault],
+  );
+  const apply = useCallback(([st, list, p]: Awaited<ReturnType<typeof load>>) => {
+    setState(st);
+    setStored(list);
+    setHasPass(p !== null);
+    setNow(Date.now());
+  }, []);
+  const refresh = async () => apply(await load());
+
+  useEffect(() => {
+    let live = true;
+    void load().then((r) => {
+      if (live) apply(r);
+    });
+    return () => {
+      live = false;
+    };
+  }, [load, apply]);
+
+  const setAuto = (patch: Partial<typeof auto>) =>
+    update({ ...settings, autoBackup: { ...auto, ...patch } });
+
+  const backUpNow = async () => {
+    setBusy(true);
+    setMessage(undefined);
+    const r = await runAutoBackup(services, settings, vault, Date.now(), { allowPrompt: true });
+    setBusy(false);
+    if (r.kind === 'done') {
+      haptic('success');
+      setMessage({
+        ok: true,
+        text: `${b.savedAuto(r.name)} (${r.secrets ? b.withSecrets : b.withoutSecrets})`,
+      });
+    } else if (r.kind === 'failed') {
+      haptic('error');
+      setMessage({ ok: false, text: b.lastFailed(r.error) });
+    }
+    await refresh();
+  };
+
+  const passError =
+    pass.length > 0 && pass.length < MIN_PASSPHRASE
+      ? b.passphraseShort
+      : pass2.length > 0 && pass !== pass2
+        ? b.passphraseMismatch
+        : undefined;
+
+  const next = nextDueAt(auto, state.lastAt, now);
+
+  return (
+    <section className="settings-group" aria-labelledby="bk-auto" data-section="auto-backup">
+      <h2 id="bk-auto" className="section-title">
+        {b.autoTitle}
+      </h2>
+      <Toggle
+        label={b.autoEnable}
+        hint={b.autoHint}
+        checked={auto.enabled}
+        onChange={(enabled) => setAuto({ enabled })}
+      />
+      {auto.enabled ? (
+        <>
+          <Segmented<BackupFrequency>
+            label={b.frequency}
+            value={auto.frequency}
+            onChange={(frequency) => setAuto({ frequency })}
+            options={BACKUP_FREQUENCIES.map((f) => ({ value: f, label: b.frequencies[f] ?? f }))}
+          />
+          <RangeField
+            label={b.keep}
+            value={auto.keep}
+            min={AUTO_BACKUP_KEEP_MIN}
+            max={AUTO_BACKUP_KEEP_MAX}
+            step={1}
+            onChange={(keep) => setAuto({ keep })}
+            format={b.keepFormat}
+          />
+        </>
+      ) : null}
+      <p className="field-hint" data-auto-last="">
+        {state.lastAt === null ? b.lastNever : b.lastBackup(formatWhen(state.lastAt))}
+      </p>
+      {next !== null ? (
+        <p className="field-hint" data-auto-next="">
+          {state.lastAt === null || next <= now ? b.nextSoon : b.nextBackup(formatWhen(next))}
+        </p>
+      ) : null}
+      {state.lastError ? <p className="field-error">{b.lastFailed(state.lastError)}</p> : null}
+
+      <h3 className="subsection-title">{b.passTitle}</h3>
+      <p className="field-hint">{b.passHint}</p>
+      {settings.lock.enabled ? <p className="field-hint">{b.passLockNote}</p> : null}
+      <p>{hasPass ? b.passSet : b.passNone}</p>
+      {editPass ? (
+        <>
+          <TextField
+            label={b.passphrase}
+            value={pass}
+            onChange={setPass}
+            type="password"
+            autoComplete="new-password"
+          />
+          <TextField
+            label={b.passphraseConfirm}
+            value={pass2}
+            onChange={setPass2}
+            type="password"
+            autoComplete="new-password"
+            error={passError}
+          />
+          <div className="form-actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setEditPass(false);
+                setPass('');
+                setPass2('');
+              }}
+            >
+              {strings.common.cancel}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={pass.length < MIN_PASSPHRASE || pass !== pass2}
+              onClick={() =>
+                void setBackupPassphrase(services, pass).then(() => {
+                  setEditPass(false);
+                  setPass('');
+                  setPass2('');
+                  setMessage({ ok: true, text: b.passSaved });
+                  void refresh();
+                })
+              }
+            >
+              {b.savePass}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="form-actions">
+          <button type="button" className="btn" onClick={() => setEditPass(true)}>
+            {hasPass ? b.changePass : b.setPass}
+          </button>
+          {hasPass ? (
+            <button
+              type="button"
+              className="btn btn-danger-ghost"
+              onClick={() =>
+                void setBackupPassphrase(services, null).then(() => {
+                  setMessage({ ok: true, text: b.passRemoved });
+                  void refresh();
+                })
+              }
+            >
+              {b.removePass}
+            </button>
+          ) : null}
+        </div>
+      )}
+
+      <button
+        type="button"
+        className="btn btn-primary"
+        disabled={busy}
+        data-action="backup-now"
+        onClick={() => void backUpNow()}
+      >
+        <Icon name="archive" /> {busy ? b.backingUp : b.backUpNow}
+      </button>
+      {message ? (
+        message.ok ? (
+          <InfoBanner>{message.text}</InfoBanner>
+        ) : (
+          <ErrorBanner error={{ code: 'backup-auto', title: message.text }} />
+        )
+      ) : null}
+
+      <h3 className="subsection-title">{b.storedTitle}</h3>
+      {vault.where === 'browser' ? <p className="field-hint">{b.storedBrowser}</p> : null}
+      {stored.length === 0 ? <p className="muted">{b.noneStored}</p> : null}
+      <ul className="list" data-stored-backups="">
+        {stored.map((s) => (
+          <li key={s.name} className="row edit-row" data-backup-name={s.name}>
+            <span className="row-text">{s.name}</span>
+            <span className="row-trailing">
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label={b.shareName(s.name)}
+                title={b.share}
+                onClick={() => void vault.read(s.name).then((text) => saveTextFile(s.name, text))}
+              >
+                <Icon name="share" />
+              </button>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label={b.restoreName(s.name)}
+                title={b.restoreThis}
+                onClick={() =>
+                  void vault
+                    .read(s.name)
+                    .then((text) => onRestore(s.name, text))
+                    .catch(() => setMessage({ ok: false, text: b.errors['read'] ?? '' }))
+                }
+              >
+                <Icon name="refresh" />
+              </button>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label={b.deleteName(s.name)}
+                title={b.deleteThis}
+                onClick={() => setConfirmDelete(s.name)}
+              >
+                <Icon name="trash" />
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {confirmDelete ? (
+        <Dialog
+          title={b.deleteConfirmTitle}
+          tone="danger"
+          onCancel={() => setConfirmDelete(null)}
+          actions={
+            <>
+              <button type="button" className="btn" onClick={() => setConfirmDelete(null)}>
+                {strings.common.cancel}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  const name = confirmDelete;
+                  setConfirmDelete(null);
+                  void vault
+                    .remove(name)
+                    .catch(() => undefined)
+                    .then(refresh);
+                }}
+              >
+                {b.deleteThis}
+              </button>
+            </>
+          }
+        >
+          <p>{b.deleteConfirmBody(confirmDelete)}</p>
+        </Dialog>
+      ) : null}
+    </section>
+  );
+}
+
+function ImportSection({
+  loaded,
+  sectionRef,
+}: {
+  loaded: Loaded | null;
+  sectionRef: RefObject<HTMLElement | null>;
+}) {
   const services = useServices();
   const sessions = useSessions();
   const { settings, update } = useAppSettings();
   const { bump } = useProfilesVersion();
   const b = strings.backup;
   const fileInput = useRef<HTMLInputElement>(null);
-  const [backup, setBackup] = useState<BackupFile | undefined>();
-  const [skipped, setSkipped] = useState(0);
-  const [error, setError] = useState<string | undefined>();
+  // A stored backup chosen above is parsed once on mount (the section is keyed by it).
+  const [initial] = useState(() => (loaded ? parseBackup(loaded.text) : null));
+  const [backup, setBackup] = useState<BackupFile | undefined>(
+    initial?.ok ? initial.backup : undefined,
+  );
+  const [skipped, setSkipped] = useState(initial?.ok ? initial.skipped : 0);
+  const [error, setError] = useState<string | undefined>(
+    initial && !initial.ok ? b.errors[initial.error] : undefined,
+  );
   const [mode, setMode] = useState<RestoreMode>('merge');
   const [withSettings, setWithSettings] = useState(true);
   const [pass, setPass] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
-  const [done, setDone] = useState<string | undefined>();
+  const [done, setDone] = useState<string | undefined>(
+    loaded && initial?.ok ? b.loaded(loaded.name) : undefined,
+  );
+
+  const onText = (text: string) => {
+    const parsed = parseBackup(text);
+    if (!parsed.ok) {
+      setError(b.errors[parsed.error]);
+      haptic('error');
+      return;
+    }
+    setBackup(parsed.backup);
+    setSkipped(parsed.skipped);
+  };
 
   const onFile = async (file: File | undefined) => {
     setBackup(undefined);
@@ -188,14 +518,7 @@ function ImportSection() {
       setError(b.errors['read']);
       return;
     }
-    const parsed = parseBackup(text);
-    if (!parsed.ok) {
-      setError(b.errors[parsed.error]);
-      haptic('error');
-      return;
-    }
-    setBackup(parsed.backup);
-    setSkipped(parsed.skipped);
+    onText(text);
   };
 
   const restore = async () => {
@@ -245,7 +568,7 @@ function ImportSection() {
 
   const date = backup?.exportedAt ? new Date(backup.exportedAt) : undefined;
   return (
-    <section className="settings-group" aria-labelledby="bk-import">
+    <section className="settings-group" aria-labelledby="bk-import" ref={sectionRef}>
       <h2 id="bk-import" className="section-title">
         {b.importTitle}
       </h2>

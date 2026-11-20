@@ -228,3 +228,64 @@ describe('share-link sessions (CON-6)', () => {
     expect(changes).toBe(2);
   });
 });
+
+describe('sign out of all servers', () => {
+  const SESSION = `${BASE}/api/session`;
+
+  it('removes passwords, tokens and TOTP seeds of every server and revokes stored tokens', async () => {
+    const http = new FakeHttpClient()
+      .on('POST', TOKENS, () => jsonResponse(200, authResultJson))
+      .on('DELETE', SESSION, () => jsonResponse(204, null));
+    const { auth, profile, profiles, secure } = await setup(http);
+    const other = await profiles.add({
+      name: 'Other',
+      baseUrl: 'https://other.example/guacamole/',
+      rememberPassword: true,
+    });
+    // A live session on the first server; only a stored token on the second (app restarted).
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: true, extra: {} });
+    await secure.set(secretKeys.totpSeed(profile.id), 'otpauth://totp/x?secret=ABC');
+    await secure.set(secretKeys.authToken(other.id), 'stored-token');
+    await secure.set(secretKeys.password(other.id), 'pw2');
+    http.on('DELETE', 'https://other.example/guacamole/api/session', () => jsonResponse(204, null));
+    const changed: string[] = [];
+    auth.onSessionChange((id) => changed.push(id));
+
+    const r = await auth.signOutEverywhere(await profiles.list());
+
+    for (const id of [profile.id, other.id]) {
+      for (const key of secretKeys.all(id)) expect(await secure.get(key), key).toBeNull();
+      expect(auth.current(id)).toBeUndefined();
+    }
+    expect(changed.sort()).toEqual([profile.id, other.id].sort());
+    const deletes = http.requests.filter((q) => q.method === 'DELETE');
+    expect(deletes.map((q) => q.headers?.['Guacamole-Token']).sort()).toEqual(
+      [authResultJson.authToken, 'stored-token'].sort(),
+    );
+    expect(r.serverSignOuts).toBe(2);
+    // Server entries are kept (removing them is the caller's separate choice).
+    expect((await profiles.list()).length).toBe(2);
+  });
+
+  it('still removes local secrets when a server cannot be reached', async () => {
+    const http = new FakeHttpClient().on('DELETE', SESSION, (req) => {
+      throw new HttpTransportError('unreachable', req.url, 'offline');
+    });
+    const { auth, profile, secure } = await setup(http);
+    await secure.set(secretKeys.authToken(profile.id), 'tok');
+    await secure.set(secretKeys.password(profile.id), 'pw');
+    const r = await auth.signOutEverywhere([profile]);
+    expect(await secure.get(secretKeys.authToken(profile.id))).toBeNull();
+    expect(await secure.get(secretKeys.password(profile.id))).toBeNull();
+    expect(r.serverSignOuts).toBe(0);
+  });
+
+  it('makes no server call for a server without a token', async () => {
+    const http = new FakeHttpClient();
+    const { auth, profile, secure } = await setup(http);
+    await secure.set(secretKeys.password(profile.id), 'pw');
+    await auth.signOutEverywhere([profile]);
+    expect(http.requests).toEqual([]);
+    expect(await secure.get(secretKeys.password(profile.id))).toBeNull();
+  });
+});

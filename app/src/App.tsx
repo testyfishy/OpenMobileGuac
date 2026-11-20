@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { parseAppLink } from './core/links/links.ts';
 import { deliverSsoCallback } from './ui/auth/ssoFlow.ts';
+import { AutoBackupRunner } from './ui/backup/AutoBackupRunner.tsx';
 import { BackupScreen } from './ui/backup/BackupScreen.tsx';
 import { EmptyState } from './ui/components/Feedback.tsx';
 import { ToastProvider } from './ui/components/Toast.tsx';
@@ -122,6 +123,7 @@ export default function App({
           <ToastProvider>
             <LaunchContext.Provider value={launch}>
               <SessionsProvider>
+                <AutoBackupRunner />
                 <NavWithSessions native={services.native}>
                   <Shell />
                 </NavWithSessions>

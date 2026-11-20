@@ -5,6 +5,9 @@ import { matchLocale, parseLanguagePreference, resolveLocale } from './locale.ts
 import { sessionEs } from './session.es.ts';
 import { sessionStrings, sessionStringsEn } from '../session/sessionStrings.ts';
 import { setActiveLocale } from '../strings.ts';
+import { adminStrings } from '../admin/adminStrings.ts';
+import { adminEn } from './admin.en.ts';
+import { adminEs } from './admin.es.ts';
 
 describe('locale selection', () => {
   it('uses the first supported device language', () => {
@@ -76,5 +79,26 @@ describe('Spanish session table', () => {
     } finally {
       setActiveLocale('en');
     }
+  });
+});
+
+describe('Spanish connection-management table', () => {
+  it('has exactly the English keys, all non-empty, mostly translated', () => {
+    const e = leaves(adminEn);
+    const s = leaves(adminEs);
+    expect([...s.keys()].sort()).toEqual([...e.keys()].sort());
+    for (const [k, v] of s) expect(v.trim(), k).not.toBe('');
+    const same = [...s].filter(([k, v]) => e.get(k) === v).length;
+    expect(same / s.size).toBeLessThan(0.15);
+  });
+
+  it('follows the active locale', () => {
+    try {
+      setActiveLocale('es');
+      expect(adminStrings).toBe(adminEs);
+    } finally {
+      setActiveLocale('en');
+    }
+    expect(adminStrings).toBe(adminEn);
   });
 });

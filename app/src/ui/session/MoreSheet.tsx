@@ -1,84 +1,137 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ChromeButton } from './ChromeButton.tsx';
 import {
-  IconBack,
-  IconClipboard,
-  IconCombo,
-  IconFolder,
-  IconInfo,
-  IconKeys,
-  IconPaste,
+  IconCursorLarge,
+  IconDrag,
+  IconFullscreen,
   IconPower,
-  IconShield,
-  IconSliders,
-  IconVolume,
+  IconScroll,
+  IconSplit,
+  IconTextBar,
+  IconToolbar,
 } from './icons.tsx';
+import {
+  buildSessionActions,
+  type SessionAction,
+  type SessionActionContext,
+} from './sessionActions.tsx';
 import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
+/** On/off settings shown as switches in the More sheet. */
+export interface MoreToggles {
+  readonly naturalScroll: boolean;
+  readonly tapDrag: boolean;
+  readonly largeCursor: boolean;
+  readonly textInputBar: boolean;
+  /** Effective split layout (the `auto` setting resolved for the fold). */
+  readonly split: boolean;
+  readonly immersive: boolean;
+}
+
 export interface MoreSheetProps {
-  /** Show the one-tap Ctrl+Alt+Del (RDP / VNC). */
-  readonly showCtrlAltDel: boolean;
-  readonly audioMuted: boolean;
-  /** An audio stream is open (otherwise the toggle still works, with a hint). */
+  readonly context: SessionActionContext;
+  readonly toggles: MoreToggles;
+  readonly pointerMode: string;
   readonly audioActive: boolean;
-  readonly keyBarOpen: boolean;
-  readonly activeTransfers: number;
   readonly hasFilesystem: boolean;
-  readonly onFiles: () => void;
-  readonly onClipboard: () => void;
-  readonly onToggleAudio: () => void;
-  readonly onToggleKeyBar: () => void;
-  readonly onInput: () => void;
-  readonly onCombos: () => void;
-  readonly onCtrlAltDel: () => void;
-  readonly onTypeClipboard: () => void;
-  readonly onInfo: () => void;
-  /** Back to the connection list with the session kept open (`onMinimize`). */
-  readonly onMinimize?: () => void;
-  readonly onDisconnect: () => void;
+  readonly onToggle: (key: keyof MoreToggles, on: boolean) => void;
+  readonly onEditToolbar: () => void;
   readonly onClose: () => void;
 }
 
 const CONFIRM_MS = 3000;
 
-function Tile({
+function Row({
   icon,
   label,
   hint,
-  pressed,
-  danger,
+  badge,
   onClick,
+  sheet,
 }: {
   icon: ReactNode;
   label: string;
   hint?: string;
-  pressed?: boolean;
-  danger?: boolean;
+  badge?: number;
   onClick: () => void;
+  sheet?: boolean;
 }) {
-  const cls = ['omg-tile', pressed ? 'omg-tile--on' : '', danger ? 'omg-tile--danger' : '']
-    .filter(Boolean)
-    .join(' ');
   return (
     <ChromeButton
-      className={cls}
-      aria-pressed={pressed}
-      onClick={onClick}
+      className="omg-row"
+      aria-haspopup={sheet ? 'dialog' : undefined}
       aria-label={hint ? `${label}. ${hint}` : label}
+      onClick={onClick}
     >
-      {icon}
-      <span className="omg-tile__label">{label}</span>
-      {hint && (
-        <span className="omg-tile__hint" aria-hidden="true">
-          {hint}
+      <span className="omg-row__icon">{icon}</span>
+      <span className="omg-row__text">
+        <span className="omg-row__label">{label}</span>
+        {hint && (
+          <span className="omg-row__hint" aria-hidden="true">
+            {hint}
+          </span>
+        )}
+      </span>
+      {(badge ?? 0) > 0 && (
+        <span className="omg-row__badge" aria-hidden="true">
+          {badge}
         </span>
       )}
+      {sheet && <span className="omg-row__chevron" aria-hidden="true" />}
     </ChromeButton>
   );
 }
 
-/** Secondary session actions, one tap away from the compact toolbar. */
+function SwitchRow({
+  icon,
+  label,
+  hint,
+  on,
+  onToggle,
+}: {
+  icon: ReactNode;
+  label: string;
+  hint?: string;
+  on: boolean;
+  onToggle: (on: boolean) => void;
+}) {
+  return (
+    <ChromeButton
+      className="omg-row"
+      role="switch"
+      aria-checked={on}
+      aria-label={hint ? `${label}. ${hint}` : label}
+      onClick={() => onToggle(!on)}
+    >
+      <span className="omg-row__icon">{icon}</span>
+      <span className="omg-row__text">
+        <span className="omg-row__label">{label}</span>
+        {hint && (
+          <span className="omg-row__hint" aria-hidden="true">
+            {hint}
+          </span>
+        )}
+      </span>
+      <span className={on ? 'omg-switch omg-switch--on' : 'omg-switch'} aria-hidden="true" />
+    </ChromeButton>
+  );
+}
+
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="omg-group" aria-label={title}>
+      <h3 className="omg-section__title">{title}</h3>
+      <div className="omg-group__rows">{children}</div>
+    </section>
+  );
+}
+
+/**
+ * Every session action, grouped (Input, View, Clipboard and files, Sound, Session) with the
+ * most used first. On/off settings are switches that apply at once and keep the sheet open;
+ * Disconnect sits apart and asks for a second tap.
+ */
 export function MoreSheet(p: MoreSheetProps) {
   const [confirmExit, setConfirmExit] = useState(false);
   useEffect(() => {
@@ -87,76 +140,162 @@ export function MoreSheet(p: MoreSheetProps) {
     return () => clearTimeout(t);
   }, [confirmExit]);
   const t = sessionStrings.more;
+  const a = buildSessionActions(p.context);
+  const run = (x: SessionAction) => () => x.onRun();
+  const sw = (x: SessionAction, label: string, hint?: string) => (
+    <SwitchRow
+      icon={x.icon}
+      label={label}
+      {...(hint ? { hint } : {})}
+      on={x.pressed ?? false}
+      onToggle={() => x.onRun()}
+    />
+  );
+  const tog = (key: keyof MoreToggles, icon: ReactNode, label: string, hint?: string) => (
+    <SwitchRow
+      icon={icon}
+      label={label}
+      {...(hint ? { hint } : {})}
+      on={p.toggles[key]}
+      onToggle={(on) => p.onToggle(key, on)}
+    />
+  );
 
   return (
-    <Sheet title={t.title} onClose={p.onClose}>
-      <div className="omg-tiles">
-        <Tile
-          icon={<IconFolder />}
+    <Sheet title={t.title} onClose={p.onClose} className="omg-sheet--more">
+      <Group title={t.groups.input}>
+        {sw(a.keyboard, t.keyboard, t.keyboardHint)}
+        {sw(a['extra-keys'], t.extraKeys, t.extraKeysHint)}
+        <Row
+          icon={a.pointer.icon}
+          label={t.pointerMode}
+          hint={t.tapToSwitch(a.pointer.label)}
+          onClick={run(a.pointer)}
+        />
+        <Row icon={a.combos.icon} label={t.keyCombos} onClick={run(a.combos)} sheet />
+        <Row
+          icon={a['key-sets'].icon}
+          label={a['key-sets'].name}
+          onClick={run(a['key-sets'])}
+          sheet
+        />
+        {a['ctrl-alt-del'].available && (
+          <Row
+            icon={a['ctrl-alt-del'].icon}
+            label="Ctrl+Alt+Del"
+            hint={t.sendNow}
+            onClick={run(a['ctrl-alt-del'])}
+          />
+        )}
+        {tog('naturalScroll', <IconScroll />, t.naturalScroll)}
+        {p.pointerMode === 'trackpad' && tog('tapDrag', <IconDrag />, t.tapDrag)}
+        {tog('largeCursor', <IconCursorLarge />, t.largeCursor)}
+        {tog('textInputBar', <IconTextBar />, t.textInputBar)}
+        <Row
+          icon={a.options.icon}
+          label={t.inputOptions}
+          hint={t.optionsHint}
+          onClick={run(a.options)}
+          sheet
+        />
+      </Group>
+
+      <Group title={t.groups.view}>
+        <Row icon={a.view.icon} label={t.viewAndZoom} onClick={run(a.view)} sheet />
+        <Row icon={a['zoom-reset'].icon} label={t.resetZoom} onClick={run(a['zoom-reset'])} />
+        {tog('split', <IconSplit />, t.splitLayout, t.splitLayoutHint)}
+        {tog('immersive', <IconFullscreen />, t.immersive, t.immersiveHint)}
+      </Group>
+
+      <Group title={t.groups.clipFiles}>
+        <Row icon={a.paste.icon} label={t.paste} hint={t.pasteHint} onClick={run(a.paste)} />
+        <Row
+          icon={a.clipboard.icon}
+          label={t.clipboard}
+          hint={t.clipboardHint}
+          onClick={run(a.clipboard)}
+          sheet
+        />
+        <Row
+          icon={a['type-clipboard'].icon}
+          label={t.typeClipboard}
+          hint={t.asKeystrokes}
+          onClick={run(a['type-clipboard'])}
+        />
+        <Row
+          icon={a.files.icon}
           label={t.files}
           hint={
-            p.activeTransfers > 0
-              ? t.running(p.activeTransfers)
+            (a.files.badge ?? 0) > 0
+              ? t.running(a.files.badge ?? 0)
               : p.hasFilesystem
                 ? t.browseRemote
                 : t.sendOrReceive
           }
-          onClick={p.onFiles}
+          {...(a.files.badge ? { badge: a.files.badge } : {})}
+          onClick={run(a.files)}
+          sheet
         />
-        <Tile
-          icon={<IconClipboard />}
-          label={t.clipboard}
-          hint={t.clipboardHint}
-          onClick={p.onClipboard}
+      </Group>
+
+      <Group title={t.groups.sound}>
+        <SwitchRow
+          icon={a.sound.icon}
+          label={t.sound}
+          hint={p.audioActive ? t.soundHint : t.noAudio}
+          on={!(a.sound.pressed ?? false)}
+          onToggle={() => a.sound.onRun()}
         />
-        <Tile
-          icon={<IconVolume muted={p.audioMuted} />}
-          label={p.audioMuted ? sessionStrings.toasts.soundOff : sessionStrings.toasts.soundOn}
-          hint={p.audioActive ? undefined : t.noAudio}
-          pressed={!p.audioMuted}
-          onClick={p.onToggleAudio}
+      </Group>
+
+      <Group title={t.groups.session}>
+        <Row
+          icon={<IconToolbar />}
+          label={t.toolbarButtons}
+          hint={t.toolbarButtonsHint}
+          onClick={p.onEditToolbar}
+          sheet
         />
-        <Tile
-          icon={<IconKeys />}
-          label={t.extraKeys}
-          pressed={p.keyBarOpen}
-          onClick={p.onToggleKeyBar}
+        <Row
+          icon={a.info.icon}
+          label={t.sessionInfo}
+          hint={t.infoHint}
+          onClick={run(a.info)}
+          sheet
         />
-        <Tile icon={<IconCombo />} label={t.keyCombos} onClick={p.onCombos} />
-        {p.showCtrlAltDel && (
-          <Tile
-            icon={<IconShield />}
-            label="Ctrl+Alt+Del"
-            hint={t.sendNow}
-            onClick={p.onCtrlAltDel}
-          />
-        )}
-        <Tile
-          icon={<IconPaste />}
-          label={t.typeClipboard}
-          hint={t.asKeystrokes}
-          onClick={p.onTypeClipboard}
-        />
-        <Tile icon={<IconSliders />} label={t.inputOptions} onClick={p.onInput} />
-        <Tile icon={<IconInfo />} label={t.sessionInfo} onClick={p.onInfo} />
-        {p.onMinimize && (
-          <Tile
-            icon={<IconBack />}
+        {a.back.available && (
+          <Row
+            icon={a.back.icon}
             label={t.backToConnections}
             hint={t.keepOpen}
-            onClick={p.onMinimize}
+            onClick={run(a.back)}
           />
         )}
-        <Tile
-          icon={<IconPower />}
-          label={confirmExit ? t.tapAgain : t.disconnect}
-          danger
-          pressed={confirmExit}
+      </Group>
+
+      <div className="omg-more__danger">
+        <ChromeButton
+          className={
+            confirmExit ? 'omg-row omg-row--danger omg-row--confirm' : 'omg-row omg-row--danger'
+          }
+          aria-label={confirmExit ? t.tapAgain : `${t.disconnect}. ${t.disconnectHint}`}
           onClick={() => {
-            if (confirmExit) p.onDisconnect();
+            if (confirmExit) a.disconnect.onRun();
             else setConfirmExit(true);
           }}
-        />
+        >
+          <span className="omg-row__icon">
+            <IconPower />
+          </span>
+          <span className="omg-row__text">
+            <span className="omg-row__label">{confirmExit ? t.tapAgain : t.disconnect}</span>
+            {!confirmExit && (
+              <span className="omg-row__hint" aria-hidden="true">
+                {t.disconnectHint}
+              </span>
+            )}
+          </span>
+        </ChromeButton>
       </div>
     </Sheet>
   );

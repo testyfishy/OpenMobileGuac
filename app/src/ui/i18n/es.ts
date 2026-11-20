@@ -410,6 +410,58 @@ export const es: Strings = {
   },
 
   settings: {
+    keysTitle: 'Teclas y combinaciones',
+    keysHint:
+      'Conjuntos para la barra de teclas extra y tus combinaciones de teclas guardadas, para todas las sesiones. Cada conexión recuerda el último conjunto que usó.',
+    keySetsButton: 'Conjuntos de teclas',
+    keySetsSummary: (n: number) => `${n} propios, 6 integrados`,
+    combosButton: 'Combinaciones guardadas',
+    combosSummary: (n: number) => `${n} guardadas`,
+    signOutAll: 'Cerrar sesión en todos los servidores',
+    signOutAllHint:
+      'Elimina de este dispositivo los datos de inicio de sesión guardados de todos los servidores.',
+    signOutTitle: '¿Cerrar sesión en todos los servidores?',
+    signOutBody: 'Para cada servidor guardado, se elimina de este dispositivo:',
+    signOutItems: [
+      'Las contraseñas guardadas',
+      'Los tokens de sesión (también se pide a cada servidor que cierre la sesión, si está accesible)',
+      'Las claves de doble factor (TOTP) guardadas',
+    ],
+    signOutKeeps:
+      'Se conservan los servidores, favoritos, recientes y todos los ajustes. Se conserva la frase de contraseña de las copias.',
+    signOutSessions: (n: number) =>
+      `Se cerrarán ${n} ${plural(n, 'sesión abierta', 'sesiones abiertas')}.`,
+    removeServers: 'Eliminar también los servidores',
+    removeServersHint:
+      'También elimina cada servidor con sus favoritos, recientes, ajustes por conexión y miniaturas.',
+    signOutConfirm: 'Cerrar sesión',
+    signOutConfirmRemove: 'Cerrar sesión y eliminar servidores',
+    signingOut: 'Cerrando sesión…',
+    signedOut: (n: number) => `Sesión cerrada en ${n} ${plural(n, 'servidor', 'servidores')}.`,
+    signedOutRemoved: (n: number) =>
+      `Sesión cerrada y ${n} ${plural(n, 'servidor eliminado', 'servidores eliminados')}.`,
+    keepAlive: 'Mantener las sesiones conectadas en segundo plano',
+    keepAliveHintAndroid:
+      'Mientras haya al menos una sesión abierta, Android muestra una notificación (con Desconectar todas) y mantiene la conexión al cambiar de app o apagarse la pantalla. Usa más batería y datos. Desactivado: las sesiones se desconectan tras el tiempo de arriba.',
+    keepAliveHintIos:
+      'No disponible en iOS: iOS suspende las apps en segundo plano, así que las sesiones se desconectan tras el tiempo de arriba. Al volver a la app se reconectan enseguida.',
+    keepAliveHintWeb: 'Disponible solo en la app de Android.',
+    keepAliveExplainTitle: '¿Permitir la notificación?',
+    keepAliveExplain:
+      'Para mantener una sesión conectada en segundo plano, Android exige una notificación mientras funciona. Permite las notificaciones en la siguiente pantalla para verla (con su botón Desconectar todas).',
+    keepAliveContinue: 'Continuar',
+    keepAliveDenied:
+      'Las notificaciones de esta app están desactivadas: las sesiones siguen conectadas, pero la notificación no se ve. Puedes permitirlas en los ajustes de Android.',
+    keepAliveBattery:
+      'Algunos teléfonos detienen igualmente las apps en segundo plano para ahorrar batería. Si las sesiones se cortan, pon el uso de batería de la app en Sin restricciones en Ajustes de Android › Aplicaciones.',
+    keepAliveOnSince: 'Activo: las sesiones siguen conectadas en segundo plano.',
+    notifTitle: (n: number) =>
+      `${n} ${plural(n, 'sesión remota conectada', 'sesiones remotas conectadas')}`,
+    notifBody: 'Toca para volver a la app.',
+    notifDisconnectAll: 'Desconectar todas',
+    channelName: 'Sesiones conectadas',
+    channelDescription:
+      'Se muestra mientras las sesiones remotas siguen conectadas en segundo plano',
     title: 'Ajustes',
     appearance: 'Apariencia',
     theme: 'Tema',
@@ -486,9 +538,63 @@ export const es: Strings = {
     storageDev: 'Versión de desarrollo: se guardan SIN CIFRAR en el almacenamiento del navegador.',
     storageMemory:
       'La contraseña aún no se guarda en este dispositivo: se conserva en memoria hasta cerrar la app.',
+    showDemo: 'Servidor de demostración en la lista',
+    showDemoAuto: 'Automático',
+    showDemoShow: 'Mostrar',
+    showDemoHide: 'Ocultar',
+    showDemoHint:
+      'Automático lo muestra solo mientras no hay ningún servidor guardado. La demostración funciona sin conexión y siempre se puede volver a mostrar aquí.',
   },
 
   backup: {
+    autoTitle: 'Copias automáticas',
+    autoEnable: 'Hacer copias automáticamente',
+    autoHint:
+      'Se hace la próxima vez que abras la app después de que toque: los teléfonos no dejan que la app se ejecute según un horario en segundo plano. Las copias se guardan en el almacenamiento privado de la app en este dispositivo.',
+    frequency: 'Frecuencia',
+    frequencies: {
+      daily: 'Diaria',
+      weekly: 'Semanal',
+      monthly: 'Mensual',
+    } as Record<string, string>,
+    keep: 'Conservar las más recientes',
+    keepFormat: (n: number) => `${n} ${plural(n, 'copia', 'copias')}`,
+    lastBackup: (when: string) => `Última copia automática: ${when}`,
+    lastNever: 'Última copia automática: nunca',
+    nextBackup: (when: string) => `Siguiente: la primera vez que abras la app después del ${when}`,
+    nextSoon: 'Siguiente: la próxima vez que abras la app',
+    lastFailed: (error: string) => `La última copia automática falló (${error}).`,
+    backUpNow: 'Hacer copia ahora',
+    backingUp: 'Haciendo la copia…',
+    savedAuto: (name: string) => `Guardada ${name}.`,
+    storedTitle: 'Copias en este dispositivo',
+    storedBrowser: 'Versión de desarrollo: se guardan en el almacenamiento de este navegador.',
+    noneStored: 'Aún no hay copias automáticas.',
+    share: 'Compartir',
+    shareName: (name: string) => `Compartir ${name}`,
+    restoreThis: 'Restaurar',
+    restoreName: (name: string) => `Restaurar ${name}`,
+    deleteThis: 'Eliminar',
+    deleteName: (name: string) => `Eliminar ${name}`,
+    deleteConfirmTitle: '¿Eliminar esta copia?',
+    deleteConfirmBody: (name: string) =>
+      `Se elimina ${name} de este dispositivo. No se puede deshacer.`,
+    loaded: (name: string) => `Cargada ${name}. Elige abajo cómo restaurarla.`,
+    passTitle: 'Frase de contraseña de las copias',
+    passHint:
+      'Con una frase de contraseña, las copias automáticas también incluyen tus contraseñas guardadas y claves de doble factor, cifradas con ella. Sin ella, no incluyen secretos. La frase se guarda solo en el almacenamiento seguro del dispositivo y nunca va en una copia.',
+    passLockNote:
+      'Con el bloqueo de la app activado, los secretos solo se incluyen si la copia se hace justo después de desbloquear la app.',
+    passSet: 'Hay una frase de contraseña: las copias automáticas incluyen contraseñas cifradas.',
+    passNone: 'Sin frase de contraseña: las copias automáticas no incluyen secretos.',
+    setPass: 'Definir frase de contraseña',
+    changePass: 'Cambiar la frase de contraseña',
+    removePass: 'Quitar la frase de contraseña',
+    savePass: 'Guardar la frase de contraseña',
+    passSaved: 'Frase de contraseña guardada.',
+    passRemoved: 'Frase de contraseña quitada.',
+    withSecrets: 'con contraseñas cifradas',
+    withoutSecrets: 'sin secretos',
     title: 'Copia de seguridad y restauración',
     intro:
       'Una copia de seguridad es un archivo JSON con tus servidores, favoritos, recientes y los ajustes de cada conexión y de la app. Las contraseñas, los tokens de sesión y las claves de doble factor quedan fuera salvo que elijas lo contrario.',

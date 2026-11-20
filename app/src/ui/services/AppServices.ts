@@ -1,3 +1,4 @@
+import { GuacAdminApi } from '../../core/api/GuacAdminApi.ts';
 import { GuacApi } from '../../core/api/GuacApi.ts';
 import { Logger } from '../../core/diagnostics/log.ts';
 import { LoggingHttpClient } from '../../core/diagnostics/LoggingHttpClient.ts';
@@ -32,6 +33,8 @@ export interface AppServices {
   readonly api: GuacApi;
   /** For probing URLs: a short timeout, because up to four candidates are tried in turn. */
   readonly probeApi: GuacApi;
+  /** Connection management (docs/protocol-notes.md §8). */
+  readonly admin: GuacAdminApi;
   readonly auth: AuthService;
   readonly settings: SettingsStore;
   readonly devServer: DevServer | undefined;
@@ -43,10 +46,16 @@ export interface AppServices {
   readonly lock: LockService;
 }
 
-export function createAppServices(): AppServices {
+/** Dev harnesses only (`?harness=admin`): swap the HTTP stack and the dev-server entry. */
+export interface AppServiceOverrides {
+  readonly http?: HttpClient;
+  readonly devServer?: DevServer;
+}
+
+export function createAppServices(overrides: AppServiceOverrides = {}): AppServices {
   const native = isNativePlatform();
   const log = new Logger();
-  const http = new LoggingHttpClient(createHttpClient(), log);
+  const http = new LoggingHttpClient(overrides.http ?? createHttpClient(), log);
   const kv = createKeyValueStore();
   const secure = createSecureStore();
   const secretStorage: SecretStorageKind = secure.protectedAtRest
@@ -57,8 +66,9 @@ export function createAppServices(): AppServices {
   const profiles = new ProfileStore(kv, { secureStore: secure, isEphemeral: isShareServerId });
   const api = new GuacApi(http, { timeoutMs: 20_000 });
   const probeApi = new GuacApi(http, { timeoutMs: 6_000 });
+  const admin = new GuacAdminApi(http, { timeoutMs: 20_000 });
   const auth = new AuthService(api, secure, profiles, log);
-  const devServer = getDevServer();
+  const devServer = overrides.devServer ?? getDevServer();
   if (devServer) auth.setVirtualPassword(devServer.profile.id, devServer.password);
   const lock = new LockService();
   // SRV-6(b): the one gate before any saved credential is used to sign in. The prompt text
@@ -76,6 +86,7 @@ export function createAppServices(): AppServices {
     profiles,
     api,
     probeApi,
+    admin,
     auth,
     settings: new SettingsStore(kv),
     devServer,

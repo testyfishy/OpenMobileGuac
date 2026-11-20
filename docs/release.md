@@ -244,6 +244,57 @@ the export-compliance question for every build so TestFlight builds don't stop a
 
 ---
 
+## Foreground service (Android background keep-alive)
+
+The optional setting "Keep sessions connected in the background" (off by default; Android
+only) starts a foreground service while at least one remote session is open, using
+`@capawesome-team/capacitor-android-foreground-service` 8.1.0 (MIT). Manifest entries
+(`android/app/src/main/AndroidManifest.xml`): `FOREGROUND_SERVICE`,
+`FOREGROUND_SERVICE_SPECIAL_USE`, `POST_NOTIFICATIONS` (runtime prompt on Android 13+, asked
+when the user turns the setting on, after an in-app explanation), `WAKE_LOCK` (the plugin
+holds a partial wake lock while the service runs), the plugin's `AndroidForegroundService`
+with `android:foregroundServiceType="specialUse"` and the
+`android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE` property, and its
+`NotificationActionBroadcastReceiver` (not exported). The notification icon is
+`res/drawable/ic_stat_session.xml`. The JS side passes
+`FOREGROUND_SERVICE_TYPE_SPECIAL_USE` (`0x40000000`) to `startForeground`
+(`ui/services/keepAlive.ts`). `SYSTEM_ALERT_WINDOW`, which the plugin's README lists for
+`moveToForeground()`, is not added (not used).
+
+Why `specialUse`: of the Android 14 types, `dataSync` is for finite transfers (upload,
+backup, sync, import/export) and is time-limited from Android 15; `connectedDevice` is for
+Bluetooth / USB / NFC / IR or similar external devices and needs a related permission the
+app does not have; `remoteMessaging` is for moving text messages between devices;
+`mediaProjection` is for screen capture; `shortService` stops after about 3 minutes. Keeping an
+interactive remote desktop connection open fits none of them, which is what `specialUse`
+(reviewed in the Play Console) is for. Sources checked 2026-11-20: Android's foreground
+service types page, the Android 15 behavior changes (`dataSync`: 6 hours per 24 hours), and
+Play Console Help "Understanding foreground service and full-screen intent requirements"
+(special use only when no defined type fits; every type is reviewed; the declaration needs a
+description, the user impact if the task is deferred or interrupted, and a video). That page
+does not mention remote desktop clients, so approval is not guaranteed; if Play rejects
+`specialUse`, the fallback is to keep the setting off in Play builds.
+
+**Play Console › App content › Foreground service permissions**: declare *Special use* and
+paste:
+
+> OpenMobileGuac is a remote desktop client for Apache Guacamole. When the user turns on
+> "Keep sessions connected in the background" (off by default), a foreground service runs
+> only while at least one remote desktop session that the user opened is connected. It keeps
+> the WebSocket connection to the user's own Guacamole server open when the user switches to
+> another app or the screen turns off, so the remote session (and the work in it) is not
+> dropped. The notification shows how many sessions are connected and has a "Disconnect all"
+> action; the service stops as soon as the last session closes. No data is collected; the
+> connection goes only to the server the user added. The work cannot be deferred or
+> interrupted, because the remote session would be disconnected.
+
+Video for the declaration: open a demo or test session, turn the setting on, switch apps,
+show the notification, return to the still-connected session, tap Disconnect all.
+
+iOS: no background mode is added. iOS does not allow keeping a remote desktop connection open
+in the background for this kind of app (adding one would fail App Review), so sessions keep
+the grace-period disconnect and reconnect on return.
+
 ## Network configuration
 
 Users connect to self-hosted Guacamole servers, usually on private networks (Tailscale

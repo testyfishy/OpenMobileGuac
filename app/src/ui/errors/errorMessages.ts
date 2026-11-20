@@ -1,4 +1,5 @@
 import { GuacApiError, type GuacErrorInfo } from '../../core/api/errors.ts';
+import { adminStrings } from '../admin/adminStrings.ts';
 import { strings } from '../strings.ts';
 
 /** A human-readable error for the UI (SPEC SRV-2: each failure kind reads differently). */
@@ -61,6 +62,18 @@ export function describeGuacError(info: GuacErrorInfo, ctx: ErrorContext = {}): 
         code: 'session-expired',
         title: e.sessionExpired.title,
         detail: e.sessionExpired.detail,
+      };
+    case 'permission-denied':
+      return {
+        code: 'permission-denied',
+        title: adminStrings.denied.title,
+        detail: adminStrings.denied.detail,
+      };
+    case 'not-found':
+      return {
+        code: 'not-found',
+        title: adminStrings.notFound.title,
+        detail: adminStrings.notFound.detail,
       };
     case 'invalid-response':
       return {

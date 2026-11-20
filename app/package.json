@@ -36,6 +36,7 @@
     "@capacitor/privacy-screen": "^2.0.1",
     "@capacitor/share": "^8.0.3",
     "@capacitor/status-bar": "^8.0.4",
+    "@capawesome-team/capacitor-android-foreground-service": "^8.1.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

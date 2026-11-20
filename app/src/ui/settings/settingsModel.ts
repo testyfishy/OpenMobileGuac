@@ -1,3 +1,14 @@
+import {
+  DEFAULT_AUTO_BACKUP,
+  parseAutoBackupSettings,
+  type AutoBackupSettings,
+} from '../../core/backup/schedule.ts';
+import {
+  DEFAULT_KEY_LIBRARY,
+  migrateLegacyLibrary,
+  normalizeKeyLibrary,
+  type KeyLibrary,
+} from '../../session/keys/KeySets.ts';
 import type { SessionSettings } from '../integration/session.ts';
 import { INPUT_SETTING_KEYS, sanitizeSessionSettingsPatch } from '../session/settings.ts';
 import { parseLanguagePreference, type LanguagePreference } from '../i18n/locale.ts';
@@ -39,6 +50,29 @@ export interface AppSettings {
   readonly onboardingDone: boolean;
   /** Diagnostics: hide host names when copying/sharing the log. */
   readonly logHideHosts: boolean;
+  /** The built-in Demo in the server list: `auto` = only while no server is saved. */
+  readonly showDemo: DemoVisibility;
+  /** KEY-9: key sets, saved combos and per-protocol default sets (app-wide). */
+  readonly keys: KeyLibrary;
+  /**
+   * Android: keep open sessions connected in the background with a foreground service and a
+   * notification. Off = disconnect after `backgroundDisconnectSeconds`. No effect on iOS.
+   */
+  readonly keepAliveBackground: boolean;
+  /** SRV-10: scheduled automatic backups (run when the app is opened after they are due). */
+  readonly autoBackup: AutoBackupSettings;
+}
+
+export type DemoVisibility = 'auto' | 'show' | 'hide';
+
+/**
+ * Whether the server list shows the Demo entry. `savedServers` is undefined while the list
+ * is still loading (nothing is shown then, so the row does not flash).
+ */
+export function demoVisible(pref: DemoVisibility, savedServers: number | undefined): boolean {
+  if (pref === 'show') return true;
+  if (pref === 'hide') return false;
+  return savedServers === 0;
 }
 
 export const LOCK_AFTER_CHOICES = [0, 30, 60, 300, 900] as const;
@@ -57,6 +91,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   connectionSort: 'server',
   onboardingDone: false,
   logHideHosts: true,
+  showDemo: 'auto',
+  keys: DEFAULT_KEY_LIBRARY,
+  keepAliveBackground: false,
+  autoBackup: DEFAULT_AUTO_BACKUP,
 };
 
 const FIT_MODES = ['fit-screen', 'fit-width', 'fit-height', 'one-to-one'] as const;
@@ -139,6 +177,22 @@ export function applyConnectionPatch(
   return { ...sanitizeSessionPatch(stored), ...sanitizeSessionPatch(patch) };
 }
 
+/** "Use app default": drops the connection's own value for these keys. */
+export function removeConnectionKeys(
+  stored: unknown,
+  keys: readonly string[],
+): SessionSettingsPatch {
+  const drop = new Set(keys);
+  return Object.fromEntries(
+    Object.entries(sanitizeSessionPatch(stored)).filter(([k]) => !drop.has(k)),
+  ) as SessionSettingsPatch;
+}
+
+/** Keys a stored per-connection patch overrides. */
+export function overriddenKeys(stored: unknown): string[] {
+  return Object.keys(sanitizeSessionPatch(stored));
+}
+
 /**
  * Global defaults as edited in Settings: keeps only fields that differ from the built-in
  * defaults, so a later change to a built-in default still reaches users who never touched it.
@@ -169,13 +223,40 @@ function parseLock(raw: unknown): LockSettings {
   };
 }
 
+/**
+ * The key library, or (settings saved before key sets) one migrated from the app-wide
+ * `keyBarLayout` and `customCombos`, which are then dropped from the session defaults.
+ */
+function keysAndDefaults(raw: Record<string, unknown>): {
+  keys: KeyLibrary;
+  sessionDefaults: SessionSettingsPatch;
+} {
+  const defaults = sanitizeSessionPatch(raw['sessionDefaults']);
+  if (raw['keys'] !== undefined)
+    return { keys: normalizeKeyLibrary(raw['keys']), sessionDefaults: defaults };
+  const sd = isRecord(raw['sessionDefaults']) ? raw['sessionDefaults'] : {};
+  if (sd['keyBarLayout'] === undefined && sd['customCombos'] === undefined) {
+    return { keys: DEFAULT_KEY_LIBRARY, sessionDefaults: defaults };
+  }
+  const m = migrateLegacyLibrary(sd['keyBarLayout'], sd['customCombos']);
+  const { keyBarLayout: _l, customCombos: _c, ...rest } = defaults;
+  void _l;
+  void _c;
+  return {
+    keys: m.library,
+    sessionDefaults:
+      m.defaultSet && rest.keySet === undefined ? { ...rest, keySet: m.defaultSet } : rest,
+  };
+}
+
 export function parseAppSettings(raw: unknown): AppSettings {
   const d = DEFAULT_APP_SETTINGS;
   if (!isRecord(raw)) return d;
   const max = raw['maxSessions'];
+  const kd = keysAndDefaults(raw);
   return {
     theme: parseThemePreference(raw['theme']),
-    sessionDefaults: sanitizeSessionPatch(raw['sessionDefaults']),
+    sessionDefaults: kd.sessionDefaults,
     language: parseLanguagePreference(raw['language']),
     lock: parseLock(raw['lock']),
     backgroundDisconnectSeconds: pick(
@@ -196,6 +277,13 @@ export function parseAppSettings(raw: unknown): AppSettings {
     onboardingDone:
       typeof raw['onboardingDone'] === 'boolean' ? raw['onboardingDone'] : d.onboardingDone,
     logHideHosts: typeof raw['logHideHosts'] === 'boolean' ? raw['logHideHosts'] : d.logHideHosts,
+    showDemo: pick(raw['showDemo'], ['auto', 'show', 'hide'] as const, d.showDemo),
+    keys: kd.keys,
+    keepAliveBackground:
+      typeof raw['keepAliveBackground'] === 'boolean'
+        ? raw['keepAliveBackground']
+        : d.keepAliveBackground,
+    autoBackup: parseAutoBackupSettings(raw['autoBackup']),
   };
 }
 

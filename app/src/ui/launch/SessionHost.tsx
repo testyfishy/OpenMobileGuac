@@ -15,13 +15,16 @@ import {
 } from '../integration/session.ts';
 import { useBackInterceptor } from '../nav/NavContext.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
-import { haptic } from '../services/native.ts';
+import { haptic, saveTextFile } from '../services/native.ts';
 import type { OpenSession } from '../sessions/sessionModel.ts';
 import {
   applyConnectionPatch,
   mergeSessionSettings,
+  overriddenKeys,
   parseServerOptions,
+  removeConnectionKeys,
   type SessionSettingsPatch,
+  type AppSettings,
 } from '../settings/settingsModel.ts';
 import { strings } from '../strings.ts';
 import { deviceTimezone, makeConnectDataBuilder } from './connectData.ts';
@@ -59,7 +62,20 @@ export default function SessionHost({
   onSignInExpired,
 }: SessionHostProps) {
   const services = useServices();
-  const { settings: app } = useAppSettings();
+  const { settings: app, update: updateApp } = useAppSettings();
+  const appRef = useRef(app);
+  useEffect(() => {
+    appRef.current = app;
+  });
+  // KEY-9: key sets and saved combos are app-wide; edits in the session update the app settings.
+  const onKeyLibraryChange = useCallback(
+    (keys: AppSettings['keys']) => {
+      const next = { ...appRef.current, keys };
+      appRef.current = next;
+      updateApp(next);
+    },
+    [updateApp],
+  );
   const { serverId, target } = session;
   const isDemo = serverId === DEMO_PROFILE_ID;
   const ref: ConnectionRef = useMemo(
@@ -100,6 +116,18 @@ export default function SessionHost({
     },
     [services.profiles, serverId, ref],
   );
+
+  const onUseDefault = useCallback(
+    (keys: string[]) => {
+      setStored((prev) => {
+        const next = removeConnectionKeys(prev, keys);
+        void services.profiles.setConnectionSettings(serverId, ref, next);
+        return next;
+      });
+    },
+    [services.profiles, serverId, ref],
+  );
+  const overridden = useMemo(() => overriddenKeys(stored), [stored]);
 
   const createTunnel = useCallback((): TunnelLike => {
     if (isDemo) return new DemoTunnel();
@@ -178,12 +206,17 @@ export default function SessionHost({
         buildConnectData={buildConnectData}
         settings={settings}
         onSettingsChange={onSettingsChange}
+        overriddenKeys={overridden}
+        onUseDefault={onUseDefault}
         onExit={exit}
         isDemo={isDemo}
         active={active}
         onThumbnail={onThumbnail}
         onLog={onLog}
         onMinimize={onHide}
+        keyLibrary={app.keys}
+        onKeyLibraryChange={onKeyLibraryChange}
+        saveTextFile={saveTextFile}
         {...(isDemo ? {} : { onSignInExpired })}
       />
       {confirmExit && active ? (

@@ -20,8 +20,10 @@ Record failures as `T1.x-fix` tasks with device, OS version, keyboard app and ap
 - [ ] Dismiss with the system control (iOS: swipe/Done, Android: back or the hide key), then
       tap Keyboard again: it comes back on the first tap.
 - [ ] The page does not zoom or scroll when the keyboard opens (iOS especially).
-- [ ] The desktop does not shrink when the keyboard opens; the key bar sits right above the
-      keyboard; the area near the pointer/last tap stays visible above it (DSP-5).
+- [ ] The desktop does not shrink when the keyboard opens; the key bar sits above the keyboard
+      (with the toolbar docked at the bottom: keyboard, then toolbar row, then key bar; other
+      styles: right above the keyboard); the area near the pointer/last tap stays visible
+      above them (DSP-5).
 - [ ] Letters, digits and punctuation arrive correctly in a remote text editor, including a
       mixed-case password like `Ab3$xY9!`.
 - [ ] Autocorrect, auto-capitalise and suggestions do not change what reaches the remote
@@ -38,10 +40,48 @@ Record failures as `T1.x-fix` tasks with device, OS version, keyboard app and ap
 - [ ] Hardware keyboard (tablet, S5): letters, arrows, Ctrl+C / Ctrl+V, Alt+Tab, Esc reach
       the remote; no key is sent twice; no key stays stuck after switching apps.
 
+## Toolbar and keyboard (toolbar styles, keyboard dismissal)
+
+Defaults: toolbar docked at the bottom, swipe-down on the key bar on, tap-to-hide off. Change
+them in Settings › Session defaults, or for one connection in More › Session options.
+
+- [ ] Docked bottom (default), portrait: a static row above the home indicator; nothing of the
+      desktop is under it (the desktop is fitted above it); no gap below the bar.
+- [ ] Docked bottom, keyboard up: the row sits right above the keyboard with the key bar
+      above it; all buttons reachable; the desktop does not shrink or jump in size.
+- [ ] Docked top: the row sits below the notch / status bar; the desktop starts below it;
+      toasts and the Demo badge are not hidden behind it.
+- [ ] Landscape: Left and Right put a column at that edge (the desktop fits beside it, the
+      key bar spans the rest); in portrait they fall back to the bottom row.
+- [ ] Floating: the old collapsible bar still works (hide, handle, auto-hide after 5 s; no
+      auto-hide while the keyboard is up; immersive turns the handle into an edge grip).
+- [ ] More › Toolbar buttons: add Files and Disconnect, move them, remove one, "Reset to
+      default"; the row follows at once; Disconnect asks for a second tap.
+- [ ] Labels: Auto hides them in landscape on a phone; Always keeps them; Icons only hides
+      them everywhere.
+- [ ] Keyboard button shows its "on" state while the keyboard is up and hides it on a tap,
+      in every style.
+- [ ] The key bar's accent "hide keyboard" key (right edge) is always visible, even with the
+      Fn rows or after scrolling the row sideways; tapping it hides the keyboard and the key
+      bar, and the desktop re-fits with no empty band.
+- [ ] Swipe down on the key bar hides the keyboard; with the keyboard hidden it hides the
+      key bar. A sideways swipe still scrolls the keys and does not press one.
+- [ ] Turn on "Tap the desktop to hide the keyboard": a tap on the desktop with the keyboard
+      up hides it (and clicks). Off (default): a tap only clicks.
+- [ ] More sheet: switches (Keyboard, Extra keys, Natural scrolling, Large cursor, Split
+      layout, Full screen, Sound) apply at once and keep the sheet open; every sheet closes
+      with ✕, a tap outside, or a swipe down on its title.
+- [ ] Settings › Session defaults: change the toolbar style and a slider; open a connection
+      you never changed: it uses them. In a connection you changed, Session options shows
+      "Custom for this connection"; "Use app default" switches it back.
+- [ ] Settings › About › Demo server in the list: Automatic hides the Demo once a server is
+      saved; Show brings it back; onboarding's "Try the Demo" still opens it.
+
 ## Key bar and combos (KEY-3, KEY-4, KEY-5)
 
-- [ ] Toolbar > Keys shows the key bar with the keyboard hidden, docked above the gesture
-      bar / home indicator; the chevron hides it.
+- [ ] Toolbar > Keys shows the key bar with the keyboard hidden: above the docked toolbar row
+      (bottom dock), or above the gesture bar / home indicator (other styles); the chevron at
+      the right hides it.
 - [ ] Ctrl tap (one-shot, outlined) + `c` on the soft keyboard copies on the remote; Ctrl
       then turns off by itself.
 - [ ] Shift double tap locks (filled); arrows extend a selection; third tap unlocks.
@@ -282,3 +322,32 @@ only fakes the server side.
 - Capacitor Keyboard resize mode in effect (does the WebView shrink when the keyboard
   opens?). The session handles both, but report which one the device used.
 - Any keyboard app where Backspace or Enter misbehaves (name and version).
+
+## Key sets, combo builder, incoming files (KEY-9, FIL-4)
+
+Verified only in a desktop browser (demo desktop and the dev harness); check on the phone.
+
+- [ ] Settings › Keys & combos › Key sets: duplicate "Terminal / Linux", rename it, add a
+      text key (e.g. `| grep `) and a saved combo key; open an SSH connection: the Terminal
+      set (or the app default you chose) is shown, and the text key types into the shell.
+- [ ] Key bar switch button (right end): one tap moves to the next set and shows a toast;
+      a long press opens the list. The choice is remembered for that connection after
+      closing and reopening it; another connection keeps its own set.
+- [ ] Session options › "Swipe sideways on the key bar to switch sets" on: a swipe left/right
+      when the row is scrolled to its end switches the set; a swipe in the middle of a long
+      row only scrolls it.
+- [ ] Combo builder: Ctrl+K, pause 500 ms, Ctrl+C (Keep modifiers on) in a remote editor
+      that uses chords (e.g. VS Code comment): the second chord arrives after the pause.
+      Disconnecting or hiding the session during the pause leaves no key held.
+- [ ] Combos saved by an older build still appear (combo menu › "Saved on this connection")
+      and run; Save copies one to My combos.
+- [ ] Export key sets (share sheet), then import the file on the other phone (Android ↔ iOS).
+- [ ] RDP with a drive or printing: from the remote, push a file (e.g. save to the
+      redirected download folder that guacd streams) and print a test page: the prompt names
+      the file / says print job. Decline: the transfer stops on the server (no partial file
+      on the phone). Accept: the share sheet opens. "Always decline" / "Always accept" skip
+      the prompt.
+- [ ] Session options › "Tap the desktop to hide the keyboard": Hide only hides the keyboard
+      without clicking the remote; Hide and click hides it and clicks; Off only clicks.
+- [ ] Android: rotate the phone while the soft keyboard is open: the toolbar layout follows
+      the new orientation at once (not only after the keyboard closes).

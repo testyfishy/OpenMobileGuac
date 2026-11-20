@@ -15,7 +15,20 @@ import {
   reduceClipboard,
 } from '../../session/clipboard/ClipboardHistory.ts';
 import { isFinished } from '../../session/transfer/TransferModel.ts';
-import { parseCombo, type Combo } from '../../session/keys/KeyModel.ts';
+import type { ComboStep } from '../../session/keys/ComboLibrary.ts';
+import { parseCombo } from '../../session/keys/KeyModel.ts';
+import {
+  DEFAULT_KEY_LIBRARY,
+  LEGACY_SET_ID,
+  legacySet,
+  newComboId,
+  reduceKeyLibrary,
+  resolveActiveKeySet,
+  stepSet,
+  switchableSets,
+  type KeyLibrary,
+  type KeyLibraryAction,
+} from '../../session/keys/KeySets.ts';
 import type { PointerMode } from '../../session/pointer/PointerModel.ts';
 import { ClipboardSheet } from './ClipboardSheet.tsx';
 import { ComboMenu } from './ComboMenu.tsx';
@@ -25,8 +38,9 @@ import { CursorArrow } from './icons.tsx';
 import { InfoSheet } from './InfoSheet.tsx';
 import { InputMenu } from './InputMenu.tsx';
 import { KeyBar } from './KeyBar.tsx';
-import { KeyBarEditor } from './KeyBarEditor.tsx';
-import { resolveKeyBarLayout } from './keyBarLayout.ts';
+import { IncomingFileSheet } from './IncomingFileSheet.tsx';
+import { KeySetManager, KeySetPicker, type SaveTextFile } from './KeySetManager.tsx';
+import { keySetName, keySetNameIn } from './keySetNames.ts';
 import { MoreSheet } from './MoreSheet.tsx';
 import {
   enterImmersive,
@@ -45,11 +59,14 @@ import {
 } from './platform.ts';
 import { SessionController, type SessionLogLevel } from './SessionController.ts';
 import { sessionStrings } from './sessionStrings.ts';
+import type { SessionActionContext } from './sessionActions.tsx';
 import { normalizeSessionSettings, type SessionSettings } from './settings.ts';
 import { isSignInFailure } from './status.ts';
 import { TextInputBar } from './TextInputBar.tsx';
 import { StatusOverlay } from './StatusOverlay.tsx';
 import { Toolbar } from './Toolbar.tsx';
+import { ToolbarEditor } from './ToolbarEditor.tsx';
+import { NO_EDGES, dockReserve, effectiveToolbarStyle, type Edges } from './toolbarItems.ts';
 import { ViewMenu } from './ViewMenu.tsx';
 import './SessionScreen.css';
 
@@ -90,6 +107,22 @@ export interface SessionScreenProps {
    * connection; the shell can sign in again and remount the session with a fresh tunnel.
    */
   onSignInExpired?: () => void;
+  /**
+   * Settings this connection stores itself (overriding the app / server defaults). Shown in
+   * Session options with "Use app default".
+   */
+  overriddenKeys?: readonly string[];
+  /** Forget the connection's own value for these keys (back to the app / server default). */
+  onUseDefault?: (keys: string[]) => void;
+  /**
+   * KEY-9: the app's key library (key sets, saved combos, protocol defaults). Edits made in
+   * the session go to `onKeyLibraryChange` (app-wide, not per connection). Without these
+   * props the screen keeps a library of its own in memory (dev harness).
+   */
+  keyLibrary?: KeyLibrary;
+  onKeyLibraryChange?: (next: KeyLibrary) => void;
+  /** Save a text file for the user (key set export); default: a browser download. */
+  saveTextFile?: SaveTextFile;
 }
 
 /** Longest clipboard text typed as keystrokes (each character is two key events). */
@@ -98,7 +131,39 @@ const TOOLBAR_AUTOHIDE_MS = 5000;
 /** Protocols rendered by guacd's terminal emulator. */
 const TERMINAL_PROTOCOLS = new Set(['ssh', 'telnet', 'kubernetes']);
 
-type Menu = 'view' | 'combos' | 'input' | 'keybar' | 'more' | 'files' | 'clipboard' | 'info' | null;
+type Menu =
+  | 'view'
+  | 'combos'
+  | 'keysets'
+  | 'keypicker'
+  | 'input'
+  | 'keybar'
+  | 'toolbar'
+  | 'more'
+  | 'files'
+  | 'clipboard'
+  | 'info'
+  | null;
+
+/**
+ * Landscape from the viewport (so split screen and narrow windows count as portrait).
+ * `fromScreen`: use the device orientation instead, for a rotation while a keyboard that
+ * shrinks the WebView is open (the viewport would look landscape on a portrait phone).
+ */
+function readLandscape(fromScreen = false): boolean {
+  if (typeof window === 'undefined') return false;
+  const type = typeof screen !== 'undefined' ? screen.orientation?.type : undefined;
+  if (fromScreen && type) return type.startsWith('landscape');
+  try {
+    return window.matchMedia('(orientation: landscape)').matches;
+  } catch {
+    return window.innerWidth > window.innerHeight;
+  }
+}
+
+function sameEdges(a: Edges, b: Edges): boolean {
+  return a.top === b.top && a.right === b.right && a.bottom === b.bottom && a.left === b.left;
+}
 type KeyBarMode = 'auto' | 'shown' | 'hidden';
 
 /** Default split: the display gets this share of the height. */
@@ -128,6 +193,23 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     },
     [hostChange],
   );
+  const hostUseDefault = props.onUseDefault;
+  const useDefault = useCallback(
+    (keys: string[]) => {
+      setOverlay((o) => {
+        const drop = new Set(keys);
+        return Object.fromEntries(
+          Object.entries(o).filter(([k]) => !drop.has(k)),
+        ) as Partial<SessionSettings>;
+      });
+      hostUseDefault?.(keys);
+    },
+    [hostUseDefault],
+  );
+  const overridden = useMemo(
+    () => new Set<string>([...(props.overriddenKeys ?? [])]),
+    [props.overriddenKeys],
+  );
   const latest = useRef(props);
   useEffect(() => {
     latest.current = props;
@@ -156,6 +238,8 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const probeRef = useRef<HTMLDivElement>(null);
   const chromeRef = useRef<HTMLDivElement>(null);
   const keyBarRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
 
   // ---- Controller lifecycle. Options first (effects run in order), then attach.
@@ -174,6 +258,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       onLog: (entry) => latest.current.onLog?.(entry),
       onThumbnail: (url) => latest.current.onThumbnail?.(url),
       notify: (text) => setToast({ id: Date.now(), text }),
+      hideNativeKeyboard: nativeHideKeyboard,
     });
   }, [controller]);
 
@@ -198,6 +283,17 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       !chromeRoot
     ) {
       return;
+    }
+    // A docked toolbar's space is known before the first connect, so the remote is asked for
+    // (and fitted into) the area that is left.
+    const tb = toolbarRef.current;
+    const docked = (['dock-top', 'dock-bottom', 'dock-left', 'dock-right'] as const).find((s) =>
+      tb?.classList.contains(`omg-toolbar--${s}`),
+    );
+    if (tb && docked) {
+      const r = dockReserve(docked, { width: tb.offsetWidth, height: tb.offsetHeight });
+      const splitOn = rootRef.current?.dataset['split'] === 'on';
+      controller.setReservedInsets(splitOn ? { ...r, bottom: 0 } : r);
     }
     controller.attach({
       stage,
@@ -254,15 +350,75 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const keyBarVisible =
     split || keyBarMode === 'shown' || (keyBarMode === 'auto' && snap.keyboardActive);
   const textBarVisible = settings.textInputBar;
+
+  // ---- Toolbar style: floating over the desktop, or docked (space reserved at an edge)
+  const keyboardActive = snap.keyboardActive;
+  const [landscape, setLandscape] = useState(readLandscape);
   useEffect(() => {
-    const el = keyBarRef.current;
+    // A keyboard that shrinks the WebView (Android) can make a phone look landscape: while
+    // it is up, size changes are ignored (re-read when it closes), but a real rotation
+    // (`orientationchange`, `screen.orientation` change) still applies at once.
+    const on = () => setLandscape(readLandscape());
+    const rotated = () => {
+      const read = () => setLandscape(readLandscape(keyboardActive));
+      read();
+      // Some WebViews report the new orientation a little after the event.
+      setTimeout(read, 250);
+    };
+    if (!keyboardActive) {
+      on();
+      window.addEventListener('resize', on);
+    }
+    window.addEventListener('orientationchange', rotated);
+    const so = typeof screen !== 'undefined' ? screen.orientation : undefined;
+    so?.addEventListener?.('change', rotated);
+    return () => {
+      window.removeEventListener('resize', on);
+      window.removeEventListener('orientationchange', rotated);
+      so?.removeEventListener?.('change', rotated);
+    };
+  }, [keyboardActive]);
+  const toolbarStyle = effectiveToolbarStyle(settings.toolbarStyle, landscape);
+  const docked = toolbarStyle !== 'floating';
+  const dockBottom = toolbarStyle === 'dock-bottom';
+  const [reserve, setReserve] = useState<Edges>(NO_EDGES);
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!docked || !el || !active) {
+      setReserve((r) => (sameEdges(r, NO_EDGES) ? r : NO_EDGES));
+      return;
+    }
+    const report = () => {
+      // Docked at the bottom, the toolbar rides above the keyboard and drops its safe-area
+      // padding: keep the keyboard-closed reserve so the desktop does not rescale.
+      const next = dockReserve(toolbarStyle, { width: el.offsetWidth, height: el.offsetHeight });
+      setReserve((r) => {
+        const keepBottom =
+          dockBottom && keyboardActive && r.bottom > 0 && r.top + r.left + r.right === 0;
+        return keepBottom || sameEdges(r, next) ? r : next;
+      });
+    };
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    report();
+    return () => ro.disconnect();
+  }, [docked, dockBottom, toolbarStyle, active, keyboardActive]);
+  useEffect(() => {
+    // Split layout: the stage ends above the trackpad, so a bottom dock covers only that.
+    controller.setReservedInsets(split ? { ...reserve, bottom: 0 } : reserve);
+  }, [controller, reserve, split]);
+
+  // ---- Key bar height: part of the keyboard inset (the view pans above it; no rescale).
+  // Docked at the bottom, the whole dock (key bar + toolbar) rides above the keyboard.
+  useEffect(() => {
+    const el = dockBottom ? dockRef.current : keyBarRef.current;
     if (!el) return;
     const report = () => controller.setKeyBarHeight(split ? 0 : el.offsetHeight);
     const ro = new ResizeObserver(report);
     ro.observe(el);
     report();
     return () => ro.disconnect();
-  }, [controller, keyBarVisible, textBarVisible, split, active]);
+  }, [controller, keyBarVisible, textBarVisible, split, active, dockBottom]);
 
   // ---- Immersive (DSP-7)
   useEffect(() => {
@@ -276,11 +432,12 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const [menu, setMenu] = useState<Menu>(null);
   const [activity, setActivity] = useState(0);
   const connected = snap.phase.kind === 'connected';
+  const autoHide = !docked && settings.toolbarAutoHide && !keyboardActive;
   useEffect(() => {
-    if (!toolbarExpanded || menu !== null || !connected) return;
+    if (!autoHide || !toolbarExpanded || menu !== null || !connected) return;
     const t = setTimeout(() => setToolbarExpanded(false), TOOLBAR_AUTOHIDE_MS);
     return () => clearTimeout(t);
-  }, [toolbarExpanded, menu, connected, activity]);
+  }, [autoHide, toolbarExpanded, menu, connected, activity]);
   const bump = useCallback(() => setActivity((n) => n + 1), []);
 
   // ---- Toast timeout
@@ -399,12 +556,50 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     });
   };
 
-  const runCombo = (combo: Combo, label: string) => {
-    controller.runCombo(combo);
+  const runSteps = (steps: readonly ComboStep[], label: string) => {
+    if (!controller.isConnected()) return showToast(sessionStrings.common.notConnected);
+    controller.runComboSteps(steps);
     showToast(sessionStrings.toasts.sentCombo(label));
   };
 
-  const closeMenu = useCallback(() => setMenu(null), []);
+  // ---- KEY-9 key library and the active key set
+  const [ownLibrary, setOwnLibrary] = useState<KeyLibrary>(DEFAULT_KEY_LIBRARY);
+  const library = props.keyLibrary ?? ownLibrary;
+  const hostLibrary = props.onKeyLibraryChange;
+  const setLibrary = useCallback(
+    (next: KeyLibrary) => {
+      if (hostLibrary) hostLibrary(next);
+      else setOwnLibrary(next);
+    },
+    [hostLibrary],
+  );
+  const libraryAction = (a: KeyLibraryAction) => setLibrary(reduceKeyLibrary(library, a).library);
+  const legacy = settings.keyBarLayout
+    ? legacySet(settings.keyBarLayout, t.keySets.legacyName)
+    : undefined;
+  const connectionSet = overlay.keySet ?? (overridden.has('keySet') ? settings.keySet : undefined);
+  const activeSet = resolveActiveKeySet({
+    library,
+    connectionSet,
+    legacyLayout: settings.keyBarLayout,
+    protocol: proto,
+    defaultSet: settings.keySet,
+    legacyName: t.keySets.legacyName,
+  }).set;
+  const sets = switchableSets(library, legacy);
+  const chooseSet = (id: string, toast = false) => {
+    onSettingsChange({ keySet: id });
+    if (toast) {
+      const name = id === LEGACY_SET_ID ? t.keySets.legacyName : keySetNameIn(library, id);
+      showToast(t.keySets.switched(name));
+    }
+  };
+  const runSaved = (id: string) => {
+    const c = library.combos.find((x) => x.id === id);
+    if (c) runSteps(c.steps, c.name);
+  };
+
+  const closeMenu = useCallback(() => setMenu(null), [setMenu]);
 
   const splitTop =
     fold.horizontalFold && fold.foldTop !== null && settings.splitLayout !== 'off'
@@ -413,10 +608,130 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const rootStyle = {
     '--omg-kb-cover': `${snap.keyboardCover}px`,
     '--omg-split-top': splitTop,
+    '--omg-dock-top': `${reserve.top}px`,
+    '--omg-dock-bottom': `${reserve.bottom}px`,
+    '--omg-dock-left': `${reserve.left}px`,
+    '--omg-dock-right': `${reserve.right}px`,
   } as CSSProperties;
   const effectiveMode: PointerMode =
     settings.pointerMode === 'touch' && !touchOffered ? 'direct' : settings.pointerMode;
   const prompt = snap.credentials;
+
+  const toggleAudio = () => {
+    const muted = !settings.audioMuted;
+    onSettingsChange({ audioMuted: muted });
+    showToast(muted ? t.toasts.soundOff : t.toasts.soundOn);
+  };
+  const actionContext: SessionActionContext = {
+    pointerMode: effectiveMode,
+    keyboardActive,
+    keyBarVisible,
+    audioMuted: settings.audioMuted,
+    showCtrlAltDel,
+    canMinimize: onMinimize !== undefined,
+    pasteHint: terminal ? t.screen.pasteHintTerminal : t.screen.pasteHint,
+    runningTransfers,
+    onTogglePointerMode: togglePointerMode,
+    onToggleKeyboard: () => {
+      // Synchronous on purpose (iOS raises the keyboard only inside the tap).
+      if (menu !== null) setMenu(null);
+      toggleKeyboard();
+    },
+    onToggleKeyBar: () => setKeyBarMode(keyBarVisible ? 'hidden' : 'shown'),
+    onPaste: () => {
+      setMenu(null);
+      paste();
+    },
+    onTypeClipboard: () => {
+      setMenu(null);
+      typeClipboard();
+    },
+    onView: () => setMenu('view'),
+    onZoomReset: () => {
+      controller.resetZoom();
+      showToast(t.toasts.zoomReset);
+    },
+    onZoom: (f) => controller.zoomBy(f),
+    onCombos: () => setMenu('combos'),
+    onKeySets: () => setMenu('keypicker'),
+    onCtrlAltDel: () => {
+      runComboText('Ctrl+Alt+Del');
+      showToast(t.toasts.sentCombo('Ctrl+Alt+Del'));
+      setMenu(null);
+    },
+    onClipboard: () => setMenu('clipboard'),
+    onFiles: () => setMenu('files'),
+    onToggleAudio: toggleAudio,
+    onOptions: () => setMenu('input'),
+    onInfo: () => setMenu('info'),
+    onMinimize: () => {
+      setMenu(null);
+      nativeHideKeyboard();
+      onMinimize?.();
+    },
+    onDisconnect: exit,
+  };
+
+  const toolbar = (
+    <Toolbar
+      ref={toolbarRef}
+      style={toolbarStyle}
+      labels={settings.toolbarLabels}
+      expanded={docked || toolbarExpanded}
+      onExpandedChange={(v) => {
+        setToolbarExpanded(v);
+        bump();
+      }}
+      immersive={settings.immersive}
+      context={actionContext}
+      items={settings.toolbarItems}
+      onOpenMore={() => setMenu('more')}
+      moreBadge={runningTransfers}
+      onActivity={bump}
+    />
+  );
+  const keyBarSlot = (
+    <div ref={keyBarRef} className="omg-keybar-slot">
+      {textBarVisible && (
+        <TextInputBar
+          onSend={(text, enter) => {
+            if (text !== '') controller.typeText(text);
+            if (enter) controller.pressKey('Enter');
+          }}
+          onClose={() => onSettingsChange({ textInputBar: false })}
+        />
+      )}
+      {keyBarVisible && (
+        <KeyBar
+          modifiers={snap.modifiers}
+          layout={activeSet.rows}
+          onKey={(name) => controller.pressKey(name)}
+          onModifier={(mod) => controller.tapModifier(mod)}
+          onCombo={runComboText}
+          onText={(text) => controller.typeText(text)}
+          onSaved={runSaved}
+          combos={library.combos}
+          setName={keySetName(activeSet)}
+          onNextSet={() => chooseSet(stepSet(sets, activeSet.id, 1).id, true)}
+          onPickSet={() => setMenu('keypicker')}
+          {...(settings.keySetSwipe
+            ? { onSwipeSet: (d: -1 | 1) => chooseSet(stepSet(sets, activeSet.id, d).id, true) }
+            : {})}
+          onCollapse={split ? undefined : () => setKeyBarMode('hidden')}
+          keyboardActive={keyboardActive}
+          onHideKeyboard={toggleKeyboard}
+          {...(settings.keyBarSwipeDismiss
+            ? {
+                onSwipeDown: () => {
+                  if (keyboardActive) toggleKeyboard();
+                  else if (!split) setKeyBarMode('hidden');
+                },
+              }
+            : {})}
+        />
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -427,6 +742,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       data-keyboard={snap.keyboardActive ? 'open' : 'closed'}
       data-split={split ? 'on' : 'off'}
       data-immersive={settings.immersive ? 'on' : 'off'}
+      data-toolbar={toolbarStyle}
       data-active={active ? 'true' : 'false'}
       aria-hidden={active ? undefined : true}
     >
@@ -481,91 +797,52 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
         {active && (
           <>
             {isDemo && <div className="omg-badge">{t.common.demo}</div>}
-            <div className="omg-dock">
-              <Toolbar
-                expanded={toolbarExpanded}
-                onExpandedChange={(v) => {
-                  setToolbarExpanded(v);
-                  bump();
-                }}
-                pointerMode={effectiveMode}
-                onTogglePointerMode={togglePointerMode}
-                onOpenView={() => setMenu('view')}
-                onZoom={(f) => controller.zoomBy(f)}
-                immersive={settings.immersive}
-                keyboardActive={snap.keyboardActive}
-                onToggleKeyboard={toggleKeyboard}
-                pasteHint={terminal ? t.screen.pasteHintTerminal : t.screen.pasteHint}
-                onPaste={paste}
-                onTypeClipboard={typeClipboard}
-                onOpenMore={() => setMenu('more')}
-                moreBadge={runningTransfers}
-                onActivity={bump}
-              />
-              <div ref={keyBarRef} className="omg-keybar-slot">
-                {textBarVisible && (
-                  <TextInputBar
-                    onSend={(text, enter) => {
-                      if (text !== '') controller.typeText(text);
-                      if (enter) controller.pressKey('Enter');
-                    }}
-                    onClose={() => onSettingsChange({ textInputBar: false })}
-                  />
-                )}
-                {keyBarVisible && (
-                  <KeyBar
-                    modifiers={snap.modifiers}
-                    layout={resolveKeyBarLayout(settings.keyBarLayout)}
-                    onKey={(name) => controller.pressKey(name)}
-                    onModifier={(mod) => controller.tapModifier(mod)}
-                    onCombo={runComboText}
-                    onCollapse={split ? undefined : () => setKeyBarMode('hidden')}
-                  />
-                )}
-              </div>
+            {docked && !dockBottom && toolbar}
+            <div ref={dockRef} className="omg-dock">
+              {dockBottom ? (
+                <>
+                  {keyBarSlot}
+                  {toolbar}
+                </>
+              ) : (
+                <>
+                  {!docked && toolbar}
+                  {keyBarSlot}
+                </>
+              )}
             </div>
 
             {menu === 'more' && (
               <MoreSheet
-                showCtrlAltDel={showCtrlAltDel}
-                audioMuted={settings.audioMuted}
+                context={actionContext}
+                pointerMode={effectiveMode}
                 audioActive={snap.audioStreams > 0}
-                keyBarOpen={keyBarVisible}
-                activeTransfers={runningTransfers}
                 hasFilesystem={transferSnap.filesystems.length > 0}
-                onFiles={() => setMenu('files')}
-                onClipboard={() => setMenu('clipboard')}
-                onToggleAudio={() => {
-                  const muted = !settings.audioMuted;
-                  onSettingsChange({ audioMuted: muted });
-                  showToast(muted ? t.toasts.soundOff : t.toasts.soundOn);
+                toggles={{
+                  naturalScroll: settings.naturalScroll,
+                  tapDrag: settings.tapDrag,
+                  largeCursor: settings.largeCursor,
+                  textInputBar: settings.textInputBar,
+                  split,
+                  immersive: settings.immersive,
                 }}
-                onToggleKeyBar={() => {
-                  setKeyBarMode(keyBarVisible ? 'hidden' : 'shown');
-                  setMenu(null);
+                onToggle={(key, on) => {
+                  if (key === 'split') onSettingsChange({ splitLayout: on ? 'on' : 'off' });
+                  else onSettingsChange({ [key]: on });
                 }}
-                onInput={() => setMenu('input')}
-                onCombos={() => setMenu('combos')}
-                onCtrlAltDel={() => {
-                  runComboText('Ctrl+Alt+Del');
-                  showToast(t.toasts.sentCombo('Ctrl+Alt+Del'));
-                  setMenu(null);
-                }}
-                onTypeClipboard={() => {
-                  setMenu(null);
-                  typeClipboard();
-                }}
-                onInfo={() => setMenu('info')}
-                onMinimize={
-                  onMinimize
-                    ? () => {
-                        setMenu(null);
-                        nativeHideKeyboard();
-                        onMinimize();
-                      }
-                    : undefined
-                }
-                onDisconnect={exit}
+                onEditToolbar={() => setMenu('toolbar')}
+                onClose={closeMenu}
+              />
+            )}
+            {menu === 'toolbar' && (
+              <ToolbarEditor
+                items={settings.toolbarItems}
+                style={settings.toolbarStyle}
+                labels={settings.toolbarLabels}
+                context={actionContext}
+                onItems={(items) => onSettingsChange({ toolbarItems: items })}
+                onStyle={(s) => onSettingsChange({ toolbarStyle: s })}
+                onLabels={(l) => onSettingsChange({ toolbarLabels: l })}
                 onClose={closeMenu}
               />
             )}
@@ -654,29 +931,63 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
               <InputMenu
                 settings={settings}
                 touchSupport={snap.touchSupport}
+                overridden={overridden}
                 onChange={onSettingsChange}
-                onEditKeyBar={() => setMenu('keybar')}
+                {...(props.onUseDefault ? { onUseDefault: useDefault } : {})}
+                onEditList={(editor) =>
+                  setMenu(
+                    editor === 'toolbar' ? 'toolbar' : editor === 'keySets' ? 'keysets' : 'combos',
+                  )
+                }
+                summaryContext={{ keySetName: () => keySetName(activeSet) }}
                 onClose={closeMenu}
               />
             )}
-            {menu === 'keybar' && (
-              <KeyBarEditor
-                layout={settings.keyBarLayout}
-                customCombos={settings.customCombos}
-                onChange={(layout) => onSettingsChange({ keyBarLayout: layout })}
+            {menu === 'keypicker' && (
+              <KeySetPicker
+                sets={sets}
+                activeId={activeSet.id}
+                onUse={(id) => chooseSet(id, true)}
+                onManage={() => setMenu('keysets')}
+                onClose={closeMenu}
+              />
+            )}
+            {menu === 'keysets' && (
+              <KeySetManager
+                library={library}
+                onLibrary={setLibrary}
+                activeId={activeSet.id}
+                onUse={(id) => chooseSet(id)}
+                legacy={legacy}
+                onCombos={() => setMenu('combos')}
+                {...(props.saveTextFile ? { saveFile: props.saveTextFile } : {})}
                 onClose={closeMenu}
               />
             )}
             {menu === 'combos' && (
               <ComboMenu
-                customCombos={settings.customCombos}
-                onRun={runCombo}
-                onChangeCombos={(list) => onSettingsChange({ customCombos: list })}
+                combos={library.combos}
+                legacy={settings.customCombos}
+                onRun={runSteps}
+                onLibrary={libraryAction}
+                newId={() => newComboId(library)}
                 onTypeClipboard={typeClipboard}
                 onClose={closeMenu}
               />
             )}
 
+            {transferSnap.prompts[0] && !prompt && (
+              <IncomingFileSheet
+                prompt={transferSnap.prompts[0]}
+                waiting={transferSnap.prompts.length - 1}
+                onAnswer={(accept) => {
+                  const pr = transferSnap.prompts[0];
+                  if (!pr) return;
+                  controller.transfers.answerIncoming(pr.id, accept);
+                  if (!accept) showToast(t.files.declined(pr.filename));
+                }}
+              />
+            )}
             {prompt ? (
               <CredentialSheet
                 title={title}

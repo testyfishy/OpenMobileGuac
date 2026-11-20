@@ -1,12 +1,17 @@
 import { useId, type ReactNode } from 'react';
-import type { PointerMode } from '../../session/pointer/PointerModel.ts';
 import { ChromeButton } from './ChromeButton.tsx';
+import type { ResolvedSessionSettings, SessionSettings } from './settings.ts';
 import {
-  INPUT_RANGES,
-  type NumericInputSetting,
-  type ResolvedSessionSettings,
-  type SessionSettings,
-} from './settings.ts';
+  SETTING_SECTIONS,
+  descriptorsIn,
+  rangeOf,
+  settingPatch,
+  DEFAULT_SUMMARY_CONTEXT,
+  type ListEditor,
+  type SettingDescriptor,
+  type SettingKey,
+  type SummaryContext,
+} from './settingsSchema.ts';
 import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
@@ -14,8 +19,14 @@ export interface InputMenuProps {
   readonly settings: ResolvedSessionSettings;
   /** Touches the server accepts; 0 hides the touch pass-through mode. */
   readonly touchSupport: number;
+  /** Keys this connection overrides (shown with "Use app default"). */
+  readonly overridden?: ReadonlySet<string>;
   readonly onChange: (patch: Partial<SessionSettings>) => void;
-  readonly onEditKeyBar: () => void;
+  /** Drop the connection's own value for these keys (back to the app / server default). */
+  readonly onUseDefault?: (keys: SettingKey[]) => void;
+  readonly onEditList: (editor: ListEditor) => void;
+  /** Names for list summaries (the key set in use). */
+  readonly summaryContext?: SummaryContext;
   readonly onClose: () => void;
 }
 
@@ -26,7 +37,7 @@ function Switch({
   onToggle,
 }: {
   label: string;
-  hint?: string;
+  hint?: string | undefined;
   on: boolean;
   onToggle: (on: boolean) => void;
 }) {
@@ -46,72 +57,6 @@ function Switch({
   );
 }
 
-function Segmented<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: readonly { value: T; label: string }[];
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="omg-field">
-      <span className="omg-label">{label}</span>
-      <div className="omg-segmented" role="radiogroup" aria-label={label}>
-        {options.map((o) => (
-          <ChromeButton
-            key={o.value}
-            role="radio"
-            aria-checked={o.value === value}
-            className={o.value === value ? 'omg-seg omg-seg--on' : 'omg-seg'}
-            onClick={() => onChange(o.value)}
-          >
-            {o.label}
-          </ChromeButton>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Slider({
-  setting,
-  label,
-  value,
-  format,
-  onChange,
-}: {
-  setting: NumericInputSetting;
-  label: string;
-  value: number;
-  format: (v: number) => string;
-  onChange: (v: number) => void;
-}) {
-  const id = useId();
-  const [min, max, step] = INPUT_RANGES[setting];
-  return (
-    <div className="omg-field">
-      <label htmlFor={id} className="omg-label omg-label--row">
-        <span>{label}</span>
-        <span className="omg-value">{format(value)}</span>
-      </label>
-      <input
-        id={id}
-        className="omg-range"
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-    </div>
-  );
-}
-
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="omg-section" aria-label={title}>
@@ -121,176 +66,173 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-const ms = (v: number) => `${Math.round(v)} ms`;
-const times = (v: number) => `${v.toFixed(2)}×`;
+function Control({
+  d,
+  s,
+  touchSupport,
+  onChange,
+  onEditList,
+  ctx,
+}: {
+  d: SettingDescriptor;
+  s: ResolvedSessionSettings;
+  touchSupport: number;
+  onChange: (patch: Partial<SessionSettings>) => void;
+  onEditList: (editor: ListEditor) => void;
+  ctx: SummaryContext;
+}) {
+  const id = useId();
+  const value = s[d.key];
+  const set = (v: unknown) => onChange(settingPatch(d.key, v));
+  switch (d.control) {
+    case 'switch':
+      return (
+        <Switch label={d.label()} hint={d.hint?.(s)} on={value === true} onToggle={(v) => set(v)} />
+      );
+    case 'choice': {
+      const options =
+        d.key === 'pointerMode' && touchSupport <= 0 && value !== 'touch'
+          ? d.options.filter((o) => o !== 'touch')
+          : d.options;
+      if (d.optionHint) {
+        return (
+          <div className="omg-field">
+            <span className="omg-label">{d.label()}</span>
+            <div className="omg-choice-list" role="radiogroup" aria-label={d.label()}>
+              {options.map((o) => (
+                <ChromeButton
+                  key={o}
+                  role="radio"
+                  aria-checked={o === value}
+                  className={o === value ? 'omg-choice omg-choice--on' : 'omg-choice'}
+                  onClick={() => set(o)}
+                >
+                  <span className="omg-choice__label">{d.optionLabel(o)}</span>
+                  <span className="omg-choice__hint">
+                    {d.key === 'pointerMode' && o === 'touch' && touchSupport <= 0
+                      ? sessionStrings.pointerModes.touchNotOffered
+                      : d.optionHint?.(o)}
+                  </span>
+                </ChromeButton>
+              ))}
+            </div>
+          </div>
+        );
+      }
+      const hint = d.hint?.(s);
+      return (
+        <div className="omg-field">
+          <span className="omg-label">{d.label()}</span>
+          <div className="omg-segmented" role="radiogroup" aria-label={d.label()}>
+            {options.map((o) => (
+              <ChromeButton
+                key={o}
+                role="radio"
+                aria-checked={o === value}
+                className={o === value ? 'omg-seg omg-seg--on' : 'omg-seg'}
+                onClick={() => set(o)}
+              >
+                {d.optionLabel(o)}
+              </ChromeButton>
+            ))}
+          </div>
+          {hint && <p className="omg-muted">{hint}</p>}
+        </div>
+      );
+    }
+    case 'range': {
+      const [min, max, step] = rangeOf(d);
+      const v = value as number;
+      return (
+        <div className="omg-field">
+          <label htmlFor={id} className="omg-label omg-label--row">
+            <span>{d.label()}</span>
+            <span className="omg-value">{d.format(v)}</span>
+          </label>
+          <input
+            id={id}
+            className="omg-range"
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={v}
+            aria-valuetext={d.format(v)}
+            onChange={(e) => set(Number(e.target.value))}
+          />
+        </div>
+      );
+    }
+    case 'list':
+      return (
+        <div className="omg-field omg-list-setting">
+          <span>
+            <span className="omg-choice__label">{d.label()}</span>
+            <span className="omg-choice__hint">{d.summary(s, ctx)}</span>
+          </span>
+          <ChromeButton className="omg-btn--ghost" onClick={() => onEditList(d.editor)}>
+            {sessionStrings.options.edit}
+          </ChromeButton>
+        </div>
+      );
+  }
+}
 
-/** In-session "Input options" (PTR-7, KEY-2, KEY-7, DSP-7, DSP-8). */
+/**
+ * In-session "Session options": every session setting, rendered from the shared descriptor
+ * table (`settingsSchema.ts`), saved for this connection. Values this connection overrides
+ * are marked, with "Use app default".
+ */
 export function InputMenu({
   settings: s,
   touchSupport,
+  overridden,
   onChange,
-  onEditKeyBar,
+  onUseDefault,
+  onEditList,
+  summaryContext = DEFAULT_SUMMARY_CONTEXT,
   onClose,
 }: InputMenuProps) {
-  const modes: PointerMode[] =
-    touchSupport > 0 || s.pointerMode === 'touch'
-      ? ['direct', 'trackpad', 'touch']
-      : ['direct', 'trackpad'];
-  const t = sessionStrings.input;
-  const pm = sessionStrings.pointerModes;
+  const o = sessionStrings.options;
+  const custom = [...(overridden ?? [])] as SettingKey[];
   return (
-    <Sheet title={t.title} onClose={onClose}>
-      <Section title={t.pointer}>
-        <div className="omg-choice-list" role="radiogroup" aria-label={t.pointerModeGroup}>
-          {modes.map((m) => (
-            <ChromeButton
-              key={m}
-              role="radio"
-              aria-checked={m === s.pointerMode}
-              className={m === s.pointerMode ? 'omg-choice omg-choice--on' : 'omg-choice'}
-              onClick={() => onChange({ pointerMode: m })}
-            >
-              <span className="omg-choice__label">{pm.labels[m]}</span>
-              <span className="omg-choice__hint">
-                {m === 'touch' && touchSupport <= 0 ? pm.touchNotOffered : pm.hints[m]}
-              </span>
-            </ChromeButton>
-          ))}
-        </div>
-        <Slider
-          setting="pointerSpeed"
-          label={t.pointerSpeed}
-          value={s.pointerSpeed}
-          format={times}
-          onChange={(v) => onChange({ pointerSpeed: v })}
-        />
-        <Slider
-          setting="pointerAcceleration"
-          label={t.acceleration}
-          value={s.pointerAcceleration}
-          format={(v) => (v === 0 ? t.off : times(v))}
-          onChange={(v) => onChange({ pointerAcceleration: v })}
-        />
-        <Switch
-          label={t.tapDrag}
-          hint={s.tapDrag ? t.tapDragOn : t.tapDragOff}
-          on={s.tapDrag}
-          onToggle={(v) => onChange({ tapDrag: v })}
-        />
-        <Segmented
-          label={t.directOneFinger}
-          value={s.directOneFinger}
-          options={[
-            { value: 'pan', label: t.panView },
-            { value: 'drag', label: t.dragRemote },
-          ]}
-          onChange={(v) => onChange({ directOneFinger: v })}
-        />
-        <p className="omg-muted">{t.fitsAlwaysDrags}</p>
-        <Switch
-          label={t.pointerLock}
-          hint={t.pointerLockHint}
-          on={s.pointerLock}
-          onToggle={(v) => onChange({ pointerLock: v })}
-        />
-        <Switch
-          label={t.largeCursor}
-          hint={t.largeCursorHint}
-          on={s.largeCursor}
-          onToggle={(v) => onChange({ largeCursor: v })}
-        />
-      </Section>
-
-      <Section title={t.scrolling}>
-        <Segmented
-          label={t.twoFingerDrag}
-          value={s.twoFingerDrag}
-          options={[
-            { value: 'scroll', label: t.scrollRemote },
-            { value: 'pan', label: t.panView },
-          ]}
-          onChange={(v) => onChange({ twoFingerDrag: v })}
-        />
-        <Switch
-          label={t.naturalScroll}
-          hint={t.naturalScrollHint}
-          on={s.naturalScroll}
-          onToggle={(v) => onChange({ naturalScroll: v })}
-        />
-        <Switch
-          label={t.horizontalScroll}
-          hint={t.horizontalScrollHint}
-          on={s.horizontalScroll}
-          onToggle={(v) => onChange({ horizontalScroll: v })}
-        />
-      </Section>
-
-      <Section title={t.timing}>
-        <Slider
-          setting="longPressMs"
-          label={t.longPress}
-          value={s.longPressMs}
-          format={ms}
-          onChange={(v) => onChange({ longPressMs: v })}
-        />
-        <Slider
-          setting="doubleTapWindowMs"
-          label={t.doubleTap}
-          value={s.doubleTapWindowMs}
-          format={ms}
-          onChange={(v) => onChange({ doubleTapWindowMs: v })}
-        />
-        <Slider
-          setting="tapSlopPx"
-          label={t.tapTolerance}
-          value={s.tapSlopPx}
-          format={(v) => `${Math.round(v)} px`}
-          onChange={(v) => onChange({ tapSlopPx: v })}
-        />
-      </Section>
-
-      <Section title={t.keyboard}>
-        <Segmented
-          label={t.softKeyboardText}
-          value={s.textInputMode}
-          options={[
-            { value: 'live', label: t.live },
-            { value: 'word', label: t.commitOnWord },
-          ]}
-          onChange={(v) => onChange({ textInputMode: v })}
-        />
-        <p className="omg-muted">{t.keyboardTip}</p>
-        <Switch
-          label={t.textInputBar}
-          hint={t.textInputBarHint}
-          on={s.textInputBar}
-          onToggle={(v) => onChange({ textInputBar: v })}
-        />
-        <div className="omg-sheet__actions">
-          <ChromeButton className="omg-btn--ghost" onClick={onEditKeyBar}>
-            {t.editKeyBar}
+    <Sheet title={o.title} onClose={onClose}>
+      <p className="omg-muted omg-options__intro">{o.savedForConnection}</p>
+      {onUseDefault && custom.length > 0 && (
+        <div className="omg-sheet__actions omg-options__reset-all">
+          <ChromeButton className="omg-btn--ghost" onClick={() => onUseDefault(custom)}>
+            {o.resetConnection}
           </ChromeButton>
         </div>
-      </Section>
-
-      <Section title={t.screen}>
-        <Segmented
-          label={t.splitLayout}
-          value={s.splitLayout}
-          options={[
-            { value: 'auto', label: t.whenFolded },
-            { value: 'on', label: t.on },
-            { value: 'off', label: t.off },
-          ]}
-          onChange={(v) => onChange({ splitLayout: v })}
-        />
-        <Switch
-          label={t.immersive}
-          hint={t.immersiveHint}
-          on={s.immersive}
-          onToggle={(v) => onChange({ immersive: v })}
-        />
-      </Section>
+      )}
+      {SETTING_SECTIONS.map((section) => (
+        <Section key={section} title={o.sections[section]}>
+          {descriptorsIn(section).map((d) => (
+            <div key={d.key} className="omg-setting" data-setting-key={d.key}>
+              <Control
+                d={d}
+                s={s}
+                touchSupport={touchSupport}
+                onChange={onChange}
+                onEditList={onEditList}
+                ctx={summaryContext}
+              />
+              {onUseDefault && overridden?.has(d.key) && (
+                <p className="omg-override">
+                  <span className="omg-override__tag">{o.overridden}</span>
+                  <ChromeButton
+                    className="omg-btn--small omg-btn--ghost"
+                    aria-label={o.useDefaultFor(d.label())}
+                    onClick={() => onUseDefault([d.key])}
+                  >
+                    {o.useDefault}
+                  </ChromeButton>
+                </p>
+              )}
+            </div>
+          ))}
+        </Section>
+      ))}
     </Sheet>
   );
 }

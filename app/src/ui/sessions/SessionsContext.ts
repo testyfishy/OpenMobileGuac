@@ -20,6 +20,8 @@ export interface SessionsApi {
   readonly close: (id: string) => void;
   /** Disconnects every session of a server (sign-out, server deleted or edited). */
   readonly closeServer: (serverId: string) => void;
+  /** Disconnects every open session (sign out of all servers, "Disconnect all"). */
+  readonly closeAll: () => void;
   /** Reconnects a suspended session (re-validating the sign-in first). */
   readonly reconnect: (id: string) => void;
   /**

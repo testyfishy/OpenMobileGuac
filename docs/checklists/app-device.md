@@ -64,6 +64,35 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
       system browser opens, returns to the app, signs in.
 - [ ] SAML and CAS servers, in-app browser mode.
 
+## Server management (ADM-1…ADM-6)
+
+Use an administrator account on your own server and a throwaway test connection and folder.
+Compare each step with the Guacamole web client (Settings › Connections).
+
+- [ ] As an administrator: "+" is in the connection list header, folders have an edit button,
+      and a connection's details show "Manage on server".
+- [ ] New folder "App test" at the top level: it appears (even while empty), also in the web client.
+- [ ] New RDP connection "App test RDP" in that folder with hostname, port, username and
+      password: the web client shows the same parameters (password included).
+- [ ] Edit it: change one parameter (e.g. enable wallpaper), save, check the web client, reopen
+      the editor: the value is marked as set.
+- [ ] Back with unsaved changes asks before discarding.
+- [ ] Searching "wallpaper" in the editor finds the field; labels are readable (server
+      translations or names).
+- [ ] Apply "Low bandwidth": the dialog lists exactly what changes; save and connect. The
+      session uses fewer colours and shows no wallpaper. Note how it feels on mobile data.
+- [ ] Clone it: the copy is "Copy of …", says which passwords were copied, and saves as a new
+      connection; the original is unchanged.
+- [ ] Move the copy to the top level, then move the folder; a folder cannot go into itself.
+- [ ] Delete the copy, then the folder: the confirmation says it is permanent (and, for the
+      folder, that its contents go too). Both disappear from the web client.
+- [ ] Sessions and history: while connected from another device, that session is listed and
+      Disconnect ends it.
+- [ ] A read-only account sees no management actions.
+- [ ] Revoke a right in the web client while the app is open, then try a change: the app
+      explains the refusal, hides the actions and stays signed in.
+- [ ] Diagnostics log after these steps: no parameter values or passwords appear.
+
 ## Other
 
 - [ ] Haptics on connect, favourite, success/failure (when the device has haptics enabled).
@@ -81,3 +110,33 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
       connections. The entry's close button, or restarting the app, removes it.
 - [ ] File download / print job: the share sheet opens; after a few minutes (or the next
       app start) the copy in the app cache is gone (Android: Settings › Apps › storage).
+
+## Background keep-alive, scheduled backups, sign out of all (MUL-3, SRV-12, SRV-13)
+
+- [ ] Android 13+: Settings › Sessions › "Keep sessions connected in the background" shows the
+      explanation, then the system notification prompt. Allow it.
+- [ ] With a session open, switch to another app for 10 minutes (longer than the disconnect
+      time) and turn the screen off: the notification "1 remote session connected" stays;
+      returning shows the session still connected (no reconnect). Open a second session: the
+      notification says 2.
+- [ ] Notification › Disconnect all closes every session and the notification goes away.
+      Closing the last session also removes it.
+- [ ] Deny the notification permission: sessions still stay connected (no visible
+      notification); Settings shows the explanation.
+- [ ] Setting off: sessions disconnect after the grace period as before.
+- [ ] If sessions still drop with the setting on, note the phone maker and whether setting
+      the app's battery use to Unrestricted fixes it.
+- [ ] iOS: the setting is disabled with the explanation; a session still disconnects after
+      the grace period and Reconnect works.
+- [ ] Backups › Automatic backups on (weekly): "Back up now" adds a file under "Backups on
+      this device"; Share opens the share sheet; Restore loads it into the Restore section;
+      Delete asks and removes it. With "Keep the most recent" at 2, a third backup removes the
+      oldest.
+- [ ] Set a backup passphrase: the next automatic backup says "with encrypted passwords";
+      restoring it on another device with the passphrase restores saved passwords. With the
+      app lock on, the backup that runs right after unlocking includes them.
+- [ ] Change the phone's date forward 8 days and open the app: a new automatic backup appears.
+- [ ] Settings › Security › Sign out of all servers: the dialog lists what is removed; confirm.
+      Every server then asks for its password; open sessions closed; in the web client's
+      active sessions the app's session is gone (for servers that were reachable). With
+      "Remove servers too" ticked, the server list is empty afterwards.

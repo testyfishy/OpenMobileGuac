@@ -1,4 +1,5 @@
 import { buildConnectLink } from '../../core/links/links.ts';
+import { AdminConnectionActions } from '../admin/EntryPoints.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { Sheet } from '../components/Sheet.tsx';
 import { useToast } from '../components/toastContext.ts';
@@ -94,6 +95,7 @@ export function ConnectionDetails({
           <Icon name="link" /> {c.copyLink}
         </button>
       </div>
+      <AdminConnectionActions connection={conn} onAction={onClose} />
     </Sheet>
   );
 }

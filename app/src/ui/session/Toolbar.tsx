@@ -1,39 +1,27 @@
-import { useRef } from 'react';
-import type { PointerMode } from '../../session/pointer/PointerModel.ts';
+import { forwardRef, useEffect, useRef, useState } from 'react';
 import { ChromeButton } from './ChromeButton.tsx';
+import { IconChevronDown, IconMenu, IconMore } from './icons.tsx';
 import {
-  IconChevronDown,
-  IconKeyboard,
-  IconMenu,
-  IconMore,
-  IconMultiTouch,
-  IconPaste,
-  IconTouch,
-  IconTrackpad,
-  IconView,
-  IconZoomIn,
-  IconZoomOut,
-} from './icons.tsx';
+  buildSessionActions,
+  type SessionAction,
+  type SessionActionContext,
+} from './sessionActions.tsx';
 import { sessionStrings } from './sessionStrings.ts';
+import { resolveToolbarItems, type ToolbarStyle } from './toolbarItems.ts';
 
 export interface ToolbarProps {
+  /** Effective style (side docks already resolved for the orientation). */
+  readonly style: ToolbarStyle;
+  readonly labels: 'auto' | 'always' | 'never';
+  /** Floating only: expanded row or the small handle. */
   readonly expanded: boolean;
   readonly onExpandedChange: (expanded: boolean) => void;
-  readonly pointerMode: PointerMode;
-  readonly onTogglePointerMode: () => void;
-  readonly onOpenView: () => void;
-  /** Shown in touch pass-through mode, where pinch goes to the remote. */
-  readonly onZoom?: (factor: number) => void;
   /** Immersive: the collapsed handle becomes a thin edge grip. */
   readonly immersive?: boolean;
-  readonly keyboardActive: boolean;
-  readonly onToggleKeyboard: () => void;
-  /** Hide the paste button (no clipboard path for this protocol). */
-  readonly showPaste?: boolean;
-  /** Accessible description of what Paste does for this protocol. */
-  readonly pasteHint?: string;
-  readonly onPaste: () => void;
-  readonly onTypeClipboard: () => void;
+  /** State and commands of every action. */
+  readonly context: SessionActionContext;
+  /** The user's row (`toolbarItems`), null = built-in. */
+  readonly items: readonly string[] | null;
   readonly onOpenMore: () => void;
   /** Small count on the More button (running transfers). */
   readonly moreBadge?: number;
@@ -42,22 +30,34 @@ export interface ToolbarProps {
 }
 
 const LONG_PRESS_MS = 500;
+const CONFIRM_MS = 3000;
 
 /**
- * Session toolbar: one compact row at the bottom edge (thumb reach in portrait and
- * landscape) with pointer mode, keyboard, paste, view and More; everything else is in the
- * More sheet. It collapses to a small handle on the right edge, above the bottom 60 px of
- * the desktop (taskbars, status lines). Buttons never take focus from the hidden field.
+ * Session toolbar. Floating: one compact row over the bottom of the desktop that collapses
+ * to a handle on the right edge. Docked (top / bottom / left / right): a static row that
+ * the desktop is laid out around (see `setReservedInsets`). Buttons never take focus from
+ * the hidden field. "More" is always the last button.
  */
-export function Toolbar(props: ToolbarProps) {
-  const { expanded, onExpandedChange, pointerMode, keyboardActive, onActivity } = props;
-  const pressStart = useRef<number | null>(null);
-  const longPressed = useRef(false);
+export const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(function Toolbar(props, ref) {
+  const { style, expanded, onExpandedChange, onActivity } = props;
   const t = sessionStrings.toolbar;
+  const floating = style === 'floating';
+  const badge = props.moreBadge ?? 0;
+  const actions = buildSessionActions(props.context);
+  const ids = resolveToolbarItems(props.items);
+  // Touch pass-through sends pinches to the remote: offer zoom buttons unless already there.
+  if (
+    props.context.pointerMode === 'touch' &&
+    !ids.includes('zoom-in') &&
+    !ids.includes('zoom-out')
+  ) {
+    ids.splice(ids.indexOf('pointer') + 1, 0, 'zoom-in', 'zoom-out');
+  }
+  const row = ids.map((id) => actions[id]).filter((a) => a.available);
 
-  if (!expanded) {
+  if (floating && !expanded) {
     return (
-      <div className="omg-toolbar omg-toolbar--collapsed">
+      <div ref={ref} className="omg-toolbar omg-toolbar--collapsed">
         <ChromeButton
           className={props.immersive ? 'omg-handle omg-handle--grip' : 'omg-handle'}
           aria-label={t.show}
@@ -65,132 +65,133 @@ export function Toolbar(props: ToolbarProps) {
           onClick={() => onExpandedChange(true)}
         >
           <IconMenu />
-          {(props.moreBadge ?? 0) > 0 && <span className="omg-badge-dot" aria-hidden="true" />}
+          {badge > 0 && <span className="omg-badge-dot" aria-hidden="true" />}
         </ChromeButton>
       </div>
     );
   }
 
-  const trackpad = pointerMode === 'trackpad';
-  const touch = pointerMode === 'touch';
-  const modeLabel = trackpad
-    ? sessionStrings.common.trackpad
-    : touch
-      ? t.modeMultiTouch
-      : t.modeTouch;
-  const badge = props.moreBadge ?? 0;
+  const cls = [
+    'omg-toolbar',
+    floating ? 'omg-toolbar--floating' : `omg-toolbar--dock omg-toolbar--${style}`,
+  ].join(' ');
   return (
     <div
-      className="omg-toolbar"
+      ref={ref}
+      className={cls}
       role="toolbar"
       aria-label={t.label}
+      aria-orientation={style === 'dock-left' || style === 'dock-right' ? 'vertical' : undefined}
+      data-labels={props.labels}
       onPointerDownCapture={onActivity}
       onKeyDownCapture={onActivity}
     >
       <div className="omg-toolbar__scroll">
+        {row.map((a) => (
+          <ToolButton key={a.id} action={a} />
+        ))}
+      </div>
+      <ChromeButton
+        className="omg-tool omg-tool--more"
+        aria-label={badge > 0 ? t.moreActionsRunning(badge) : t.moreActions}
+        aria-haspopup="dialog"
+        onClick={props.onOpenMore}
+      >
+        <IconMore />
+        <span className="omg-tool__label">{t.more}</span>
+        {badge > 0 && (
+          <span className="omg-tool__badge" aria-hidden="true">
+            {badge}
+          </span>
+        )}
+      </ChromeButton>
+      {floating && (
         <ChromeButton
-          className={
-            trackpad ? 'omg-tool omg-tool--mode-trackpad' : 'omg-tool omg-tool--mode-direct'
-          }
-          aria-label={t.pointer(modeLabel)}
-          onClick={props.onTogglePointerMode}
+          className="omg-tool omg-tool--collapse"
+          aria-label={t.hide}
+          aria-expanded={true}
+          onClick={() => onExpandedChange(false)}
         >
-          {trackpad ? <IconTrackpad /> : touch ? <IconMultiTouch /> : <IconTouch />}
-          <span className="omg-tool__label">{modeLabel}</span>
+          <IconChevronDown />
         </ChromeButton>
-        <ChromeButton
-          className={keyboardActive ? 'omg-tool omg-tool--on' : 'omg-tool'}
-          aria-label={keyboardActive ? t.hideKeyboard : t.showKeyboard}
-          aria-pressed={keyboardActive}
-          onClick={props.onToggleKeyboard}
-        >
-          <IconKeyboard />
-          <span className="omg-tool__label">{t.keyboard}</span>
-        </ChromeButton>
-        {props.showPaste !== false && (
-          <ChromeButton
-            className="omg-tool"
-            aria-label={t.pasteLongPress(props.pasteHint ?? sessionStrings.screen.pasteHint)}
-            onPointerDown={() => {
+      )}
+    </div>
+  );
+});
+
+function ToolButton({ action: a }: { action: SessionAction }) {
+  const pressStart = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  const [confirm, setConfirm] = useState(false);
+  useEffect(() => {
+    if (!confirm) return;
+    const id = setTimeout(() => setConfirm(false), CONFIRM_MS);
+    return () => clearTimeout(id);
+  }, [confirm]);
+  const t = sessionStrings.toolbar;
+
+  const cls = [
+    'omg-tool',
+    a.pressed ? 'omg-tool--on' : '',
+    a.danger ? 'omg-tool--danger' : '',
+    confirm ? 'omg-tool--confirm' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const label = confirm ? t.tapAgain : a.label;
+  const name = confirm ? t.disconnectConfirm : a.name;
+  const pressable = a.id === 'keyboard' || a.id === 'extra-keys' || a.id === 'sound';
+  return (
+    <ChromeButton
+      className={cls}
+      aria-label={name}
+      aria-pressed={pressable ? (a.pressed ?? false) : undefined}
+      aria-haspopup={a.opensSheet ? 'dialog' : undefined}
+      data-action={a.id}
+      onPointerDown={
+        a.onLongPress
+          ? () => {
               pressStart.current = performance.now();
               longPressed.current = false;
-            }}
-            onPointerUp={() => {
+            }
+          : undefined
+      }
+      onPointerUp={
+        a.onLongPress
+          ? () => {
               const start = pressStart.current;
               pressStart.current = null;
               if (start !== null && performance.now() - start >= LONG_PRESS_MS) {
                 longPressed.current = true;
-                props.onTypeClipboard();
+                a.onLongPress?.();
               }
-            }}
-            onPointerCancel={() => {
-              pressStart.current = null;
-            }}
-            onContextMenu={(e) => e.preventDefault()}
-            onClick={() => {
-              if (longPressed.current) {
-                longPressed.current = false;
-                return;
-              }
-              props.onPaste();
-            }}
-          >
-            <IconPaste />
-            <span className="omg-tool__label">{t.paste}</span>
-          </ChromeButton>
-        )}
-        {touch && props.onZoom && (
-          <>
-            <ChromeButton
-              className="omg-tool"
-              aria-label={t.zoomIn}
-              onClick={() => props.onZoom?.(1.25)}
-            >
-              <IconZoomIn />
-              <span className="omg-tool__label">{t.zoomInShort}</span>
-            </ChromeButton>
-            <ChromeButton
-              className="omg-tool"
-              aria-label={t.zoomOut}
-              onClick={() => props.onZoom?.(0.8)}
-            >
-              <IconZoomOut />
-              <span className="omg-tool__label">{t.zoomOutShort}</span>
-            </ChromeButton>
-          </>
-        )}
-        <ChromeButton
-          className="omg-tool"
-          aria-label={t.viewLabel}
-          aria-haspopup="dialog"
-          onClick={props.onOpenView}
-        >
-          <IconView />
-          <span className="omg-tool__label">{t.view}</span>
-        </ChromeButton>
-        <ChromeButton
-          className="omg-tool"
-          aria-label={badge > 0 ? t.moreActionsRunning(badge) : t.moreActions}
-          aria-haspopup="dialog"
-          onClick={props.onOpenMore}
-        >
-          <IconMore />
-          <span className="omg-tool__label">{t.more}</span>
-          {badge > 0 && (
-            <span className="omg-tool__badge" aria-hidden="true">
-              {badge}
-            </span>
-          )}
-        </ChromeButton>
-      </div>
-      <ChromeButton
-        className="omg-tool omg-tool--collapse"
-        aria-label={t.hide}
-        aria-expanded={true}
-        onClick={() => onExpandedChange(false)}
-      >
-        <IconChevronDown />
-      </ChromeButton>
-    </div>
+            }
+          : undefined
+      }
+      onPointerCancel={() => {
+        pressStart.current = null;
+      }}
+      onContextMenu={a.onLongPress ? (e) => e.preventDefault() : undefined}
+      onClick={() => {
+        if (longPressed.current) {
+          longPressed.current = false;
+          return;
+        }
+        if (a.danger && !confirm) {
+          setConfirm(true);
+          return;
+        }
+        setConfirm(false);
+        a.onRun();
+      }}
+    >
+      {a.icon}
+      <span className="omg-tool__label">{label}</span>
+      {(a.badge ?? 0) > 0 && (
+        <span className="omg-tool__badge" aria-hidden="true">
+          {a.badge}
+        </span>
+      )}
+    </ChromeButton>
   );
 }

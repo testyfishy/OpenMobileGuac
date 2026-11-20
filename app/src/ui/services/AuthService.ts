@@ -42,6 +42,17 @@ export type RevalidateResult = 'ok' | 'relogged' | 'needs-sign-in';
 
 export type CredentialGate = () => Promise<boolean>;
 
+/** Enough of a session to call `DELETE api/session` with a stored token. */
+export function tokenOnlySession(baseUrl: string, token: string): AuthSession {
+  return {
+    baseUrl: baseUrl.replace(/\/+$/, ''),
+    token,
+    username: '',
+    primaryDataSource: '',
+    dataSources: [''],
+  };
+}
+
 export class AuthService {
   private readonly api: GuacApi;
   private readonly secure: SecureStore;
@@ -232,6 +243,35 @@ export class AuthService {
     for (const key of secretKeys.all(profileId)) {
       await this.secure.remove(key).catch(() => undefined);
     }
+  }
+
+  /**
+   * "Sign out of all servers": for every profile, removes the saved password, session token
+   * and TOTP seed from this device, then asks each server to end its session (best effort,
+   * in parallel; a stored token is used when no session is live). Local data is removed
+   * first, so an unreachable server cannot keep anything on the device.
+   * Returns how many servers confirmed the sign-out.
+   */
+  async signOutEverywhere(profiles: readonly ServerProfile[]): Promise<{ serverSignOuts: number }> {
+    const revoke: AuthSession[] = [];
+    for (const p of profiles) {
+      const live = this.sessions.get(p.id);
+      const stored = isShareServerId(p.id)
+        ? null
+        : await this.secure.get(secretKeys.authToken(p.id)).catch(() => null);
+      const token = live?.token ?? stored;
+      if (token) revoke.push(live ?? tokenOnlySession(p.baseUrl, token));
+      this.sessions.delete(p.id);
+      this.transientPasswords.delete(p.id);
+      this.lastTotpCounter.delete(p.id);
+      for (const key of secretKeys.all(p.id)) {
+        await this.secure.remove(key).catch(() => undefined);
+      }
+      this.emit(p.id);
+    }
+    this.log?.info('auth', `signed out of ${profiles.length} server(s) on this device`);
+    const results = await Promise.allSettled(revoke.map((s) => this.api.logout(s)));
+    return { serverSignOuts: results.filter((r) => r.status === 'fulfilled').length };
   }
 
   /** Called when a profile's URL changes or it is deleted. */

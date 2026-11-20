@@ -10,7 +10,9 @@
 import type { GestureConfig } from '../../session/gesture/GestureRecognizer.ts';
 import type { FitMode } from '../../session/viewport/Viewport.ts';
 import type { PointerConfig, PointerMode } from '../../session/pointer/PointerModel.ts';
+import { GENERAL_SET_ID, isKeySetId } from '../../session/keys/KeySets.ts';
 import { normalizeKeyBarLayout } from './keyBarLayout.ts';
+import { TOOLBAR_STYLES, normalizeToolbarItems, type ToolbarStyle } from './toolbarItems.ts';
 
 export interface SessionSettings {
   fitMode: FitMode;
@@ -24,7 +26,10 @@ export interface SessionSettings {
   clipboardRemoteToDevice: boolean;
   clipboardAutoSendOnFocus: boolean;
   keepAwake: boolean;
-  /** e.g. "Ctrl+Shift+Esc", parsed by KeyModel.parseCombo. */
+  /**
+   * Legacy (before the key library): e.g. "Ctrl+Shift+Esc". Still read and offered in the
+   * combo menu; new combos are saved in the app's key library (`AppSettings.keys`).
+   */
   customCombos: string[];
 
   // ---- Input options (PTR-7 and later; optional for compatibility)
@@ -48,8 +53,17 @@ export interface SessionSettings {
   textInputMode?: 'live' | 'word';
   /** Show the visible "Text input" bar (type / dictate / paste, then Send). */
   textInputBar?: boolean;
-  /** Key bar rows (tokens, see keyBarLayout.ts); null = built-in layout. */
+  /**
+   * Legacy (before key sets): this connection's own key bar rows; null = none. Shown as the
+   * "Custom layout" set until the user picks another set.
+   */
   keyBarLayout?: string[][] | null;
+  /** KEY-9: the extra key bar's key set (id from the key library). */
+  keySet?: string;
+  /** KEY-9: a sideways swipe on the key bar switches to the next / previous set. */
+  keySetSwipe?: boolean;
+  /** FIL-1: files (and print jobs) the remote pushes: ask, always accept or always decline. */
+  remoteFiles?: RemoteFilesPolicy;
   /** Larger, high-contrast cursor overlay. */
   largeCursor?: boolean;
   /** Split layout: display above a trackpad + key bar. `auto` = on a folded (tabletop) device. */
@@ -60,7 +74,39 @@ export interface SessionSettings {
   pointerLock?: boolean;
   /** AUD-1: remote audio muted for this connection. */
   audioMuted?: boolean;
+
+  // ---- Toolbar and keyboard dismissal (optional for compatibility)
+  /**
+   * Floating (collapsible, over the desktop) or a static row docked to an edge that the
+   * desktop is laid out around. Side docks apply in landscape; portrait uses the bottom.
+   */
+  toolbarStyle?: ToolbarStyle;
+  /** Actions in the toolbar row, in order (ids from toolbarItems.ts); null = built-in row. */
+  toolbarItems?: string[] | null;
+  /** Labels under the icons: `auto` hides them on short (landscape) screens. */
+  toolbarLabels?: 'auto' | 'always' | 'never';
+  /** Floating toolbar: collapse to a handle after a few seconds without use. */
+  toolbarAutoHide?: boolean;
+  /**
+   * A tap on the remote while the soft keyboard is up: `off` (only a click), `hide-click`
+   * (hides the keyboard and clicks) or `hide-only` (hides the keyboard, no click). Stored
+   * booleans from older versions map to `hide-click` / `off`.
+   */
+  tapDismissKeyboard?: TapDismissMode;
+  /** Swiping down on the extra key bar hides the keyboard (or the key bar). */
+  keyBarSwipeDismiss?: boolean;
 }
+
+export type TapDismissMode = 'off' | 'hide-click' | 'hide-only';
+export const TAP_DISMISS_MODES: readonly TapDismissMode[] = ['off', 'hide-click', 'hide-only'];
+export type RemoteFilesPolicy = 'ask' | 'accept' | 'decline';
+export const REMOTE_FILES_POLICIES: readonly RemoteFilesPolicy[] = ['ask', 'accept', 'decline'];
+
+/**
+ * Fields still read (for migration and old stored values) but no longer edited as session
+ * settings: key sets and the key library replace them. The descriptor table skips them.
+ */
+export const LEGACY_SESSION_KEYS = ['keyBarLayout', 'customCombos'] as const;
 
 /** Settings with every optional field resolved. */
 export type ResolvedSessionSettings = Required<SessionSettings>;
@@ -92,6 +138,15 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   immersive: false,
   pointerLock: false,
   audioMuted: false,
+  toolbarStyle: 'dock-bottom',
+  toolbarItems: null,
+  toolbarLabels: 'auto',
+  toolbarAutoHide: true,
+  tapDismissKeyboard: 'off',
+  keyBarSwipeDismiss: true,
+  keySet: GENERAL_SET_ID,
+  keySetSwipe: false,
+  remoteFiles: 'ask',
 };
 
 export const MIN_POINTER_SPEED = 0.25;
@@ -127,6 +182,13 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
 
 function bool(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+/** Three-way tap-to-hide; booleans from older versions: true → hide and click. */
+function tapDismiss(value: unknown): TapDismissMode {
+  if (value === true) return 'hide-click';
+  if (value === false) return 'off';
+  return oneOf(value, TAP_DISMISS_MODES, DEFAULT_SESSION_SETTINGS.tapDismissKeyboard);
 }
 
 const FIT_MODES_LIST: readonly FitMode[] = ['fit-screen', 'fit-width', 'fit-height', 'one-to-one'];
@@ -167,6 +229,19 @@ export function normalizeSessionSettings(
     immersive: bool(raw['immersive'], d.immersive),
     pointerLock: bool(raw['pointerLock'], d.pointerLock),
     audioMuted: bool(raw['audioMuted'], d.audioMuted),
+    toolbarStyle: oneOf(raw['toolbarStyle'], TOOLBAR_STYLES, d.toolbarStyle),
+    toolbarItems: normalizeToolbarItems(raw['toolbarItems']),
+    toolbarLabels: oneOf(
+      raw['toolbarLabels'],
+      ['auto', 'always', 'never'] as const,
+      d.toolbarLabels,
+    ),
+    toolbarAutoHide: bool(raw['toolbarAutoHide'], d.toolbarAutoHide),
+    tapDismissKeyboard: tapDismiss(raw['tapDismissKeyboard']),
+    keyBarSwipeDismiss: bool(raw['keyBarSwipeDismiss'], d.keyBarSwipeDismiss),
+    keySet: isKeySetId(raw['keySet']) ? raw['keySet'] : d.keySet,
+    keySetSwipe: bool(raw['keySetSwipe'], d.keySetSwipe),
+    remoteFiles: oneOf(raw['remoteFiles'], REMOTE_FILES_POLICIES, d.remoteFiles),
   };
 }
 
@@ -192,6 +267,15 @@ export const INPUT_SETTING_KEYS = [
   'immersive',
   'pointerLock',
   'audioMuted',
+  'toolbarStyle',
+  'toolbarItems',
+  'toolbarLabels',
+  'toolbarAutoHide',
+  'tapDismissKeyboard',
+  'keyBarSwipeDismiss',
+  'keySet',
+  'keySetSwipe',
+  'remoteFiles',
 ] as const satisfies readonly (keyof SessionSettings)[];
 
 /**

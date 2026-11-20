@@ -43,6 +43,13 @@ export type GuacErrorInfo =
    * indistinguishable upstream from a real permission denial.
    */
   | ({ readonly kind: 'session-expired' } & ServerDetail)
+  /**
+   * `PERMISSION_DENIED` on a management call while the session is still valid (checked with
+   * `HEAD api/session`): the account may not do this (docs/protocol-notes.md §8.3).
+   */
+  | ({ readonly kind: 'permission-denied' } & ServerDetail)
+  /** `NOT_FOUND` on a management call: the object no longer exists on the server. */
+  | ({ readonly kind: 'not-found' } & ServerDetail)
   /** The server returned JSON of an unexpected shape on a known endpoint. */
   | { readonly kind: 'invalid-response'; readonly url: string; readonly detail: string }
   /**
@@ -121,6 +128,10 @@ function describe(info: GuacErrorInfo): string {
       return `Additional credentials required: ${info.expected.map((f) => f.name).join(', ')}`;
     case 'session-expired':
       return 'Session expired';
+    case 'permission-denied':
+      return 'Permission denied';
+    case 'not-found':
+      return 'Not found';
     case 'server-error':
       return info.message ?? `Server error (${info.type})`;
   }

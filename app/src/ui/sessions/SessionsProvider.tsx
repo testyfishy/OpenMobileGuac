@@ -12,7 +12,16 @@ import type { RevalidateResult } from '../services/AuthService.ts';
 import { DEMO_PROFILE_ID } from '../integration/demoProfile.ts';
 import type { SessionTarget } from '../nav/navigation.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
-import { haptic, onAppActiveChange } from '../services/native.ts';
+import {
+  isAndroid,
+  keepAliveRunning,
+  onDisconnectAllPressed,
+  startOrUpdateKeepAlive,
+  stopKeepAlive,
+} from '../services/keepAlive.ts';
+import { haptic, onAppActiveChange, platformName } from '../services/native.ts';
+import { strings } from '../strings.ts';
+import { graceApplies, shouldSuspendInBackground, wantKeepAlive } from './backgroundPolicy.ts';
 import { isInsecureUrl } from '../servers/serverForm.ts';
 import { parseServerOptions } from '../settings/settingsModel.ts';
 import { seedPolicy } from '../servers/seedPolicy.ts';
@@ -22,7 +31,6 @@ import {
   decideAuthRecovery,
   decideOpen,
   sessionsReducer,
-  shouldSuspend,
   type OpenSession,
 } from './sessionModel.ts';
 import { SessionsContext, type SessionsApi } from './SessionsContext.ts';
@@ -112,6 +120,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const closeServer = useCallback((serverId: string) => {
     dispatch({ type: 'close-server', serverId });
   }, []);
+
+  const closeAll = useCallback(() => {
+    for (const s of stateRef.current.sessions) dispatch({ type: 'close', id: s.id });
+    setSwitcherOpen(false);
+    services.log.info('session', 'closed all sessions');
+  }, [services.log]);
 
   const findProfile = useCallback(
     async (serverId: string): Promise<ServerProfile | undefined> => {
@@ -229,13 +243,51 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [findProfile, revalidateServer, services.log],
   );
 
-  // ---- T2.1 lifecycle: grace timer (best effort) plus a timestamp check on return.
+  // ---- Android keep-alive: a foreground service while at least one session is live and
+  // "Keep sessions connected in the background" is on. Started and updated while the app is
+  // visible (sessions open in the foreground); stopped when the last session closes.
+  const liveCount = state.sessions.filter((s) => s.state === 'live').length;
+  const keepAliveWanted = wantKeepAlive({
+    platform: isAndroid() ? 'android' : platformName() === 'ios' ? 'ios' : 'web',
+    enabled: settings.keepAliveBackground,
+    liveSessions: liveCount,
+  });
+  useEffect(() => {
+    if (!keepAliveWanted) {
+      void stopKeepAlive();
+      return;
+    }
+    const t = strings.settings;
+    void startOrUpdateKeepAlive({
+      title: t.notifTitle(liveCount),
+      body: t.notifBody,
+      disconnectAll: t.notifDisconnectAll,
+      channelName: t.channelName,
+      channelDescription: t.channelDescription,
+    }).then((ok) =>
+      services.log.info('session', `keep-alive service ${ok ? 'running' : 'failed to start'}`),
+    );
+  }, [keepAliveWanted, liveCount, services.log]);
+  useEffect(() => () => void stopKeepAlive(), []);
+  useEffect(() => {
+    const sub = onDisconnectAllPressed(() => closeAll());
+    return () => sub.dispose();
+  }, [closeAll]);
+
+  // ---- T2.1 lifecycle: grace timer (best effort) plus a timestamp check on return. With the
+  // keep-alive service running, the timer does not disconnect.
   useEffect(() => {
     let backgroundedAt: number | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const suspendIfDue = () => {
       const grace = settingsRef.current.backgroundDisconnectSeconds;
-      if (!shouldSuspend(backgroundedAt, Date.now(), grace)) return;
+      const due = shouldSuspendInBackground({
+        backgroundedAt,
+        now: Date.now(),
+        graceSeconds: grace,
+        keepAliveRunning: keepAliveRunning(),
+      });
+      if (!due) return;
       if (stateRef.current.sessions.some((s) => s.state === 'live')) {
         services.log.info('session', 'background grace period over: disconnecting sessions');
         dispatch({ type: 'suspend-all' });
@@ -247,7 +299,12 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       if (!active) {
         backgroundedAt = Date.now();
         const grace = settingsRef.current.backgroundDisconnectSeconds;
-        if (grace !== null) timer = setTimeout(suspendIfDue, grace * 1000 + 50);
+        if (
+          graceApplies({ graceSeconds: grace, keepAliveRunning: keepAliveRunning() }) &&
+          grace !== null
+        ) {
+          timer = setTimeout(suspendIfDue, grace * 1000 + 50);
+        }
       } else {
         clearTimeout(timer);
         suspendIfDue();
@@ -301,12 +358,25 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       hide,
       close,
       closeServer,
+      closeAll,
       reconnect,
       recoverSignIn,
       switcherOpen,
       setSwitcherOpen,
     }),
-    [state, limit, open, show, hide, close, closeServer, reconnect, recoverSignIn, switcherOpen],
+    [
+      state,
+      limit,
+      open,
+      show,
+      hide,
+      close,
+      closeServer,
+      closeAll,
+      reconnect,
+      recoverSignIn,
+      switcherOpen,
+    ],
   );
 
   return <SessionsContext.Provider value={api}>{children}</SessionsContext.Provider>;

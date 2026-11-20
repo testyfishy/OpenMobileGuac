@@ -21,6 +21,8 @@ import {
   decideHardwareKey,
   isModifierKey,
 } from '../../session/keys/HardwareKeyboard.ts';
+import { comboSchedule, type ComboStep } from '../../session/keys/ComboLibrary.ts';
+import { onTapRecognised, onTouchDown } from './tapDismiss.ts';
 import {
   KEYSYM,
   KeyModel,
@@ -157,6 +159,8 @@ export interface SessionControllerOptions {
   readonly onThumbnail?: (dataUrl: string) => void;
   /** Short user-facing notice (toast), e.g. a finished download. */
   readonly notify?: (text: string) => void;
+  /** Hide the native soft keyboard (tap-to-dismiss; the field is blurred as well). */
+  readonly hideNativeKeyboard?: () => void;
 }
 
 /** Figures for the session info sheet. */
@@ -247,7 +251,12 @@ export class SessionController {
     deliver: (blob, name, print) => deliverFile(blob, name, { print }),
     log: (level, message) => this.log(level, message),
     notify: (text) => this.opts?.notify?.(text),
+    incomingPolicy: () => this.settings.remoteFiles,
   });
+  /** Pending step of a running combo with pauses (KEY-9). */
+  private comboTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Pointers swallowed by "hide only" tap-to-hide, until they lift. */
+  private readonly swallowed = new Set<number>();
   private thumbTimer: ReturnType<typeof setTimeout> | null = null;
   private lastThumbAt = 0;
   private stats = emptyStats();
@@ -261,6 +270,8 @@ export class SessionController {
   private nativeKeyboardHeight = 0;
   private webKeyboardSeen = false;
   private keyBarHeight = 0;
+  /** Space a docked toolbar takes at each edge (merged into the safe-area insets). */
+  private reserved: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
   private keyboardCover = 0;
   private measured: Size = { width: 0, height: 0 };
   private matchSizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -722,11 +733,11 @@ export class SessionController {
     };
     this.setCursorImage(null, 0, 0);
 
-    const screen = this.viewport.screen;
+    const avail = this.availableSize();
     const dpr = window.devicePixelRatio || 1;
     const size = optimalDisplaySize(
-      screen.width || window.innerWidth,
-      screen.height || window.innerHeight,
+      avail.width || window.innerWidth,
+      avail.height || window.innerHeight,
       dpr,
     );
     try {
@@ -984,6 +995,36 @@ export class SessionController {
     this.measure();
   }
 
+  /**
+   * Space a docked toolbar takes at the edges (CSS px, its safe-area padding included). The
+   * desktop is fitted into what is left, so the toolbar never covers it.
+   */
+  setReservedInsets(edges: Insets): void {
+    const r = {
+      top: Math.max(0, Math.round(edges.top)),
+      right: Math.max(0, Math.round(edges.right)),
+      bottom: Math.max(0, Math.round(edges.bottom)),
+      left: Math.max(0, Math.round(edges.left)),
+    };
+    const p = this.reserved;
+    if (r.top === p.top && r.right === p.right && r.bottom === p.bottom && r.left === p.left) {
+      return;
+    }
+    this.reserved = r;
+    this.measure();
+    this.scheduleMatchSize();
+  }
+
+  /** The screen minus the docked toolbar: what the remote desktop is fitted into. */
+  private availableSize(): Size {
+    const { width, height } = this.viewport.screen;
+    const r = this.reserved;
+    return {
+      width: Math.max(0, width - r.left - r.right),
+      height: Math.max(0, height - r.top - r.bottom),
+    };
+  }
+
   private setViewport(next: ViewportState): void {
     this.viewport = next;
     this.render();
@@ -1006,11 +1047,13 @@ export class SessionController {
       const n = parseFloat(v);
       return Number.isFinite(n) ? n : 0;
     };
+    // A docked toolbar's measured size already includes the safe area on its edge.
+    const r = this.reserved;
     return {
-      top: px(cs.paddingTop),
-      right: px(cs.paddingRight),
-      bottom: px(cs.paddingBottom),
-      left: px(cs.paddingLeft),
+      top: Math.max(px(cs.paddingTop), r.top),
+      right: Math.max(px(cs.paddingRight), r.right),
+      bottom: Math.max(px(cs.paddingBottom), r.bottom),
+      left: Math.max(px(cs.paddingLeft), r.left),
     };
   }
 
@@ -1113,7 +1156,7 @@ export class SessionController {
       const client = this.client;
       if (!client || !this.settings.matchDeviceSize) return;
       if (this.machine.phase.kind !== 'connected') return;
-      const { width, height } = this.viewport.screen;
+      const { width, height } = this.availableSize();
       if (width <= 0 || height <= 0) return;
       const size = optimalDisplaySize(width, height, window.devicePixelRatio || 1);
       const display = client.getDisplay();
@@ -1299,6 +1342,33 @@ export class SessionController {
     this.sendKeyEvents(this.keys.runCombo(combo));
   }
 
+  /**
+   * KEY-9: a saved combo, with the pauses between its steps. Each step presses and releases
+   * its keys before a pause, so stopping (disconnect, hide, blur) never leaves a key held.
+   * A new combo stops one still running.
+   */
+  runComboSteps(steps: readonly ComboStep[]): void {
+    this.flushText();
+    this.cancelCombo();
+    const phases = comboSchedule(steps, this.keys.heldKeysyms());
+    const run = (i: number) => {
+      this.comboTimer = null;
+      const p = phases[i];
+      if (!p || !this.client) return;
+      this.sendKeyEvents(p.events);
+      if (i + 1 < phases.length) this.comboTimer = setTimeout(() => run(i + 1), p.waitMs);
+    };
+    run(0);
+  }
+
+  /** Stop a combo still waiting between steps. Returns whether one was running. */
+  cancelCombo(): boolean {
+    if (this.comboTimer === null) return false;
+    clearTimeout(this.comboTimer);
+    this.comboTimer = null;
+    return true;
+  }
+
   /** CLP-3 / text input bar: type text as keystrokes. */
   typeText(text: string): void {
     this.flushText();
@@ -1343,10 +1413,29 @@ export class SessionController {
         if (g.type === 'tap' || g.type === 'two-finger-tap' || g.type === 'three-finger-tap') {
           this.flushBeforeClick();
         }
+        if (g.type === 'tap' || (g.type === 'pending-tap' && g.phase === 'start')) {
+          this.maybeDismissKeyboardOnTap();
+        }
         this.applyPointerOutput(this.pointer.handle(g, this.viewport));
       }
     }
     this.scheduleTick();
+  }
+
+  /**
+   * Opt-in (`tapDismissKeyboard`): a one-finger tap on the display while the soft keyboard is
+   * up hides it. The tap is still delivered (it clicks), so no button is left half pressed.
+   */
+  private maybeDismissKeyboardOnTap(): void {
+    const mode = this.settings.tapDismissKeyboard;
+    if (onTapRecognised(mode, this.fieldFocused()) !== 'hide-and-pass') return;
+    this.hideKeyboard();
+    this.opts?.hideNativeKeyboard?.();
+  }
+
+  private fieldFocused(): boolean {
+    const field = this.els?.field;
+    return !!field && document.activeElement === field;
   }
 
   /** Before a click: send text held by commit-on-word and press lazy hardware modifiers. */
@@ -1374,6 +1463,8 @@ export class SessionController {
   }
 
   private releaseInputs(): void {
+    this.cancelCombo();
+    this.swallowed.clear();
     const client = this.client;
     const released: KeyEvent[] = [...this.hw.releaseAll(), ...this.keys.releaseAll()];
     if (client) for (const e of released) client.sendKeyEvent(e.pressed ? 1 : 0, e.keysym);
@@ -1506,6 +1597,21 @@ export class SessionController {
       if (e.cancelable) e.preventDefault();
       if (!this.active) return;
       const kind = pointerKind(e.pointerType);
+      // "Hide only": the touch that lands while the keyboard is up just hides it.
+      if (this.swallowed.has(e.pointerId)) {
+        if (type === 'up' || type === 'cancel') this.swallowed.delete(e.pointerId);
+        return;
+      }
+      if (
+        type === 'down' &&
+        kind !== 'mouse' &&
+        onTouchDown(this.settings.tapDismissKeyboard, this.fieldFocused()) === 'hide-and-swallow'
+      ) {
+        this.swallowed.add(e.pointerId);
+        this.hideKeyboard();
+        this.opts?.hideNativeKeyboard?.();
+        return;
+      }
       if (type === 'down') {
         try {
           layer.setPointerCapture(e.pointerId);

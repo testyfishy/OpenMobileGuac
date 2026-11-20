@@ -1,165 +1,239 @@
-import { useId, useState } from 'react';
-import type { Combo } from '../../session/keys/KeyModel.ts';
+import { useState } from 'react';
+import {
+  stepsFromText,
+  stepsToText,
+  type ComboStep,
+  type SavedCombo,
+} from '../../session/keys/ComboLibrary.ts';
+import { COMBO_PRESETS } from '../../session/keys/KeyModel.ts';
+import type { KeyLibraryAction } from '../../session/keys/KeySets.ts';
 import { ChromeButton } from './ChromeButton.tsx';
-import { comboMenuEntries, reduceComboList, validateCombo } from './combos.ts';
+import { ComboBuilder } from './ComboBuilder.tsx';
+import { comboPreview } from './keySetNames.ts';
 import { IconArrow, IconTrash } from './icons.tsx';
 import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 
 export interface ComboMenuProps {
-  readonly customCombos: readonly string[];
-  readonly onRun: (combo: Combo, label: string) => void;
-  readonly onChangeCombos: (list: string[]) => void;
-  readonly onTypeClipboard: () => void;
+  /** Saved combos (the app's key library). */
+  readonly combos: readonly SavedCombo[];
+  /** Legacy text combos stored on this connection by an older version. */
+  readonly legacy?: readonly string[];
+  /** Run a combo (omit outside a session: the sheet opens in edit mode). */
+  readonly onRun?: (steps: readonly ComboStep[], label: string) => void;
+  readonly onLibrary: (action: KeyLibraryAction) => void;
+  /** A fresh id for a new combo. */
+  readonly newId: () => string;
+  readonly onTypeClipboard?: () => void;
   readonly onClose: () => void;
 }
 
-/** KEY-4: presets plus user combos (add, delete, reorder), and "type clipboard" (CLP-3). */
+type Mode = { kind: 'run' } | { kind: 'edit' } | { kind: 'build'; combo: SavedCombo | null };
+
+/**
+ * KEY-4 / KEY-9: run presets, saved combos and legacy combos; manage the saved combos
+ * (new, edit with the combo builder, reorder, delete); "type clipboard" (CLP-3).
+ */
 export function ComboMenu({
-  customCombos,
+  combos,
+  legacy = [],
   onRun,
-  onChangeCombos,
+  onLibrary,
+  newId,
   onTypeClipboard,
   onClose,
 }: ComboMenuProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const inputId = useId();
-  const errorId = useId();
-  const entries = comboMenuEntries(customCombos);
-  const preview = draft.trim() === '' ? null : validateCombo(draft);
+  const [mode, setMode] = useState<Mode>(onRun ? { kind: 'run' } : { kind: 'edit' });
   const t = sessionStrings.combos;
+  const savedTexts = new Set(combos.map((c) => stepsToText(c.steps)));
+  const legacyLeft = legacy
+    .map((text) => {
+      const r = stepsFromText(text);
+      return r.ok ? { text: stepsToText(r.steps), steps: r.steps } : null;
+    })
+    .filter(
+      (x): x is { text: string; steps: ComboStep[] } => x !== null && !savedTexts.has(x.text),
+    );
 
-  const add = () => {
-    const r = reduceComboList(customCombos, { type: 'add', text: draft });
-    if (!r.ok) {
-      setError(r.error);
-      return;
-    }
-    setError(null);
-    setDraft('');
-    onChangeCombos(r.list);
+  if (mode.kind === 'build') {
+    const editing = mode.combo;
+    return (
+      <ComboBuilder
+        initial={editing}
+        id={editing?.id ?? newId()}
+        onSave={(combo) => {
+          onLibrary({ type: 'save-combo', combo });
+          setMode({ kind: 'edit' });
+        }}
+        {...(editing
+          ? {
+              onDelete: () => {
+                onLibrary({ type: 'delete-combo', id: editing.id });
+                setMode({ kind: 'edit' });
+              },
+            }
+          : {})}
+        {...(onRun
+          ? { onTry: (steps: readonly ComboStep[]) => onRun(steps, comboPreview(steps)) }
+          : {})}
+        onClose={() => setMode({ kind: 'edit' })}
+      />
+    );
+  }
+
+  const run = (steps: readonly ComboStep[], label: string) => {
+    onRun?.(steps, label);
+    onClose();
   };
 
   return (
-    <Sheet title={editing ? t.editTitle : t.title} onClose={onClose}>
-      {!editing && (
+    <Sheet title={mode.kind === 'edit' ? t.editTitle : t.title} onClose={onClose}>
+      {mode.kind === 'run' && (
         <>
+          <h3 className="omg-label">{t.presets}</h3>
           <div className="omg-combo-grid">
-            {entries.map((e) => (
+            {COMBO_PRESETS.map((p) => (
               <ChromeButton
-                key={e.key}
+                key={p.id}
                 className="omg-combo"
-                onClick={() => {
-                  onRun(e.combo, e.label);
-                  onClose();
-                }}
+                onClick={() =>
+                  run(
+                    p.combo.steps.map((keys) => ({ keys })),
+                    p.label,
+                  )
+                }
               >
-                {e.label}
+                {p.label}
               </ChromeButton>
             ))}
           </div>
+          {combos.length > 0 && (
+            <>
+              <h3 className="omg-label">{t.mine}</h3>
+              <div className="omg-combo-grid">
+                {combos.map((c) => (
+                  <ChromeButton
+                    key={c.id}
+                    className="omg-combo"
+                    title={comboPreview(c.steps)}
+                    onClick={() => run(c.steps, c.name)}
+                  >
+                    {c.name}
+                  </ChromeButton>
+                ))}
+              </div>
+            </>
+          )}
+          {legacyLeft.length > 0 && (
+            <>
+              <h3 className="omg-label">{t.legacyTitle}</h3>
+              <div className="omg-combo-grid">
+                {legacyLeft.map((l) => (
+                  <ChromeButton
+                    key={l.text}
+                    className="omg-combo"
+                    onClick={() => run(l.steps, l.text)}
+                  >
+                    {l.text}
+                  </ChromeButton>
+                ))}
+              </div>
+            </>
+          )}
           <div className="omg-sheet__actions">
-            <ChromeButton
-              className="omg-btn--ghost"
-              onClick={() => {
-                onTypeClipboard();
-                onClose();
-              }}
-            >
-              {t.typeClipboard}
-            </ChromeButton>
-            <ChromeButton className="omg-btn--ghost" onClick={() => setEditing(true)}>
+            {onTypeClipboard && (
+              <ChromeButton
+                className="omg-btn--ghost"
+                onClick={() => {
+                  onTypeClipboard();
+                  onClose();
+                }}
+              >
+                {t.typeClipboard}
+              </ChromeButton>
+            )}
+            <ChromeButton className="omg-btn--ghost" onClick={() => setMode({ kind: 'edit' })}>
               {t.editMine}
             </ChromeButton>
           </div>
         </>
       )}
-      {editing && (
+      {mode.kind === 'edit' && (
         <>
-          {customCombos.length === 0 && <p className="omg-muted">{t.noneYet}</p>}
+          {combos.length === 0 && <p className="omg-muted">{t.noneYet}</p>}
           <ol className="omg-combo-list">
-            {customCombos.map((c, i) => (
-              <li key={`${i}:${c}`} className="omg-combo-list__item">
-                <span className="omg-combo-list__label">{c}</span>
+            {combos.map((c, i) => (
+              <li key={c.id} className="omg-combo-list__item" data-combo-id={c.id}>
+                <ChromeButton
+                  className="omg-btn--ghost omg-combo-list__label"
+                  aria-label={t.editCombo(c.name)}
+                  onClick={() => setMode({ kind: 'build', combo: c })}
+                >
+                  <span>{c.name}</span>
+                  <span className="omg-muted"> {comboPreview(c.steps)}</span>
+                </ChromeButton>
                 <ChromeButton
                   className="omg-btn--icon"
-                  aria-label={t.moveUp(c)}
+                  aria-label={t.moveUp(c.name)}
                   disabled={i === 0}
-                  onClick={() =>
-                    onChangeCombos(
-                      reduceComboList(customCombos, { type: 'move', index: i, delta: -1 }).list,
-                    )
-                  }
+                  onClick={() => onLibrary({ type: 'move-combo', id: c.id, delta: -1 })}
                 >
                   <IconArrow dir="up" />
                 </ChromeButton>
                 <ChromeButton
                   className="omg-btn--icon"
-                  aria-label={t.moveDown(c)}
-                  disabled={i === customCombos.length - 1}
-                  onClick={() =>
-                    onChangeCombos(
-                      reduceComboList(customCombos, { type: 'move', index: i, delta: 1 }).list,
-                    )
-                  }
+                  aria-label={t.moveDown(c.name)}
+                  disabled={i === combos.length - 1}
+                  onClick={() => onLibrary({ type: 'move-combo', id: c.id, delta: 1 })}
                 >
                   <IconArrow dir="down" />
                 </ChromeButton>
                 <ChromeButton
                   className="omg-btn--icon omg-btn--danger"
-                  aria-label={t.remove(c)}
-                  onClick={() =>
-                    onChangeCombos(reduceComboList(customCombos, { type: 'remove', index: i }).list)
-                  }
+                  aria-label={t.remove(c.name)}
+                  onClick={() => onLibrary({ type: 'delete-combo', id: c.id })}
                 >
                   <IconTrash />
                 </ChromeButton>
               </li>
             ))}
           </ol>
-          <form
-            className="omg-combo-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              add();
-            }}
-          >
-            <label htmlFor={inputId} className="omg-label">
-              {t.newCombo}
-            </label>
-            <div className="omg-combo-form__row">
-              <input
-                id={inputId}
-                className="omg-input"
-                value={draft}
-                placeholder={t.placeholder}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                aria-invalid={error !== null}
-                aria-describedby={errorId}
-                onChange={(e) => {
-                  setDraft(e.target.value);
-                  setError(null);
-                }}
-              />
-              <button type="submit" className="omg-btn omg-btn--primary" disabled={!preview?.ok}>
-                {sessionStrings.common.add}
-              </button>
-            </div>
-            <p
-              id={errorId}
-              className={error || (preview && !preview.ok) ? 'omg-error' : 'omg-muted'}
-            >
-              {error ??
-                (preview ? (preview.ok ? t.willSend(preview.canonical) : preview.error) : t.syntax)}
-            </p>
-          </form>
+          {legacyLeft.length > 0 && (
+            <>
+              <h3 className="omg-label">{t.legacyTitle}</h3>
+              <p className="omg-muted">{t.legacyHint}</p>
+              <ul className="omg-combo-list">
+                {legacyLeft.map((l) => (
+                  <li key={l.text} className="omg-combo-list__item">
+                    <span className="omg-combo-list__label">{l.text}</span>
+                    <ChromeButton
+                      className="omg-btn--ghost omg-btn--small"
+                      aria-label={t.saveToMine(l.text)}
+                      onClick={() =>
+                        onLibrary({
+                          type: 'save-combo',
+                          combo: { id: newId(), name: l.text, steps: l.steps },
+                        })
+                      }
+                    >
+                      {t.save}
+                    </ChromeButton>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <div className="omg-sheet__actions">
-            <ChromeButton className="omg-btn--ghost" onClick={() => setEditing(false)}>
+            <ChromeButton
+              className="omg-btn--primary"
+              onClick={() => setMode({ kind: 'build', combo: null })}
+            >
+              {t.newButton}
+            </ChromeButton>
+            <ChromeButton
+              className="omg-btn--ghost"
+              onClick={() => (onRun ? setMode({ kind: 'run' }) : onClose())}
+            >
               {sessionStrings.common.done}
             </ChromeButton>
           </div>

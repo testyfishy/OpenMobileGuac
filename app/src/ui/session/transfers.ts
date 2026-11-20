@@ -40,13 +40,16 @@ import {
 } from '../../session/transfer/directoryIndex.ts';
 import {
   isFinished,
+  isPrintJob,
   reduceTransfers,
   type Transfer,
   type TransferEvent,
 } from '../../session/transfer/TransferModel.ts';
 import { decodeUtf8Chunks } from './clipboardText.ts';
 import type { DeliverResult } from './fileSave.ts';
+import { decideIncoming } from './incomingFiles.ts';
 import { sessionStrings } from './sessionStrings.ts';
+import type { RemoteFilesPolicy } from './settings.ts';
 
 type GuacClient = InstanceType<typeof Guacamole.Client>;
 type GuacObject = InstanceType<typeof Guacamole.Object>;
@@ -57,6 +60,12 @@ const SUCCESS = 0x0000;
 const UNSUPPORTED = 0x0100;
 /** Status sent to abort a download the user cancelled (any non-success code aborts). */
 const ABORT = 0x0300;
+/**
+ * Status sent when the user declines a pushed file (CLIENT_FORBIDDEN). guacd's download and
+ * print-job ack handlers end the stream on any non-success status (guacamole-server 1.6.0
+ * `rdp/download.c` `guac_rdp_download_ack_handler`, `rdp/print-job.c`).
+ */
+export const DECLINED = 0x0303;
 const REQUEST_TIMEOUT_MS = 20_000;
 const PUBLISH_MS = 150;
 
@@ -69,9 +78,19 @@ export interface FilesystemView {
   readonly error: string | null;
 }
 
+/** A file the remote pushed, waiting for the user's Accept / Decline. */
+export interface IncomingPrompt {
+  readonly id: number;
+  readonly filename: string;
+  readonly mimetype: string;
+  readonly print: boolean;
+}
+
 export interface TransfersSnapshot {
   readonly transfers: readonly Transfer[];
   readonly filesystems: readonly FilesystemView[];
+  /** Pushed files waiting for consent, oldest first. */
+  readonly prompts: readonly IncomingPrompt[];
 }
 
 export interface TransferManagerOptions {
@@ -79,6 +98,13 @@ export interface TransferManagerOptions {
   readonly log: (level: 'info' | 'warn' | 'error', message: string) => void;
   /** A pushed download or print job finished or failed (for a toast). */
   readonly notify?: (text: string) => void;
+  /** "Files from the remote" for pushed files and print jobs (default: accept). */
+  readonly incomingPolicy?: () => RemoteFilesPolicy;
+}
+
+interface PendingIncoming {
+  readonly prompt: IncomingPrompt;
+  readonly stream: InputStream;
 }
 
 interface FsState {
@@ -102,7 +128,9 @@ export class TransferManager {
   private readonly active = new Map<number, Active>();
   private nextId = 1;
   private nextFsId = 1;
-  private snapshot: TransfersSnapshot = { transfers: [], filesystems: [] };
+  private snapshot: TransfersSnapshot = { transfers: [], filesystems: [], prompts: [] };
+  private pending: PendingIncoming[] = [];
+  private nextPromptId = 1;
   private readonly listeners = new Set<() => void>();
   private publishTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -137,6 +165,7 @@ export class TransferManager {
     this.snapshot = {
       transfers: this.transfers,
       filesystems: [...this.fs.values()].map((f) => f.view),
+      prompts: this.pending.map((p) => p.prompt),
     };
     for (const l of this.listeners) l();
   }
@@ -161,7 +190,7 @@ export class TransferManager {
     this.client = client;
     client.onfile = (stream, mimetype, filename) => {
       this.opts.log('info', `Server started a download (${mimetype})`);
-      this.download(stream, mimetype, filename);
+      this.incoming(stream, mimetype, filename);
     };
     client.onfilesystem = (object, name) => this.addFilesystem(object, name);
   }
@@ -174,6 +203,8 @@ export class TransferManager {
       c.onfilesystem = null;
     }
     this.client = null;
+    // Unanswered prompts: the stream is gone with the client.
+    this.pending = [];
     for (const [id, a] of this.active) {
       if (a.timer) clearTimeout(a.timer);
       this.transfers = reduceTransfers(this.transfers, {
@@ -204,6 +235,47 @@ export class TransferManager {
     const a = this.active.get(id);
     if (!a) return;
     a.cancel();
+  }
+
+  // ---- Incoming files (consent)
+
+  /**
+   * A file the server pushed (`file` instruction): accepted, declined or held for the
+   * user's answer according to "Files from the remote". Nothing is acked before the
+   * decision, so the server sends no data. Files the user requested from the file browser
+   * do not come here.
+   */
+  private incoming(stream: InputStream, mimetype: string, filename: string): void {
+    const print = isPrintJob(mimetype, filename);
+    const decision = decideIncoming(this.opts.incomingPolicy?.() ?? 'accept');
+    if (decision === 'accept') {
+      this.download(stream, mimetype, filename);
+      return;
+    }
+    if (decision === 'decline') {
+      this.opts.log('info', `Declined a pushed ${print ? 'print job' : 'file'} (setting)`);
+      stream.sendAck(sessionStrings.files.declinedMessage, DECLINED);
+      this.opts.notify?.(sessionStrings.files.autoDeclined(filename));
+      return;
+    }
+    const prompt: IncomingPrompt = { id: this.nextPromptId++, filename, mimetype, print };
+    this.pending = [...this.pending, { prompt, stream }];
+    this.publish(true);
+  }
+
+  /** The user's answer to a prompt. */
+  answerIncoming(id: number, accept: boolean): void {
+    const p = this.pending.find((x) => x.prompt.id === id);
+    if (!p) return;
+    this.pending = this.pending.filter((x) => x !== p);
+    if (accept && this.client) {
+      this.opts.log('info', `Accepted a pushed ${p.prompt.print ? 'print job' : 'file'}`);
+      this.download(p.stream, p.prompt.mimetype, p.prompt.filename);
+    } else {
+      this.opts.log('info', `Declined a pushed ${p.prompt.print ? 'print job' : 'file'}`);
+      if (this.client) p.stream.sendAck(sessionStrings.files.declinedMessage, DECLINED);
+    }
+    this.publish(true);
   }
 
   // ---- Downloads

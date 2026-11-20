@@ -123,7 +123,8 @@ describe('key bar layout (KEY-7)', () => {
   it('labels', () => {
     expect(tokenLabel('Super')).toBe('Win');
     expect(tokenLabel('PageDown')).toBe('PgDn');
-    expect(tokenLabel('combo:Ctrl+Alt+Delete')).toBe('Ctrl+Alt+Delete');
+    expect(tokenLabel('combo:Super+D')).toBe('Win+D');
+    expect(tokenLabel('combo:Ctrl+Alt+Delete')).toBe('Ctrl+Alt+Del');
   });
 
   it('normalises stored layouts', () => {

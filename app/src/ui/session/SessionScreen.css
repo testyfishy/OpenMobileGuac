@@ -348,8 +348,8 @@
 }
 
 @media (max-height: 480px) {
-  /* Landscape phones: icons only, to cover less of the desktop. */
-  .omg-tool__label {
+  /* Landscape phones: icons only, to cover less of the desktop (labels: auto). */
+  .omg-toolbar[data-labels='auto'] .omg-tool__label {
     display: none;
   }
 
@@ -363,7 +363,8 @@
 
 .omg-keybar {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: flex-end;
   gap: 4px;
   padding: 4px calc(env(safe-area-inset-right, 0px) + 4px) 4px
     calc(env(safe-area-inset-left, 0px) + 4px);
@@ -381,6 +382,8 @@
   display: flex;
   gap: 4px;
   overflow-x: auto;
+  /* Vertical moves stay with the bar (swipe down to hide the keyboard). */
+  touch-action: pan-x;
   scrollbar-width: none;
   overscroll-behavior: contain;
   scroll-snap-type: x proximity;
@@ -1317,4 +1320,538 @@
   .omg-progress[data-indeterminate='true'] > span {
     animation: none;
   }
+}
+
+/* ---- Key bar: rows scroll, "hide keyboard" / "hide keys" pinned at the right --------------- */
+
+.omg-keybar__rows {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.omg-keybar__pinned {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  padding-left: 4px;
+  border-left: 1px solid var(--_border);
+}
+
+.omg-key--hide-kb {
+  background: var(--_accent);
+  color: var(--_accent-text);
+}
+
+.omg-key--collapse {
+  background: transparent;
+  border-color: var(--_border);
+}
+
+.omg-keybar[data-swipe='on'] {
+  touch-action: pan-x;
+}
+
+/* ---- Toolbar labels ------------------------------------------------------------------------- */
+
+.omg-toolbar[data-labels='never'] .omg-tool__label {
+  display: none;
+}
+
+.omg-toolbar[data-labels='never'] .omg-tool {
+  min-height: 44px;
+}
+
+.omg-tool--more {
+  flex: none;
+}
+
+/* ---- Docked toolbar: a static row the desktop is laid out around ----------------------------- */
+
+.omg-toolbar--dock {
+  align-self: stretch;
+  max-width: none;
+  margin: 0;
+  padding: 2px calc(env(safe-area-inset-right, 0px) + 4px) 2px
+    calc(env(safe-area-inset-left, 0px) + 4px);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--omg-surface, #1c1f26);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.omg-toolbar--dock .omg-toolbar__scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.omg-toolbar--dock .omg-tool {
+  flex: 1 0 auto;
+}
+
+.omg-toolbar--dock .omg-tool--more {
+  flex: none;
+  border-left: 1px solid var(--_border);
+  border-radius: 0;
+}
+
+.omg-toolbar--dock-bottom {
+  border-top: 1px solid var(--_border);
+}
+
+.omg-session[data-keyboard='closed'] .omg-toolbar--dock-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 2px);
+}
+
+/* Docked at the bottom, the toolbar is the bottom-most element: the key bar above it needs no
+   safe-area padding (no empty gap under it). */
+.omg-session[data-toolbar='dock-bottom'][data-keyboard='closed'] .omg-keybar {
+  padding-bottom: 4px;
+}
+
+.omg-session[data-toolbar='dock-bottom'][data-keyboard='closed']
+  .omg-keybar-slot
+  > .omg-textbar:last-child {
+  padding-bottom: 6px;
+}
+
+.omg-session[data-toolbar='dock-bottom'] .omg-keybar-slot:empty {
+  padding-bottom: 0;
+}
+
+.omg-toolbar--dock-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 2px);
+  border-bottom: 1px solid var(--_border);
+  z-index: 1;
+}
+
+/* Side docks (landscape): a column from the top edge down to the keyboard. */
+.omg-toolbar--dock-left,
+.omg-toolbar--dock-right {
+  position: absolute;
+  top: 0;
+  bottom: var(--_kb);
+  flex-direction: column;
+  padding: calc(env(safe-area-inset-top, 0px) + 2px) 2px
+    calc(env(safe-area-inset-bottom, 0px) + 2px);
+  z-index: 1;
+}
+
+.omg-toolbar--dock-left {
+  left: 0;
+  padding-left: calc(env(safe-area-inset-left, 0px) + 2px);
+  border-right: 1px solid var(--_border);
+}
+
+.omg-toolbar--dock-right {
+  right: 0;
+  padding-right: calc(env(safe-area-inset-right, 0px) + 2px);
+  border-left: 1px solid var(--_border);
+}
+
+.omg-toolbar--dock-left .omg-toolbar__scroll,
+.omg-toolbar--dock-right .omg-toolbar__scroll {
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.omg-toolbar--dock-left .omg-tool,
+.omg-toolbar--dock-right .omg-tool {
+  flex: none;
+  min-width: 60px;
+}
+
+.omg-toolbar--dock-left .omg-tool--more,
+.omg-toolbar--dock-right .omg-tool--more {
+  border-left: 0;
+  border-top: 1px solid var(--_border);
+}
+
+/* The key bar (and sheets) leave the side column free. */
+.omg-session[data-toolbar='dock-left'] .omg-dock,
+.omg-session[data-toolbar='dock-left'] .omg-sheet-layer {
+  left: var(--omg-dock-left, 0px);
+}
+
+.omg-session[data-toolbar='dock-right'] .omg-dock,
+.omg-session[data-toolbar='dock-right'] .omg-sheet-layer {
+  right: var(--omg-dock-right, 0px);
+}
+
+.omg-session[data-toolbar='dock-top'] .omg-toast-region {
+  top: calc(var(--omg-dock-top, 0px) + 12px);
+}
+
+.omg-session[data-toolbar='dock-top'] .omg-badge {
+  top: calc(var(--omg-dock-top, 0px) + 8px);
+}
+
+.omg-session[data-toolbar='dock-left'] .omg-badge,
+.omg-session[data-toolbar='dock-left'] .omg-toast-region {
+  left: calc(var(--omg-dock-left, 0px) + 8px);
+}
+
+.omg-session[data-toolbar='dock-right'] .omg-toast-region {
+  right: var(--omg-dock-right, 0px);
+}
+
+/* Split layout with a bottom dock: the trackpad surface ends above the dock. */
+.omg-session[data-split='on'][data-toolbar='dock-bottom'] .omg-trackpad {
+  bottom: var(--omg-dock-bottom, 0px);
+}
+
+/* ---- Sheets: grab handle, swipe down to close --------------------------------------------- */
+
+.omg-sheet__header {
+  position: relative;
+}
+
+.omg-sheet__header--drag {
+  touch-action: none;
+  cursor: grab;
+  padding-top: 14px;
+}
+
+.omg-sheet__grip {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--_border);
+  transform: translateX(-50%);
+}
+
+.omg-sheet__close {
+  flex: none;
+  border: 1px solid var(--_border);
+  border-radius: 999px;
+}
+
+/* ---- More sheet: grouped rows, switches inline, Disconnect apart --------------------------- */
+
+.omg-group {
+  margin-top: 14px;
+}
+
+.omg-group:first-child {
+  margin-top: 0;
+}
+
+.omg-group__rows {
+  display: grid;
+  border: 1px solid var(--_border);
+  border-radius: var(--_radius);
+  overflow: hidden;
+}
+
+.omg-row {
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.omg-group__rows > .omg-row + .omg-row {
+  border-top: 1px solid var(--_border);
+}
+
+.omg-row:active {
+  transform: none;
+  background: var(--_surface-2);
+}
+
+.omg-row__icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--_muted);
+}
+
+.omg-row__text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+
+.omg-row__label {
+  font-weight: 600;
+}
+
+.omg-row__hint {
+  font-size: 12.5px;
+  color: var(--_muted);
+}
+
+.omg-row__badge {
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--_accent);
+  color: var(--_accent-text);
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.omg-row__chevron {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-top: 2px solid var(--_muted);
+  border-right: 2px solid var(--_muted);
+  transform: rotate(45deg);
+}
+
+.omg-more__danger {
+  margin-top: 18px;
+  border: 1px solid color-mix(in srgb, var(--_danger) 55%, transparent);
+  border-radius: var(--_radius);
+  overflow: hidden;
+}
+
+.omg-row--danger,
+.omg-row--danger .omg-row__icon {
+  color: var(--_danger);
+}
+
+.omg-row--danger.omg-row--confirm {
+  background: var(--_danger);
+  color: #fff;
+}
+
+.omg-row--danger.omg-row--confirm .omg-row__icon {
+  color: #fff;
+}
+
+/* ---- Session options (descriptor-driven) and toolbar editor ----------------------------------- */
+
+.omg-options__intro {
+  margin-top: 0;
+}
+
+.omg-setting + .omg-setting {
+  border-top: 1px solid color-mix(in srgb, var(--_border) 50%, transparent);
+}
+
+.omg-override {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0 8px;
+  font-size: 12.5px;
+}
+
+.omg-override__tag {
+  color: var(--_accent);
+  font-weight: 600;
+}
+
+.omg-list-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.omg-tbe-intro {
+  margin-top: 16px;
+}
+
+.omg-tbe-list {
+  margin-top: 8px;
+}
+
+.omg-tbe-item {
+  gap: 8px;
+}
+
+.omg-tbe-item__icon {
+  display: inline-flex;
+  color: var(--_muted);
+}
+
+.omg-tbe-item__label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Key sets, combo builder, incoming files (KEY-9, FIL-1) --------------------------------- */
+
+/* The session's editors shown over the Settings screen (KeysEditorHost). */
+.omg-session--overlay {
+  z-index: 1000;
+  background: transparent;
+  pointer-events: none;
+}
+
+.omg-session--overlay .omg-sheet-layer {
+  pointer-events: auto;
+}
+
+.omg-key--set {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 96px;
+  background: transparent;
+  border-color: var(--_border);
+}
+
+/* Phones: icon only (the name is in the accessible label and the toast on switching). */
+.omg-key__set-name {
+  display: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+@media (min-width: 560px) {
+  .omg-key__set-name {
+    display: inline;
+  }
+}
+
+.omg-key--text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  white-space: pre;
+}
+
+.omg-key--small {
+  min-width: 36px;
+  min-height: 32px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+
+.omg-combo--on {
+  background: var(--_accent);
+  color: var(--_accent-text);
+}
+
+.omg-kset {
+  flex-wrap: wrap;
+  padding: 4px 4px 4px 0;
+}
+
+.omg-kset__use {
+  flex: 1 1 160px;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.omg-kset__use--on {
+  border-color: var(--_accent);
+}
+
+.omg-kset__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.omg-kset__show input {
+  width: 22px;
+  height: 22px;
+}
+
+.omg-kset-form {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--_accent);
+  border-radius: var(--_radius);
+}
+
+.omg-kset-proto {
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.omg-kset-proto .omg-label {
+  flex: 0 0 96px;
+  margin: 0;
+}
+
+.omg-file-btn {
+  position: relative;
+  cursor: pointer;
+}
+
+.omg-combo-steps .omg-combo-list__item {
+  flex-wrap: wrap;
+  padding: 4px 4px 4px 10px;
+}
+
+.omg-combo-step__keys {
+  display: flex;
+  flex: 1 1 140px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.omg-input--small {
+  flex: 0 1 auto;
+  min-height: 36px;
+  font-size: 14px;
+}
+
+.omg-combo-mods,
+.omg-combo-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 8px;
+}
+
+.omg-combo-keys {
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.omg-combo-groups {
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+}
+
+.omg-incoming {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.omg-incoming__icon {
+  flex: none;
+  margin-top: 4px;
+}
+
+.omg-incoming p {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.omg-combo-form > .omg-input {
+  width: 100%;
+  box-sizing: border-box;
 }
