@@ -6,7 +6,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   // Placeholder id; may change before store submission. Also set in
   // android/app/build.gradle and ios/App/App.xcodeproj (see docs/release.md).
-  appId: 'app.openmobileguac.client',
+  appId: 'io.github.testyfishy.omg',
   appName: 'OpenMobileGuac',
   webDir: 'dist',
   server: {

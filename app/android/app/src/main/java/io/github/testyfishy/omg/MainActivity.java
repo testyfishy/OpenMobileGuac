@@ -1,4 +1,4 @@
-package app.openmobileguac.client;
+package io.github.testyfishy.omg;
 
 import com.getcapacitor.BridgeActivity;
 

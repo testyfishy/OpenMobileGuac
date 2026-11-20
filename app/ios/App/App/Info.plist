@@ -23,7 +23,7 @@
 		<dict>
 			<!-- openmobileguac://connect?... deep links (CON-5) and the SSO app callback (SRV-7). -->
 			<key>CFBundleURLName</key>
-			<string>app.openmobileguac.client</string>
+			<string>io.github.testyfishy.omg</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>openmobileguac</string>

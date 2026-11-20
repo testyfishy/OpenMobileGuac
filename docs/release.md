@@ -126,7 +126,7 @@ Requires an active Apple Developer Program membership. All steps are in a web br
 
 **2. Register the bundle ID**
 
-The bundle ID is currently the placeholder `app.openmobileguac.client`. If you want a
+The bundle ID is `io.github.testyfishy.omg` (chosen 2026-11-19). If you want a
 different one, change it **before** registering, in all of these places, and commit:
 
 - `app/capacitor.config.ts` → `appId`
