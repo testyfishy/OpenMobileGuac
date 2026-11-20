@@ -4,6 +4,7 @@ import {
   decryptSecrets,
   parseBackup,
   planRestore,
+  secretsToRestore,
   type BackupFile,
   type BackupSecrets,
   type RestoreMode,
@@ -541,21 +542,25 @@ function ImportSection({
       for (const id of plan.removeIds) sessions.closeServer(id);
       await services.profiles.applyRestore(plan.entries, plan.removeIds);
       if (secrets) {
-        for (const [backupId, s] of Object.entries(secrets)) {
-          const id = plan.idMap[backupId];
-          if (!id) continue;
-          if (s.password) await services.auth.savePassword(id, s.password);
-          if (s.totpSeed) await services.auth.saveTotpSeed(id, s.totpSeed).catch(() => undefined);
+        for (const s of secretsToRestore(plan, backup, secrets)) {
+          if (s.password) await services.auth.savePassword(s.id, s.password);
+          if (s.totpSeed) {
+            await services.auth.saveTotpSeed(s.id, s.totpSeed).catch(() => undefined);
+          }
         }
       }
       if (withSettings && backup.settings) update(settingsFromBackup(settings, backup.settings));
       bump();
       services.log.info(
         'backup',
-        `restored (${plan.added} added, ${plan.updated} updated, ${plan.removed} removed)`,
+        `restored (${plan.added} added, ${plan.updated} updated, ${plan.removed} removed, ${plan.addressChanged} address changed)`,
       );
       haptic('success');
-      setDone(b.restored(plan.added, plan.updated, plan.removed));
+      setDone(
+        b.restored(plan.added, plan.updated, plan.removed) +
+          (plan.addressChanged > 0 ? b.restoredAddressChanged(plan.addressChanged) : '') +
+          (backup.secrets && !secrets ? b.restoredSecretsSkipped : ''),
+      );
       setBackup(undefined);
       setPass('');
       if (fileInput.current) fileInput.current.value = '';

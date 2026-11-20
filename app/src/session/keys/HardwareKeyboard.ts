@@ -440,3 +440,23 @@ export class HardwareKeyboard {
     }
   }
 }
+
+/** What the Command (⌘) / Meta key sends (KEY-6, AUDIT: iPad Cmd mapping). */
+export type CommandKeyMode = 'super' | 'ctrl';
+
+/**
+ * Hardware keyboards on iPad/Mac: ⌘ arrives as Meta, which the web client sends as Super
+ * (Win on Windows), so ⌘C/⌘V become Win+C/Win+V. With `ctrl` the app sends Control instead,
+ * so ⌘C/⌘V/⌘Z copy, paste and undo on Windows and Linux. Applied to every event the hardware
+ * keyboard produces (including releases), so presses and releases stay paired.
+ */
+export function mapCommandKey(events: readonly KeyEvent[], mode: CommandKeyMode): KeyEvent[] {
+  if (mode === 'super') return [...events];
+  return events.map((e) =>
+    e.keysym === KEYSYM.Super_L || e.keysym === KEYSYM.Meta_L
+      ? { ...e, keysym: KEYSYM.Control_L }
+      : e.keysym === KEYSYM.Super_R || e.keysym === KEYSYM.Meta_R
+        ? { ...e, keysym: KEYSYM.Control_R }
+        : e,
+  );
+}

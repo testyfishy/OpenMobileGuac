@@ -3,12 +3,14 @@ import { ChromeButton } from './ChromeButton.tsx';
 import {
   IconCursorLarge,
   IconDrag,
+  IconEye,
   IconFullscreen,
   IconPower,
   IconScroll,
   IconSplit,
   IconTextBar,
   IconToolbar,
+  IconVolume,
 } from './icons.tsx';
 import {
   buildSessionActions,
@@ -17,6 +19,21 @@ import {
 } from './sessionActions.tsx';
 import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
+import {
+  AUDIO_MODES,
+  QUALITIES,
+  type AudioMode,
+  type Quality,
+} from '../../session/viewport/remoteSize.ts';
+
+/** Terminal sessions: what the server lets the user change (argv), or null. */
+export interface TerminalControls {
+  /** Points; null when `font-size` is not changeable. */
+  readonly fontSize: number | null;
+  readonly colorScheme: string | null;
+  readonly onFontStep: (delta: number) => void;
+  readonly onNextScheme: () => void;
+}
 
 /** On/off settings shown as switches in the More sheet. */
 export interface MoreToggles {
@@ -37,7 +54,21 @@ export interface MoreSheetProps {
   readonly hasFilesystem: boolean;
   readonly onToggle: (key: keyof MoreToggles, on: boolean) => void;
   readonly onEditToolbar: () => void;
+  readonly quality: Quality;
+  readonly audio: AudioMode;
+  readonly viewOnly: boolean;
+  readonly reconnectToApply: boolean;
+  readonly onQuality: (q: Quality) => void;
+  readonly onAudio: (a: AudioMode) => void;
+  readonly onReconnect: () => void;
+  readonly terminal: TerminalControls | null;
+  /** "Share this session", when the host supports it (not the demo). */
+  readonly onShare?: () => void;
   readonly onClose: () => void;
+}
+
+function next<T>(list: readonly T[], cur: T): T {
+  return list[(list.indexOf(cur) + 1) % list.length] ?? cur;
 }
 
 const CONFIRM_MS = 3000;
@@ -163,7 +194,26 @@ export function MoreSheet(p: MoreSheetProps) {
 
   return (
     <Sheet title={t.title} onClose={p.onClose} className="omg-sheet--more">
+      {p.reconnectToApply && (
+        <div className="omg-more__notice">
+          <ChromeButton className="omg-row" onClick={p.onReconnect}>
+            <span className="omg-row__text">
+              <span className="omg-row__label">{t.reconnectToApply}</span>
+              <span className="omg-row__hint" aria-hidden="true">
+                {t.reconnectToApplyHint}
+              </span>
+            </span>
+          </ChromeButton>
+        </div>
+      )}
       <Group title={t.groups.input}>
+        <SwitchRow
+          icon={<IconEye off={false} />}
+          label={t.viewOnly}
+          hint={t.viewOnlyHint}
+          on={p.viewOnly}
+          onToggle={() => a['view-only'].onRun()}
+        />
         {sw(a.keyboard, t.keyboard, t.keyboardHint)}
         {sw(a['extra-keys'], t.extraKeys, t.extraKeysHint)}
         <Row
@@ -205,7 +255,48 @@ export function MoreSheet(p: MoreSheetProps) {
         <Row icon={a['zoom-reset'].icon} label={t.resetZoom} onClick={run(a['zoom-reset'])} />
         {tog('split', <IconSplit />, t.splitLayout, t.splitLayoutHint)}
         {tog('immersive', <IconFullscreen />, t.immersive, t.immersiveHint)}
+        <Row
+          icon={a.view.icon}
+          label={t.quality(sessionStrings.options.qualityOptions[p.quality])}
+          hint={t.qualityHint}
+          onClick={() => p.onQuality(next(QUALITIES, p.quality))}
+        />
       </Group>
+
+      {p.terminal && (
+        <Group title={t.groups.terminal}>
+          {p.terminal.fontSize !== null && (
+            <div className="omg-row omg-row--stepper" role="group" aria-label={t.fontSize}>
+              <span className="omg-row__text">
+                <span className="omg-row__label">{t.fontSize}</span>
+                <span className="omg-row__hint">{t.points(p.terminal.fontSize)}</span>
+              </span>
+              <ChromeButton
+                className="omg-btn--ghost"
+                aria-label={t.fontSmaller}
+                onClick={() => p.terminal?.onFontStep(-1)}
+              >
+                −
+              </ChromeButton>
+              <ChromeButton
+                className="omg-btn--ghost"
+                aria-label={t.fontLarger}
+                onClick={() => p.terminal?.onFontStep(1)}
+              >
+                +
+              </ChromeButton>
+            </div>
+          )}
+          {p.terminal.colorScheme !== null && (
+            <Row
+              icon={a.view.icon}
+              label={t.colorScheme}
+              hint={t.colorSchemeName(p.terminal.colorScheme)}
+              onClick={() => p.terminal?.onNextScheme()}
+            />
+          )}
+        </Group>
+      )}
 
       <Group title={t.groups.clipFiles}>
         <Row icon={a.paste.icon} label={t.paste} hint={t.pasteHint} onClick={run(a.paste)} />
@@ -242,9 +333,15 @@ export function MoreSheet(p: MoreSheetProps) {
         <SwitchRow
           icon={a.sound.icon}
           label={t.sound}
-          hint={p.audioActive ? t.soundHint : t.noAudio}
+          hint={p.audio === 'off' ? t.audioNotRequested : p.audioActive ? t.soundHint : t.noAudio}
           on={!(a.sound.pressed ?? false)}
           onToggle={() => a.sound.onRun()}
+        />
+        <Row
+          icon={<IconVolume muted={p.audio !== 'on'} />}
+          label={t.audioMode(sessionStrings.options.audioOptions[p.audio])}
+          hint={t.audioModeHint}
+          onClick={() => p.onAudio(next(AUDIO_MODES, p.audio))}
         />
       </Group>
 
@@ -256,6 +353,15 @@ export function MoreSheet(p: MoreSheetProps) {
           onClick={p.onEditToolbar}
           sheet
         />
+        {p.onShare && (
+          <Row
+            icon={a.view.icon}
+            label={t.shareSession}
+            hint={t.shareSessionHint}
+            onClick={p.onShare}
+            sheet
+          />
+        )}
         <Row
           icon={a.info.icon}
           label={t.sessionInfo}

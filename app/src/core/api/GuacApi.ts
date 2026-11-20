@@ -53,13 +53,20 @@ export class GuacApi {
    *
    * When every candidate fails, the reported error is the most informative one: `tls`, then
    * `not-guacamole` (something answered), then `unreachable`.
+   *
+   * Without a typed scheme only https is tried unless `allowHttp` (AUDIT #11): a TLS error or
+   * a blocked port 443 is reported (with `httpFallbackAvailable`), never silently replaced by
+   * plain http. An explicit `http://` is the user's choice and is probed as typed.
    */
-  async probe(input: string): Promise<ServerUrlCandidate> {
+  async probe(input: string, opts: { allowHttp?: boolean } = {}): Promise<ServerUrlCandidate> {
     const normalized = normalizeServerUrl(input);
     if (!normalized.ok) throw new GuacApiError({ kind: 'invalid-url', reason: normalized.reason });
+    const all = normalized.candidates;
+    const schemeTyped = !(all.some((c) => c.secure) && all.some((c) => !c.secure));
+    const candidates = schemeTyped || opts.allowHttp ? all : all.filter((c) => c.secure);
 
     const failures: GuacErrorInfo[] = [];
-    for (const candidate of normalized.candidates) {
+    for (const candidate of candidates) {
       const url = joinUrl(candidate.baseUrl, 'api/languages');
       try {
         const res = await this.send({ method: 'GET', url });
@@ -73,7 +80,9 @@ export class GuacApi {
     const rank = (info: GuacErrorInfo): number =>
       info.kind === 'tls' ? 0 : info.kind === 'not-guacamole' ? 1 : 2;
     const best = [...failures].sort((a, b) => rank(a) - rank(b))[0];
-    throw new GuacApiError(best ?? { kind: 'invalid-url', reason: 'invalid' });
+    const error = new GuacApiError(best ?? { kind: 'invalid-url', reason: 'invalid' });
+    error.httpFallbackAvailable = candidates.length < all.length;
+    throw error;
   }
 
   /**
@@ -154,6 +163,60 @@ export class GuacApi {
       });
     }
     return session;
+  }
+
+  /**
+   * Sharing profiles of the connection behind an open tunnel (session sharing, 1.6.0):
+   * `GET api/session/tunnels/{uuid}/activeConnection/connection/sharingProfiles`
+   * (guacamole-client `TunnelResource` → `ActiveConnectionResource` →
+   * `ConnectionResource.getSharingProfileDirectoryResource`; web client
+   * `tunnelService.getSharingProfiles`). Only profiles the user may READ are listed.
+   */
+  async getTunnelSharingProfiles(
+    session: AuthSession,
+    tunnelUuid: string,
+  ): Promise<{ readonly identifier: string; readonly name: string }[]> {
+    const url = joinUrl(
+      session.baseUrl,
+      `api/session/tunnels/${encodeURIComponent(tunnelUuid)}/activeConnection/connection/sharingProfiles`,
+    );
+    const res = await this.send({ method: 'GET', url, headers: { [TOKEN_HEADER]: session.token } });
+    if (res.status !== 200) throw this.errorFor(res, session.baseUrl, true);
+    if (!isRecord(res.body)) {
+      throw new GuacApiError({ kind: 'invalid-response', url, detail: 'sharing profiles' });
+    }
+    const out: { identifier: string; name: string }[] = [];
+    for (const [id, v] of Object.entries(res.body)) {
+      const name = isRecord(v) && typeof v['name'] === 'string' ? v['name'] : id;
+      const identifier = isRecord(v) && typeof v['identifier'] === 'string' ? v['identifier'] : id;
+      out.push({ identifier, name });
+    }
+    return out.sort((x, y) => x.name.localeCompare(y.name));
+  }
+
+  /**
+   * A share key for the active connection behind a tunnel:
+   * `GET api/session/tunnels/{uuid}/activeConnection/sharingCredentials/{profile}` →
+   * `{ expected: [{ name: 'key', type: 'QUERY_PARAMETER' }], values: { key } }`
+   * (`ActiveConnectionResource.getSharingCredentials`, JDBC `ConnectionSharingService`).
+   * Returns the link the web client builds (`UserCredentials.getLink`):
+   * `<base>/#/?key=<key>`.
+   */
+  async createShareLink(
+    session: AuthSession,
+    tunnelUuid: string,
+    sharingProfileId: string,
+  ): Promise<string> {
+    const url = joinUrl(
+      session.baseUrl,
+      `api/session/tunnels/${encodeURIComponent(tunnelUuid)}/activeConnection/sharingCredentials/${encodeURIComponent(sharingProfileId)}`,
+    );
+    const res = await this.send({ method: 'GET', url, headers: { [TOKEN_HEADER]: session.token } });
+    if (res.status !== 200) throw this.errorFor(res, session.baseUrl, true);
+    const values = isRecord(res.body) && isRecord(res.body['values']) ? res.body['values'] : null;
+    const key = values && typeof values['key'] === 'string' ? values['key'] : null;
+    if (!key) throw new GuacApiError({ kind: 'invalid-response', url, detail: 'no share key' });
+    return `${session.baseUrl.replace(/\/+$/, '')}/#/?key=${encodeURIComponent(key)}`;
   }
 
   /** `HEAD api/session`: whether the token is still valid. Network errors still reject. */

@@ -84,6 +84,37 @@ describe('ProfileStore profiles', () => {
     expect(await store.get('nope')).toBeUndefined();
   });
 
+  it('drops the token, password and TOTP seed when the address changes (AUDIT #1, #2)', async () => {
+    const { store, secure } = makeStore();
+    const a = await store.add({ name: 'Home', baseUrl: 'https://guac.example/guacamole' });
+    const fill = async () => {
+      for (const k of secretKeys.all(a.id)) await secure.set(k, 'not-a-real-secret');
+    };
+    await fill();
+    // Same endpoint (case and trailing slash only): secrets stay.
+    await store.update(a.id, { name: 'Renamed', baseUrl: 'https://GUAC.example/guacamole/' });
+    expect(await secure.get(secretKeys.authToken(a.id))).toBe('not-a-real-secret');
+    // Another host: all gone.
+    await store.update(a.id, { baseUrl: 'https://other.example/guacamole' });
+    for (const k of secretKeys.all(a.id)) expect(await secure.get(k)).toBeNull();
+    // Restore onto the same id with another address: gone too.
+    await fill();
+    await store.applyRestore([
+      {
+        targetId: a.id,
+        merge: true,
+        data: {
+          profile: { ...a, baseUrl: 'http://other.example:8080/guacamole' },
+          favourites: [],
+          recents: [],
+          connectionSettings: {},
+          options: undefined,
+        },
+      },
+    ]);
+    for (const k of secretKeys.all(a.id)) expect(await secure.get(k)).toBeNull();
+  });
+
   it('validates base URLs and unknown ids', async () => {
     const { store } = makeStore();
     await expect(store.add({ name: 'x', baseUrl: 'ftp://guac.example' })).rejects.toThrow(/http/);

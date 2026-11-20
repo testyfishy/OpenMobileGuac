@@ -24,6 +24,40 @@ describe('redaction', () => {
     expect(s).toBe('got [redacted] and otpauth://[redacted]');
   });
 
+  it.each([
+    ['prose', 'the password is hunter2 now', 'hunter2'],
+    ['prose token', 'token was 0a1b2c3d', '0a1b2c3d'],
+    ['userinfo', 'GET https://testuser:hunter2@guac.example/x', 'hunter2'],
+    ['bearer header', 'Authorization: Bearer abc.def.ghi', 'abc.def'],
+    ['bearer bare', 'sent Bearer sometokenvalue', 'sometokenvalue'],
+    ['pwd', 'login pwd=hunter2&user=x', 'hunter2'],
+    ['passphrase', '{"passphrase":"correct horse"}', 'correct'],
+    ['json password', '{"password": "hunter2"}', 'hunter2'],
+    ['tunnel token', 'Guacamole-Tunnel-Token: 1234-abcd', '1234-abcd'],
+    ['totp seed', 'seed=JBSWY3DPEHPK3PXP', 'JBSWY3DP'],
+  ])('closes the %s gap (AUDIT DIAG-1)', (_label, input, secret) => {
+    expect(redactSecrets(input)).not.toContain(secret);
+  });
+
+  it('keeps user names and ordinary text', () => {
+    expect(redactSecrets('GET https://testuser:hunter2@guac.example/x')).toContain('testuser');
+    expect(redactSecrets('connected for 12:30:45')).toBe('connected for 12:30:45');
+  });
+
+  it.each([
+    ['fe80::1', 'link-local'],
+    ['::1', 'loopback'],
+    ['2001:db8::5%en0', 'zone'],
+    ['2001:db8:0:0:0:0:0:1', 'full'],
+    ['[fe80::1]:8080', 'bracketed'],
+  ])('hides compressed IPv6 %s (%s)', (addr) => {
+    expect(redactHosts(`from ${addr} ok`)).not.toMatch(/fe80|::1|db8/);
+  });
+
+  it('does not treat times or C++ names as IPv6', () => {
+    expect(redactHosts('at 12:30:45 in Foo::bar')).toBe('at 12:30:45 in Foo::bar');
+  });
+
   it('optionally hides hosts and addresses', () => {
     const s = redactHosts(
       'GET https://guac.example:8443/guacamole/api from 192.0.2.20 via host.example.ts.net',
@@ -107,7 +141,8 @@ describe('connection test', () => {
   it('reports the working candidate, API, websocket and latency', async () => {
     let t = 0;
     const sockets: { url: string; ws: FakeWs }[] = [];
-    const result = await runConnectionTest('guac.example:8080', {
+    // Typed http:// (no scheme would try only https, AUDIT #11).
+    const result = await runConnectionTest('http://guac.example:8080', {
       http: http((req) =>
         req.url.startsWith('https://')
           ? new HttpTransportError('unreachable', req.url, 'refused')
@@ -125,13 +160,26 @@ describe('connection test', () => {
     });
     expect(result.api).toBe('ok');
     expect(result.workingUrl).toMatch(/^http:\/\/guac\.example:8080\/guacamole$/);
-    expect(result.candidates.some((c) => c.status === 'fail' && c.failure === 'unreachable')).toBe(
-      true,
-    );
+    expect(result.candidates[0]).toMatchObject({ status: 'ok' });
     expect(result.websocket).toBe('ok');
     expect(sockets[0]?.url).toBe('ws://guac.example:8080/guacamole/websocket-tunnel');
     expect(sockets[0]?.ws.closed).toBe(true);
     expect(result.latencyMs).toBe(10);
+  });
+
+  it('without a scheme, tries only https and lists http as skipped (AUDIT #11)', async () => {
+    const urls: string[] = [];
+    const result = await runConnectionTest('guac.example:8080', {
+      http: http((req) => {
+        urls.push(req.url);
+        return new HttpTransportError('tls', req.url, 'cert');
+      }),
+    });
+    expect(urls.every((u) => u.startsWith('https://'))).toBe(true);
+    expect(result.candidates.filter((c) => c.baseUrl.startsWith('http:'))).toEqual([
+      { baseUrl: 'http://guac.example:8080/guacamole', status: 'skipped' },
+      { baseUrl: 'http://guac.example:8080', status: 'skipped' },
+    ]);
   });
 
   it('fails cleanly for an unreachable host and skips the websocket step', async () => {

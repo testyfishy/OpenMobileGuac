@@ -93,10 +93,13 @@ export function pointerKind(pointerType: string): PointerKind {
   return 'touch';
 }
 
-/** WheelEvent.deltaMode → pixels. Line = 16 px, page = 0.9 × viewport height (approx.). */
+/**
+ * WheelEvent.deltaMode → pixels. Line = 18 px as upstream `Mouse.js` (`PIXELS_PER_LINE`), so
+ * one 3-line notch (54 px) passes the 50 px scroll step; page = 0.9 × viewport height.
+ */
 export function wheelDeltaPx(delta: number, deltaMode: number, pageHeightPx: number): number {
   if (!Number.isFinite(delta)) return 0;
-  if (deltaMode === 1) return delta * 16;
+  if (deltaMode === 1) return delta * 18;
   if (deltaMode === 2) return delta * Math.max(1, pageHeightPx) * 0.9;
   return delta;
 }

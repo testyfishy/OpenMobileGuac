@@ -270,11 +270,12 @@ function ExtraField({
             <div className="totp-enroll">
               <p className="muted">{l.totpEnrollHint}</p>
               {qr && qr.startsWith('data:image/') ? (
-                <img className="totp-qr" src={qr} alt="" width={180} height={180} />
+                <img className="totp-qr" src={qr} alt={l.totpQrAlt} width={180} height={180} />
               ) : null}
               <p>
                 {l.totpSecret}: <code className="totp-secret">{secret}</code>
               </p>
+              <p className="muted">{l.totpParams(enrolmentParams(field.extra))}</p>
               {saveEnrolment !== undefined ? (
                 <Toggle
                   label={strings.serverForm.totp.enable}
@@ -352,4 +353,19 @@ function ExtraField({
         />
       );
   }
+}
+
+/** "6 digits, every 30 s, SHA1" for the setup-key text (what an authenticator app needs). */
+function enrolmentParams(extra: Readonly<Record<string, unknown>>): {
+  digits: number;
+  period: number;
+  algorithm: string;
+} {
+  const n = (v: unknown, d: number) =>
+    typeof v === 'number' ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : d;
+  return {
+    digits: n(extra['digits'], 6),
+    period: n(extra['period'], 30),
+    algorithm: typeof extra['mode'] === 'string' ? extra['mode'].toUpperCase() : 'SHA1',
+  };
 }

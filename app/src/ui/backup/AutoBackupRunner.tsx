@@ -24,6 +24,8 @@ export function AutoBackupRunner() {
     const check = () => {
       // Not while the unlock prompt is showing (it can pause and resume the app).
       if (services.lock.promptActive()) return;
+      // Never behind the lock screen (AUDIT #3): it would read stored secrets' passphrase.
+      if (services.lock.isLocked()) return;
       void runAutoBackupIfDue(services, latest.current, vault);
     };
     // Give the app lock its chance to unlock first (secrets need a recent unlock).

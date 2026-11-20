@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HardwareKeyboard,
+  mapCommandKey,
   type HardwareKeyInput,
   type HardwareKeyContext,
 } from './HardwareKeyboard.ts';
@@ -211,5 +212,42 @@ describe('HardwareKeyboard (KEY-6)', () => {
     hk.handle(key('down', 'ArrowDown', 'ArrowDown', { ctrl: true, shift: true }), NO_FIELD);
     expect(ev(hk.releaseAll())).toEqual([u(0xff54), u(SHIFT), u(CTRL)]);
     expect(hk.held().size).toBe(0);
+  });
+});
+
+describe('Command key mapping (iPad / Mac hardware keyboards)', () => {
+  it('sends Control for ⌘ when chosen, Super otherwise', () => {
+    const cmdC = [
+      { keysym: KEYSYM.Super_L, pressed: true },
+      { keysym: 0x63, pressed: true },
+      { keysym: 0x63, pressed: false },
+      { keysym: KEYSYM.Super_L, pressed: false },
+    ];
+    expect(mapCommandKey(cmdC, 'ctrl').map((e) => e.keysym)).toEqual([
+      KEYSYM.Control_L,
+      0x63,
+      0x63,
+      KEYSYM.Control_L,
+    ]);
+    expect(mapCommandKey(cmdC, 'super')).toEqual(cmdC);
+    expect(mapCommandKey([{ keysym: KEYSYM.Super_R, pressed: true }], 'ctrl')[0]?.keysym).toBe(
+      KEYSYM.Control_R,
+    );
+  });
+});
+
+describe('physical chords with Shift (AUDIT #5 rule) and ⌘ as Control', () => {
+  it('⌘+Shift+Z (key "z" as macOS reports it) becomes Ctrl+Shift+Z with uppercase Z', () => {
+    const { out } = run([
+      key('down', 'Meta', 'MetaLeft', { meta: true }),
+      key('down', 'Shift', 'ShiftLeft', { meta: true, shift: true }),
+      key('down', 'z', 'KeyZ', { meta: true, shift: true }),
+    ]);
+    const mapped = mapCommandKey(
+      out.map((s) => ({ pressed: s.startsWith('+'), keysym: Number.parseInt(s.slice(1), 16) })),
+      'ctrl',
+    );
+    // Keys under ⌘ are released at once (browsers send no keyup for them, as upstream).
+    expect(ev(mapped)).toEqual([d(CTRL), d(SHIFT), d(0x5a), u(0x5a)]);
   });
 });

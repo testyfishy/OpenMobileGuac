@@ -19,6 +19,13 @@ options:
 3. **Use plain `http://` on a private network** you trust (Tailscale/WireGuard already encrypt
    the traffic). The app warns before sending a password over http.
 
+**No silent fallback to http (AUDIT #11, 2026-11-21).** When an address is typed without a
+scheme, the app tries only `https://`. If that fails (untrusted certificate, port 443
+blocked, nothing answering), it shows the https error and offers **"Use http instead — not
+encrypted"**; nothing is sent over http before that choice. Typing `http://` yourself skips
+the question (the plain-http warning before the password still applies). The connection test
+likewise lists the http candidates as skipped unless `http://` was typed.
+
 The connection test (Edit server › Test connection) shows when the API answers but the
 WebSocket does not, which on HTTPS usually means the WebView does not trust the certificate.
 

@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- No Android auto-backup or device-to-device copy of app data (AUDIT #12): the
+         WebView storage holds server addresses, usernames, recents and remote-screen
+         thumbnails, and Keystore-wrapped secrets cannot be restored on another device
+         anyway. The app has its own explicit backup (Settings › Backup), which never
+         includes tokens and encrypts passwords only with a passphrase. allowBackup="false"
+         stops cloud backup and adb backup; dataExtractionRules (Android 12+) also excludes
+         device-to-device transfer, which allowBackup alone does not stop there. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

@@ -273,7 +273,10 @@ export interface Combo {
 export type ComboParseResult =
   { readonly ok: true; readonly combo: Combo } | { readonly ok: false; readonly error: string };
 
-/** Keysym for a combo token. Letters map to lowercase so guacd does not add Shift. */
+/**
+ * Keysym for a combo token on its own (validation, pickers): letters lowercase, other
+ * characters as written. `comboEvents` picks the final keysym per chord (`chordCharKeysym`).
+ */
 export function keysymForComboToken(token: string): number | null {
   const named = keysymForName(token);
   if (named !== null) return named;
@@ -358,14 +361,94 @@ export function formatCombo(combo: Combo): string {
   return combo.steps.map((chord) => chord.map((k) => canonicalToken(k) ?? k).join('+')).join(', ');
 }
 
-/** Key events for a combo: each chord pressed in order and released in reverse. */
+/** Shifted US symbols (`!`, `@`, …) → their unshifted key (`1`, `2`, …). */
+const US_UNSHIFTED: ReadonlyMap<number, number> = new Map(
+  Object.entries(US_SHIFTED).map(([base, shifted]) => [shifted.charCodeAt(0), base.charCodeAt(0)]),
+);
+
+const SHIFT_KEYSYMS: ReadonlySet<number> = new Set([KEYSYM.Shift_L, KEYSYM.Shift_R]);
+const MODIFIER_KEYSYMS: ReadonlySet<number> = new Set([
+  KEYSYM.Control_L,
+  KEYSYM.Control_R,
+  KEYSYM.Alt_L,
+  KEYSYM.Alt_R,
+  KEYSYM.Shift_L,
+  KEYSYM.Shift_R,
+  KEYSYM.Super_L,
+  KEYSYM.Super_R,
+  KEYSYM.Meta_L,
+  KEYSYM.Meta_R,
+  KEYSYM.ISO_Level3_Shift,
+]);
+
+/**
+ * The keysym a physical US keyboard sends for a printable combo token with the given
+ * Shift state, and whether the token itself needs Shift (`!` is Shift+1).
+ *
+ * The rule (AUDIT #5; docs/protocol-notes.md "Keys, Shift and guacd"): send the character
+ * the key types *with the Shift state actually sent*, exactly as `Guacamole.Keyboard` does
+ * for a hardware keyboard:
+ * - Shift sent: letters uppercase, digits/punctuation as their shifted symbol (`T`, `!`);
+ * - no Shift: letters lowercase, the unshifted symbol (`t`, `1`).
+ *
+ * guacd's RDP keymaps (`en_us_qwerty.keymap`) give each printable keysym a required Shift
+ * state (`t` = `-shift`, `T` = `+shift`, `1` = `-shift`, `!` = `+shift`) and
+ * `keyboard.c` releases or presses Shift to match before the scancode, so a keysym that
+ * disagrees with the held Shift silently changes the chord (Ctrl+Shift+`t` arrives as
+ * Ctrl+T). VNC passes the keysym through, so the matching keysym is also what a VNC server
+ * expects; the SSH terminal ignores Shift for printable keys and maps Ctrl+`T`/Ctrl+`t`
+ * both to 0x14, so it is unaffected. Named keys (Tab, Esc, F-keys, arrows) have no Shift
+ * constraint in guacd's base keymap and are always sent as their base keysym.
+ */
+export function chordCharKeysym(
+  cp: number,
+  shift: boolean,
+): { keysym: number; needsShift: boolean } {
+  if (isAsciiLetter(cp)) return { keysym: shift ? cp & ~0x20 : cp | 0x20, needsShift: false };
+  const base = US_UNSHIFTED.get(cp);
+  if (base !== undefined) {
+    // A shifted symbol: the key is `base` with Shift; a physical keyboard needs Shift for it.
+    return { keysym: cp, needsShift: !shift };
+  }
+  if (cp <= 0x7f && US_SHIFTED[String.fromCharCode(cp)] !== undefined) {
+    return { keysym: shift ? shiftedCodePoint(cp) : cp, needsShift: false };
+  }
+  return { keysym: keysymForCodePoint(cp) ?? cp, needsShift: false };
+}
+
+/**
+ * Key events for a combo: per chord, modifiers first (in the order written), then the other
+ * keys, released in reverse. Printable keys follow `chordCharKeysym` with the chord's Shift
+ * state (Shift in the chord, or held by a locked key-bar Shift); a shifted symbol without
+ * Shift in the chord gets Shift added, as on a physical keyboard (`Ctrl+!` = Ctrl+Shift+1).
+ * Keysyms in `held` (locked modifiers) are neither pressed nor released.
+ */
 export function comboEvents(combo: Combo, held: ReadonlySet<number> = new Set()): KeyEvent[] {
   const out: KeyEvent[] = [];
   for (const chord of combo.steps) {
+    const named = chord.map((t) => ({ token: t, keysym: keysymForName(t) }));
+    let shift =
+      [...held].some((k) => SHIFT_KEYSYMS.has(k)) ||
+      named.some((n) => n.keysym !== null && SHIFT_KEYSYMS.has(n.keysym));
+    const mods: number[] = [];
+    const keys: number[] = [];
+    for (const n of named) {
+      if (n.keysym !== null) {
+        (MODIFIER_KEYSYMS.has(n.keysym) ? mods : keys).push(n.keysym);
+        continue;
+      }
+      const cp = [...n.token].length === 1 ? n.token.codePointAt(0) : undefined;
+      if (cp === undefined) continue;
+      const r = chordCharKeysym(cp, shift);
+      if (r.needsShift) {
+        mods.push(KEYSYM.Shift_L);
+        shift = true;
+      }
+      keys.push(r.keysym);
+    }
     const pressed: number[] = [];
-    for (const token of chord) {
-      const ks = keysymForComboToken(token);
-      if (ks === null || held.has(ks) || pressed.includes(ks)) continue;
+    for (const ks of [...mods, ...keys]) {
+      if (held.has(ks) || pressed.includes(ks)) continue;
       out.push({ keysym: ks, pressed: true });
       pressed.push(ks);
     }

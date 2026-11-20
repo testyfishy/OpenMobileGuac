@@ -110,3 +110,50 @@ describe('expired sign-in on reconnect', () => {
     expect(isSignInFailure(run(connected).phase)).toBe(false);
   });
 });
+
+describe('clean server close vs network drop (AUDIT #7)', () => {
+  it('a clean close with no error (admin Kill: WebSocket 1000, SUCCESS) never reconnects', () => {
+    const m = run([...connected, { type: 'closed', intentional: false }]);
+    expect(m.phase.kind).not.toBe('reconnecting');
+    const byServer = run([...connected, { type: 'closed', intentional: true, byServer: true }]);
+    expect(byServer.phase).toEqual({ kind: 'disconnected', byServer: true });
+  });
+
+  it.each([
+    ['WebSocket 1006 (UPSTREAM_NOT_FOUND)', STATUS.UPSTREAM_NOT_FOUND],
+    ['receive timeout (UPSTREAM_TIMEOUT)', STATUS.UPSTREAM_TIMEOUT],
+    ['proxy going away (UPSTREAM_UNAVAILABLE)', STATUS.UPSTREAM_UNAVAILABLE],
+  ])('a network drop reported as %s retries', (_label, code) => {
+    const m = run([
+      ...connected,
+      { type: 'error', code, source: 'tunnel' },
+      { type: 'closed', intentional: false },
+    ]);
+    expect(m.phase.kind).toBe('reconnecting');
+  });
+
+  it.each([
+    ['kicked', STATUS.SESSION_CONFLICT],
+    ['idle', STATUS.SESSION_TIMEOUT],
+    ['closed by the server', STATUS.SESSION_CLOSED],
+  ])('a session ended by the server (%s) is not retried', (_label, code) => {
+    const m = run([
+      ...connected,
+      { type: 'error', code, source: 'client' },
+      { type: 'closed', intentional: false },
+    ]);
+    expect(m.phase.kind).toBe('error');
+  });
+});
+
+describe('WebSocket blocked before the session started (AUDIT: no HTTP fallback)', () => {
+  it('names a blocked WebSocket when the tunnel never opened', () => {
+    const m = run([
+      { type: 'connect' },
+      { type: 'error', code: STATUS.UPSTREAM_NOT_FOUND, source: 'tunnel' },
+      { type: 'closed', intentional: false },
+    ]);
+    expect(m.phase).toMatchObject({ kind: 'error' });
+    expect(m.phase.kind === 'error' && m.phase.message).toMatch(/WebSocket/);
+  });
+});

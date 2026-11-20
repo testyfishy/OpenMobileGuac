@@ -5,6 +5,7 @@ import {
   encodeBase32,
   hotp,
   parseTotpInput,
+  totpFromEnrolmentField,
   secondsRemaining,
   serializeTotp,
   totpAt,
@@ -146,5 +147,43 @@ describe('waitForFreshCode', () => {
     expect(waitForFreshCode(undefined, 10_000, 30)).toBe(0);
     expect(waitForFreshCode(0, 10_000, 30)).toBe(20_000);
     expect(waitForFreshCode(0, 30_000, 30)).toBe(0);
+  });
+});
+
+describe('totpFromEnrolmentField (Guacamole 1.6.0 AuthenticationCodeField, AUDIT #4)', () => {
+  const secret = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+  it('uses digits, period and mode from the field', () => {
+    const p = totpFromEnrolmentField({
+      secret,
+      digits: 8,
+      period: 60,
+      mode: 'SHA256',
+      issuer: 'Apache Guacamole',
+      username: 'testuser',
+    });
+    expect([p.digits, p.period, p.algorithm]).toEqual([8, 60, 'SHA256']);
+    expect(p.issuer).toBe('Apache Guacamole');
+    expect(p.account).toBe('testuser');
+    expect(serializeTotp(p)).toMatch(/algorithm=SHA256&digits=8&period=60/);
+  });
+
+  it('prefers the server key URI, which is its complete description', () => {
+    const p = totpFromEnrolmentField({
+      secret,
+      digits: 6,
+      keyUri: `otpauth://totp/Guac:testuser?secret=${secret}&issuer=Guac&algorithm=SHA512&digits=7&period=45`,
+    });
+    expect([p.digits, p.period, p.algorithm]).toEqual([7, 45, 'SHA512']);
+  });
+
+  it('falls back to the fields when the key URI is unusable, and to defaults when absent', () => {
+    expect(totpFromEnrolmentField({ secret, keyUri: 'nonsense', digits: '8' }).digits).toBe(8);
+    const d = totpFromEnrolmentField({ secret });
+    expect([d.digits, d.period, d.algorithm]).toEqual([6, 30, 'SHA1']);
+    expect(totpFromEnrolmentField({ secret, mode: 'sha512' }).algorithm).toBe('SHA512');
+  });
+
+  it('rejects a field without a key', () => {
+    expect(() => totpFromEnrolmentField({ digits: 6 })).toThrow(TotpParseError);
   });
 });

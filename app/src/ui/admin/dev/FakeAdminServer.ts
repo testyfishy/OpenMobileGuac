@@ -23,6 +23,8 @@ import { PROTOCOL_FIXTURE } from './protocolFixture.ts';
  */
 
 export const FAKE_BASE_URL = 'https://guac.example/guacamole';
+/** A second address the fake also answers (dev only: changing a server's address). */
+export const FAKE_ALT_BASE_URL = 'https://other.guac.example/guacamole';
 /** Grepped for in `dist/` to prove the harness is not shipped. */
 export const FAKE_BACKEND_MARKER = 'omg-fake-admin-backend';
 const DS = 'postgresql';
@@ -197,11 +199,26 @@ export class FakeAdminServer implements HttpClient {
 
   async request(req: HttpRequest): Promise<HttpResponse> {
     if (this.latencyMs > 0) await new Promise((r) => setTimeout(r, this.latencyMs));
-    if (!req.url.startsWith(`${FAKE_BASE_URL}/`)) {
+    // Dev inspection: what reached which host, and whether it carried a token or password.
+    const log = ((globalThis as { __omgFakeLog?: unknown[] }).__omgFakeLog ??= []);
+    const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? '');
+    log.push({
+      method: req.method,
+      url: req.url.split('?')[0],
+      token: req.headers?.['Guacamole-Token'] ?? null,
+      // Field names only (never values): e.g. ["username", "password"].
+      fields:
+        typeof req.body === 'object' && req.body !== null
+          ? Object.keys(req.body)
+          : [...new URLSearchParams(body).keys()],
+    });
+    // A second address served by the same fake, to try changing a server's address.
+    const base = req.url.startsWith(`${FAKE_ALT_BASE_URL}/`) ? FAKE_ALT_BASE_URL : FAKE_BASE_URL;
+    if (!req.url.startsWith(`${base}/`)) {
       // Anything else (e.g. a probe of another address) is unreachable.
       throw new HttpTransportError('unreachable', req.url, 'fake server: unknown host');
     }
-    const path = req.url.slice(FAKE_BASE_URL.length + 1).split('?')[0] ?? '';
+    const path = req.url.slice(base.length + 1).split('?')[0] ?? '';
     return this.route(req, path);
   }
 

@@ -177,6 +177,8 @@ export class ScribbleTunnel implements TunnelLike {
     if (!this.isConnected()) return;
     const [opcode, ...rest] = elements.map((e) => String(e));
     if (opcode === undefined) return;
+    // Dev inspection: every instruction the session sent (keys, mouse, size…).
+    ((globalThis as { __omgSent?: string[] }).__omgSent ??= []).push([opcode, ...rest].join(','));
     if (this.handleExtra(opcode, rest)) return;
     switch (opcode) {
       case 'mouse':

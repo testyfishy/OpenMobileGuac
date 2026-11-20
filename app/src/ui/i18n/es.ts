@@ -73,6 +73,18 @@ export const es: Strings = {
     urlHint: 'Con o sin http(s):// y /guacamole. La app encuentra la dirección correcta.',
     username: 'Usuario',
     password: 'Contraseña',
+    confirmLinks: 'Preguntar antes de conectar con enlaces de la app',
+    confirmLinksHint:
+      'Un enlace openmobileguac:// (por ejemplo de otra app o un código QR) pregunta primero «¿Abrir … en este servidor?».',
+    httpFallback: 'Usar http — sin cifrar',
+    httpFallbackHint:
+      'La dirección segura (https) no funcionó, así que no se envió nada. Cualquiera en la red puede leer http sin cifrar; úsalo solo en una red de confianza.',
+    passwordNewAddress:
+      'Una dirección nueva necesita la contraseña otra vez: la guardada se borra al guardar.',
+    moveTitle: '¿Cambiar la dirección del servidor?',
+    moveBody:
+      'La contraseña, la sesión y la clave TOTP guardadas eran para la dirección anterior. Se borrarán y volverás a iniciar sesión en la nueva. No se envía nada guardado a la nueva dirección.',
+    moveConfirm: 'Cambiar dirección',
     passwordKeep: 'Déjala en blanco para conservar la contraseña guardada',
     remember: 'Recordar la contraseña en este dispositivo',
     rememberHintSecure: 'Se guarda en el llavero / almacén de claves del dispositivo.',
@@ -194,6 +206,9 @@ export const es: Strings = {
     totpHint: 'Escribe el código de tu app de autenticación.',
     totpEnrollHint:
       'Esta cuenta debe configurar la autenticación de doble factor. Añade esta clave a tu app de autenticación y escribe el código que muestre.',
+    totpQrAlt: 'Código QR con la clave del autenticador de esta cuenta',
+    totpParams: (p: { digits: number; period: number; algorithm: string }) =>
+      `${p.digits} dígitos, un código nuevo cada ${p.period} s, ${p.algorithm}.`,
     totpSecret: 'Clave de configuración',
     totpAutofilled: (seconds: number) => `Rellenado con la clave guardada · quedan ${seconds} s`,
     totpWaiting: (seconds: number) =>
@@ -341,6 +356,12 @@ export const es: Strings = {
       'Enlace copiado. Añádelo como acceso directo en la pantalla de inicio con tu launcher o con la app Atajos.',
     openSessionBadge: 'Abierta',
     swipeHint: 'Desliza para ver acciones',
+    linkConfirmTitle: (connection: string, server: string) =>
+      `¿Abrir «${connection}» en ${server}?`,
+    linkConfirmBody:
+      'Un enlace pidió conectar. Conectar puede quitar la sesión a otra persona o despertar el equipo.',
+    linkConfirmOpen: 'Abrir',
+    linkDontAsk: 'No volver a preguntar para enlaces de este servidor',
     linkServerMissing: 'Ese enlace apunta a un servidor que no está guardado en este dispositivo.',
     linkConnectionMissing: 'Esa conexión ya no está disponible en este servidor.',
   },
@@ -374,6 +395,7 @@ export const es: Strings = {
   } as Record<string, string>,
 
   session: {
+    shareTitle: (name: string) => `Únete a mi sesión: ${name}`,
     disconnectTitle: (name: string) => `¿Salir de ${name}?`,
     disconnectBody: 'Mantén la sesión abierta para volver a ella, o desconéctala ahora.',
     disconnect: 'Desconectar',
@@ -405,6 +427,15 @@ export const es: Strings = {
     unlock: 'Desbloquear',
     failed: 'No se desbloqueó. Vuelve a intentarlo.',
     reason: 'Desbloquear OpenMobileGuac',
+    unavailable:
+      'Face ID, la huella y el código del dispositivo no están disponibles ahora. Comprueba que hay un código configurado en los ajustes del dispositivo y vuelve a intentarlo.',
+    retry: 'Reintentar',
+    reset: 'Borrar los inicios de sesión guardados y desactivar el bloqueo',
+    resetTitle: '¿Desactivar el bloqueo de la app?',
+    resetBody:
+      'Primero se borran todas las contraseñas, sesiones y claves TOTP guardadas en este dispositivo. Los servidores, favoritos y ajustes se conservan. Tendrás que volver a iniciar sesión.',
+    resetConfirm: 'Borrar y desactivar',
+    offReason: 'Desactivar el bloqueo de la app',
     credentialReason: 'Usar las credenciales guardadas',
     cancel: 'Cancelar',
   },
@@ -478,7 +509,8 @@ export const es: Strings = {
       'fit-screen': 'Ajustar a pantalla',
       'fit-width': 'Ajustar al ancho',
       'fit-height': 'Ajustar al alto',
-      'one-to-one': '1:1',
+      'one-to-one': '1:1 (píxeles del dispositivo)',
+      'css-pixels': '100 % (píxeles CSS)',
     } as Record<string, string>,
     pointerMode: 'Modo de puntero',
     pointerModes: {
@@ -494,7 +526,7 @@ export const es: Strings = {
     haptics: 'Respuesta háptica',
     clipboard: 'Portapapeles',
     clipboardRemoteToDevice: 'Copiar el portapapeles remoto a este dispositivo',
-    clipboardAutoSendOnFocus: 'Enviar el portapapeles del dispositivo al abrir una sesión',
+    clipboardAutoSendOnFocus: 'Enviar el portapapeles del dispositivo al volver a la app',
     clipboardAutoSendHint: 'En iOS puede aparecer un aviso de permiso para pegar.',
     keepAwake: 'Mantener la pantalla encendida durante las sesiones',
     resetDefaults: 'Restablecer valores de sesión',
@@ -513,6 +545,8 @@ export const es: Strings = {
     maxSessionsHint:
       'Cada sesión abierta consume memoria y datos. En dispositivos antiguos puede ser mejor 1 o 2.',
     backgroundDisconnect: 'Desconectar las sesiones cuando la app lleve en segundo plano',
+    backgroundDisconnectIos:
+      'En iPhone y iPad el sistema pausa la app poco después de salir de ella, así que no puede mantener una sesión: el servidor Guacamole la cierra unos 15 segundos después de que la app deja de responder, elijas lo que elijas aquí. Al volver, la sesión se reconecta sola.',
     backgroundDisconnectHint: 'Ahorra batería y datos. Puedes volver a conectar con un toque.',
     thumbnails: 'Guardar una miniatura de cada sesión',
     thumbnailsHint:
@@ -628,6 +662,10 @@ export const es: Strings = {
       'Frase de contraseña incorrecta. Déjala en blanco para restaurar sin contraseñas.',
     restore: 'Restaurar',
     restoring: 'Restaurando…',
+    restoredAddressChanged: (n: number) =>
+      ` ${n} ${n === 1 ? 'servidor guardado tiene' : 'servidores guardados tienen'} otra dirección en la copia, así que se ${n === 1 ? 'añadió como servidor nuevo' : 'añadieron como servidores nuevos'} sin contraseñas ni sesión guardadas. Vuelve a iniciar sesión si la dirección es correcta.`,
+    restoredSecretsSkipped:
+      ' Las contraseñas y claves TOTP de la copia no se restauraron (sin frase de contraseña).',
     restored: (added: number, updated: number, removed: number) =>
       `Restaurado: ${added} ${plural(added, 'añadido', 'añadidos')}, ${updated} ${plural(updated, 'actualizado', 'actualizados')}${removed ? `, ${removed} ${plural(removed, 'eliminado', 'eliminados')}` : ''}.`,
     replaceConfirmTitle: '¿Sustituir todos los servidores?',

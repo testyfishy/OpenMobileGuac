@@ -531,6 +531,9 @@ export class TransferManager {
         // BlobWriter has no abort: detach it from the stream's acks so it stops reading,
         // then end the stream (the server keeps what it received so far).
         stream.onack = () => undefined;
+        // A FileReader chunk already in flight would still call `sendBlob` after the end
+        // (BlobWriter reads asynchronously): drop it, so no blob follows `end` (AUDIT FIL-1).
+        (stream as { sendBlob: (data: string) => void }).sendBlob = () => undefined;
         try {
           stream.sendEnd();
         } catch {

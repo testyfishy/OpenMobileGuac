@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { FieldDescriptor } from '../models/ApiErrorBody.ts';
-import { APP_SSO_CALLBACK, extractSsoParam, findSsoRedirect, withAppCallback } from '../sso/sso.ts';
+import {
+  APP_SSO_CALLBACK,
+  extractCallbackParam,
+  extractSsoParam,
+  findSsoRedirect,
+  newSsoState,
+  withAppCallback,
+} from '../sso/sso.ts';
 import { buildConnectLink, parseAppLink, parseShareLink } from './links.ts';
 
 describe('app links', () => {
@@ -91,15 +98,42 @@ describe('SSO', () => {
     expect(
       extractSsoParam('https://guac.example/other/#id_token=T1', base, 'id_token'),
     ).toBeUndefined();
-    expect(extractSsoParam(`${APP_SSO_CALLBACK}#id_token=T2`, base, 'id_token')).toBe('T2');
+    // The app callback never counts here (it needs the attempt's state).
+    expect(extractSsoParam(`${APP_SSO_CALLBACK}#id_token=T2`, base, 'id_token')).toBeUndefined();
     expect(extractSsoParam('https://guac.example/guacamole/', base, 'id_token')).toBeUndefined();
   });
 
-  it('rewrites redirect_uri for the app callback', () => {
+  it('rewrites redirect_uri and adds the attempt state for the app callback', () => {
     const out = withAppCallback(
       'https://idp.example/auth?client_id=c&redirect_uri=https%3A%2F%2Fg',
+      'S1',
     );
     expect(new URL(out ?? '').searchParams.get('redirect_uri')).toBe(APP_SSO_CALLBACK);
-    expect(withAppCallback('https://cas.example/login?service=x')).toBeUndefined();
+    expect(new URL(out ?? '').searchParams.get('state')).toBe('S1');
+    expect(withAppCallback('https://cas.example/login?service=x', 'S1')).toBeUndefined();
+  });
+
+  it('accepts an app callback only with the pending attempt state (AUDIT #13)', () => {
+    const state = newSsoState();
+    expect(state).toMatch(/^[0-9a-f]{32}$/);
+    expect(newSsoState()).not.toBe(state);
+    expect(
+      extractCallbackParam(`${APP_SSO_CALLBACK}#id_token=T&state=${state}`, 'id_token', state),
+    ).toBe('T');
+    expect(
+      extractCallbackParam(`${APP_SSO_CALLBACK}?state=${state}#id_token=T`, 'id_token', state),
+    ).toBe('T');
+    expect(
+      extractCallbackParam(`${APP_SSO_CALLBACK}#id_token=T`, 'id_token', state),
+    ).toBeUndefined();
+    expect(
+      extractCallbackParam(`${APP_SSO_CALLBACK}#id_token=T&state=other`, 'id_token', state),
+    ).toBeUndefined();
+    expect(
+      extractCallbackParam(`${APP_SSO_CALLBACK}#id_token=T&state=`, 'id_token', ''),
+    ).toBeUndefined();
+    expect(
+      extractCallbackParam(`https://evil.example/#id_token=T&state=${state}`, 'id_token', state),
+    ).toBeUndefined();
   });
 });

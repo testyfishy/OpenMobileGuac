@@ -59,6 +59,26 @@ function expectFinite(s: ViewportState) {
   }
 }
 
+describe('1:1 means one remote pixel per device pixel (AUDIT #6)', () => {
+  it.each([1, 2, 3, 2.625])('at DPR %s: 1:1 = 1/dpr, 100%% = 1', (dpr) => {
+    const remote = { width: 1920, height: 1080 };
+    const one = createViewport({ remote, screen: PORTRAIT, mode: 'one-to-one', pixelRatio: dpr });
+    expect(scaleOf(one)).toBeCloseTo(1 / dpr, 12);
+    const css = createViewport({ remote, screen: PORTRAIT, mode: 'css-pixels', pixelRatio: dpr });
+    expect(scaleOf(css)).toBe(1);
+  });
+
+  it('ignores a bogus pixel ratio', () => {
+    const v = createViewport({
+      remote: { width: 100, height: 100 },
+      screen: PORTRAIT,
+      mode: 'one-to-one',
+      pixelRatio: 0,
+    });
+    expect(scaleOf(v)).toBe(1);
+  });
+});
+
 describe('Viewport fit modes (DSP-1)', () => {
   // [mode, screen name, screen, expected scale, expected offsetX, expected offsetY]
   const rows: [FitMode, string, Size, number, number, number][] = [

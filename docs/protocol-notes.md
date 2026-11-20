@@ -332,6 +332,121 @@ The `Client.connect(connectString)` call passes this string to `tunnel.connect(d
   `tunnel.sendMessage` and `tunnel.oninstruction` (`JS/Client.js`). `ManagedClient` also
   uses `onerror`, `onstatechange` and `onuuid`.
 
+### 3.4 Remote size, DPI and quality
+
+Sources: guacamole-server 1.6.0 `src/libguac/user-handlers.c` 632-655 (handshake `size`),
+`src/protocols/rdp/resolution.c` 25-56 (`guac_rdp_suggest_resolution`),
+`src/protocols/rdp/settings.c` 850-889, `src/protocols/rdp/input.c` 102-114 and
+`src/protocols/rdp/channels/disp.c` 163-235; guacamole-client `ManagedClient.js` 281-300.
+Implemented in `app/src/session/viewport/remoteSize.ts` (tests in `remoteSize.test.ts`).
+
+**The rule guacd applies to RDP** when the administrator has not set `width`, `height` or
+`dpi`:
+
+- The handshake `size` gives the client's optimal width W, height H and DPI D (D defaults
+  to 96 when absent). The tunnel fills it from `GUAC_WIDTH`, `GUAC_HEIGHT` and `GUAC_DPI`.
+- `reasonable(r)` is true when `D == r` or `(W·r/D) · (H·r/D) ≥ 800·600`, with C integer
+  division.
+- The resolution is 96 if `reasonable(96)`, else 120 if `reasonable(120)`, else D.
+- Desktop width = `(W·res/D) & ~3` (rounded down to a multiple of 4); height = `H·res/D`
+  (not rounded). Zero or negative falls back to 1024 × 768.
+- **The DPI is never sent to the RDP server.** It only converts pixels (`input.c`); no
+  DesktopScaleFactor is set at connect, and display-update sends 0. Windows therefore uses
+  its own scaling (normally 100 %) whatever DPI the client asks for. (AUDIT §4.3 said
+  "Windows 200 %"; that was wrong.)
+- A later `size` (resize) carries width and height only. guacd converts it with the DPI
+  chosen at connect, limits it to 8192, clamps it to at least 200, makes the width even,
+  sends at most one request per 500 ms and skips unchanged sizes.
+
+**VNC** sends SetDesktopSize with W × H only (if libvncclient supports it, the user is the
+owner and `disable-display-resize` is off); many servers ignore it. **SSH, telnet and
+Kubernetes** size the terminal from W × H and draw the font at `font-size · D / 96` pixels.
+
+**What each Quality level sends** on an iPhone-class phone (390 × 844 CSS px, DPR 3) and on
+a DPR-2 phone (375 × 812 CSS px), and what guacd then gives an RDP server:
+
+| Quality | Sent at DPR 3            | RDP desktop at DPR 3 | Sent at DPR 2            | RDP desktop at DPR 2 |
+| ------- | ------------------------ | -------------------- | ------------------------ | -------------------- |
+| Auto    | 1170 × 2532 @ 288        | 484 × 1055 @ 120     | 750 × 1624 @ 192         | 748 × 1624 @ 192     |
+| Best    | 1170 × 2532 @ 298        | 1168 × 2532 @ 298    | 750 × 1624 @ 192         | 748 × 1624 @ 192     |
+| Low     | 390 × 844 @ 96, no audio | 388 × 844 @ 96       | 375 × 812 @ 96, no audio | 372 × 812 @ 96       |
+
+(The sizes are the whole screen; the app sends the area left after docked toolbars.)
+
+- **Auto** is the upstream web client: device pixels at `96·dpr`.
+- **Best** sends device pixels at the lowest DPI that guacd keeps (`nativeDpi`). For
+  1170 × 2532 every DPI from 97 to 297 is reduced to 96 or 120; 298 and above keep it. For
+  terminal protocols Best keeps the Auto DPI, since guacd scales the font by DPI.
+- **Low** sends CSS pixels at 96 DPI (guacd keeps it because the DPI equals its own), and
+  advertises no `GUAC_AUDIO` types, so guacd encodes and sends no audio
+  (`libguac/audio.c` 75-107, 206-212). It keeps `image/webp` and waits 1.5 s instead of
+  0.4 s before a mid-session resize.
+- **Remote resolution** other than Auto (Match device, 1280 × 720 to 2560 × 1440, Custom) is
+  sent at 96 DPI, which guacd always keeps. A fixed size never follows device rotation.
+- **Scale** above 100 % divides the requested size (200 % → 585 × 1266 at DPR 3), so the
+  desktop is drawn larger. It is the only client-side way to get larger text, since no
+  DPI reaches Windows.
+- **Audio off** (separate from a local mute) advertises no audio types. A local mute still
+  receives the stream (about 1.4 Mbit/s for 44.1 kHz stereo PCM).
+- Only `GUAC_*` values reach guacd (`TunnelRequest.java`). JPEG/WebP quality, frame rate,
+  colour depth, `force-lossless`, wallpaper and VNC encodings are connection parameters
+  that only an administrator can change (connection editor › Performance presets, §8.6).
+- Session info shows "Asked for" (the request) next to "Remote resolution" (what the
+  server gave), the bytes received, and a kbit/s estimate from tunnel traffic over the last
+  5 s. Changing Quality, size, Scale or Audio off mid-session offers "Reconnect to apply".
+
+### 3.5 No HTTP tunnel fallback
+
+The web client uses `ChainedTunnel(WebSocketTunnel, HTTPTunnel)`. The app does not, because
+the HTTP tunnel cannot work reliably from the app's WebView:
+
+- The app's origin is `capacitor://localhost` (iOS) or `https://localhost` (Android). The
+  HTTP tunnel's `read` and `write` requests carry the `Guacamole-Tunnel-Token` header, which
+  forces a CORS preflight that Guacamole does not answer. Reading the tunnel token and
+  `Guacamole-Status-Code` response headers would also need `Access-Control-Expose-Headers`
+  (`Tunnel.js` 466, 497-499, 663, 697-703). The `?connect` POST may still reach the server
+  as a simple request and open a connection whose answer cannot be read.
+- Capacitor's native HTTP patch (`plugins.CapacitorHttp.enabled`, off in this app) avoids
+  CORS but buffers the whole response: the patched XMLHttpRequest goes from readyState 2
+  straight to 4 (`native-bridge.js` on both platforms). The tunnel servlet ends a read
+  response only when the next read arrives (`GuacamoleHTTPTunnelServlet.java` 422-447), so
+  the progressive readyState-3 reads that `HTTPTunnel` relies on never happen.
+- `ChainedTunnel` would also replace the app's `sendMessage` wrapper (traffic counter) on
+  `attach`, and it never falls back on `UPSTREAM_TIMEOUT`.
+
+Instead, a WebSocket that closes before the tunnel ever opened (close 1006, reported as
+0x0207 `UPSTREAM_NOT_FOUND`) shows "The WebSocket connection to the server failed … a proxy
+or firewall that blocks WebSockets also causes this. The app cannot fall back to the HTTP
+tunnel." (`status.ts`, test in `status.test.ts`). A real fallback needs a native transport
+(`core/transport/SessionTransport.ts`, `native-bridge`).
+
+### 3.6 Close codes and reconnect
+
+- `WebSocketTunnel` (vendored 1.6.0, `Tunnel.js` 926-1011): a close with a numeric reason
+  uses that Guacamole status; otherwise 1000 → SUCCESS, 1006/1015 → UPSTREAM_NOT_FOUND and
+  1001/1012-1014 → UPSTREAM_UNAVAILABLE. `onerror` fires only for a non-success status, and
+  before `CLOSED`.
+- An administrator's **Kill** (`ActiveConnectionService.deleteObject` → `tunnel.close()`)
+  closes the WebSocket with code 1000 and reason `"0"` (SUCCESS). guacd sends nothing, so
+  the client sees no `error`, no `disconnect` and no `onerror`, only `CLOSED`.
+- A clean RDP log-off (ERRINFO 0xB/0xC) ends with SUCCESS and a `disconnect` instruction.
+  "Forcibly disconnected." and "Logged off." send `error` 0x020B; idle sends 0x020A;
+  another user sends 0x0209 (`rdp/error.c` 200-340).
+- The upstream web client never retries a clean close (it shows "Disconnected" with a
+  Reconnect button). It auto-retries only 0x0200, 0x0202, 0x0203, 0x0207, 0x0208, 0x0301
+  and 0x0308 (`guacClientNotification.js` 73-94, 147-151, 217-283).
+- The app now does the same for clean closes: **a close with no error is "ended by the
+  server" and is never auto-reconnected.** A network drop always reports an error first
+  (1006 → 0x0207, receive timeout → 0x0202) and is retried. While hidden, and within 10 s
+  of returning to the app, the first retry is immediate and the overlay is replaced by a
+  small "Reconnecting…" pill. 2 s after a return, a session whose tunnel is closed or
+  unstable is reconnected at once (`backgroundPolicy.ts` `resumeNeedsReconnect`).
+- Keep-alives: `Client.js` sends a `nop` 5 s after the last received instruction, and
+  `WebSocketTunnel` pings every 500 ms (the web application echoes it). Nothing in the app
+  suppresses either while a session is hidden: `setActive(false)` only stops input, loops
+  and audio. They stop only when the OS pauses the WebView; guacd then drops the user after
+  `GUACD_TIMEOUT` (15 s, `src/guacd/proc.h`) with 0x0308.
+
 ## 4. Clipboard
 
 - **Remote to local:** `client.onclipboard = function (stream, mimetype)`
@@ -390,6 +505,50 @@ The `Client.connect(connectString)` call passes this string to `tunnel.connect(d
   - The web client calls `client.sendKeyEvent(1, keysym)` and `(0, keysym)` from the
     `guacKeydown`/`guacKeyup` and `guacSyntheticKeydown`/`guacSyntheticKeyup` events, and
     only while the client is focused (`guacClient.js`).
+
+### 5.1 Keys, Shift and guacd
+
+Sources: guacamole-server 1.6.0 `src/protocols/rdp/keyboard.c` 263-352, 476-497, 530-538,
+560-588, 607-625 and 692-718; `src/protocols/rdp/keymaps/en_us_qwerty.keymap` 24-42 and
+`base.keymap` 23-91; `src/protocols/vnc/input.c` 50-65; `src/terminal/terminal.c`
+1417-1530; and the vendored `Keyboard.js`. Implemented in `app/src/session/keys/KeyModel.ts`
+(`chordCharKeysym`, `comboEvents`), with table-driven tests in `KeyModel.test.ts`.
+
+- The RDP keymap gives every printable keysym a required Shift state: `t` is `-shift`, `T`
+  is `+shift`, `1` is `-shift` and `!` is `+shift`. Before sending the scancode, guacd
+  presses or releases Shift to match. Only Shift and AltGr are tracked (Ctrl, Alt and Win
+  are left alone), and Shift is not restored afterwards. Tab, Esc, Enter, arrows and F-keys
+  have no Shift constraint. A keysym with no keymap entry becomes an RDP Unicode event (no
+  press or release, so no shortcut); ISO_Left_Tab (0xFE20) is dropped.
+- So Shift held + `t` reaches Windows as a plain `t` (Ctrl+Shift+`t` → Ctrl+T), and `T`
+  without Shift gets a synthetic Shift (Ctrl+`T` → Ctrl+Shift+T).
+- VNC passes the keysym through unchanged. The SSH terminal ignores Shift for printable
+  keys and maps Ctrl+`T` and Ctrl+`t` both to 0x14.
+- **Rule:** send what a US keyboard types with the Shift state actually sent, as
+  `Guacamole.Keyboard` does for a physical keyboard (browser `key` "T" with Shift → 0x54):
+  - with Shift: uppercase letters and shifted symbols (`T`, `!`);
+  - without Shift: lowercase letters and unshifted symbols (`t`, `1`);
+  - a shifted symbol written without Shift (`Ctrl+!`) gets Shift added, as on a keyboard;
+  - named keys are always their base keysym; modifiers are pressed first and the key last,
+    and releases come in reverse.
+
+| Chord                           | Events                              |
+| ------------------------------- | ----------------------------------- |
+| Ctrl+Shift+T                    | FFE3↓ FFE1↓ 54↓ 54↑ FFE1↑ FFE3↑     |
+| Ctrl+T                          | FFE3↓ 74↓ 74↑ FFE3↑                 |
+| Key bar: sticky Shift, then "1" | FFE1↓ 21↓ 21↑ FFE1↑                 |
+| Ctrl+Shift+1 (or Ctrl+!)        | FFE3↓ FFE1↓ 21↓ 21↑ FFE1↑ FFE3↑     |
+| Alt+Shift+Tab                   | FFE9↓ FFE1↓ FF09↓ FF09↑ FFE1↑ FFE9↑ |
+| Ctrl+Shift+Esc                  | FFE3↓ FFE1↓ FF1B↓ FF1B↑ FFE1↑ FFE3↑ |
+| Super+Shift+S                   | FFEB↓ FFE1↓ 53↓ 53↑ FFE1↑ FFEB↑     |
+| Shift+A                         | FFE1↓ 41↓ 41↑ FFE1↑                 |
+
+Known edge case: with Caps Lock on at the remote, guacd's cheapest keymap match for Shift +
+`T` is `+caps -shift`, which drops the Shift. Keep the remote Caps Lock off for Shift
+chords.
+
+The setting "Command key (⌘) on a hardware keyboard" can send Control instead of Super for
+⌘ on iPad and Mac keyboards (`mapCommandKey`), so ⌘C and ⌘V copy and paste on Windows.
 
 ## 6. Session streams: required/argv, files, audio, statistics
 
@@ -514,6 +673,50 @@ notification dialog auto-reconnects only for 0x0200, 0x0202, 0x0203, 0x0207, 0x0
 (client) and 0x0308 (`guacClientNotification.js`, `CLIENT_AUTO_RECONNECT` /
 `TUNNEL_AUTO_RECONNECT`); the app is stricter for 0x0301 (a rejected sign-in would fail
 again).
+
+### 6.6 Terminal parameters (font size, colour scheme)
+
+SSH, telnet and Kubernetes register `color-scheme`, `font-name` and `font-size` as argv
+parameters with `GUAC_ARGV_OPTION_ECHO` and without ONCE (`ssh/client.c` 82-84,
+`telnet/client.c` 87-89, `kubernetes/client.c` 134-136), for users who are not read-only.
+
+- The client opens `argv,<stream>,text/plain,<name>`, waits for the ack ("Ready for updated
+  parameter."), then sends the value as `blob`s and `end` (`libguac/argv.c` 221-347).
+- `font-size` is an integer in points (≤ 0 is ignored).
+- `color-scheme` is a preset (`gray-black`, `black-white`, `green-black`, `white-black`) or a
+  custom list `foreground: …; background: …; colorN: …`.
+- The More sheet's Terminal group offers − / + (one point per step, 6 to 48) and a cycle
+  through the colour presets. The option "Pinch to change the terminal font size" turns a
+  pinch into a `font-size` change (`app/src/session/terminalFont.ts`).
+
+### 6.7 Session sharing
+
+Verified in guacamole-client 1.6.0:
+
+- Profiles: `GET api/session/tunnels/{tunnelUUID}/activeConnection/connection/sharingProfiles`
+  (`TunnelResource` 111, `ActiveConnectionResource`, `tunnelService.js` 126-127) returns a
+  map of identifier → sharing profile.
+- Key: `GET api/session/tunnels/{tunnelUUID}/activeConnection/sharingCredentials/{profileId}`
+  (`ActiveConnectionResource.java` 128-136, `tunnelService.js` 151-158) returns
+  `{"expected":[{"name":"key","type":"QUERY_PARAMETER"}],"values":{"key":"…"}}`. The user
+  needs READ on that profile, which must belong to the connection.
+- Link: `<origin><path>#/?key=<urlencoded key>` (`UserCredentials.getLink`,
+  `ManagedShareLink.js` 92-99). The tunnel UUID is the first internal instruction
+  (`Tunnel.uuid`).
+- The app's "Share this session" (More sheet) lists the profiles, creates the link and hands
+  it to the share sheet or the clipboard (`GuacApi.getTunnelSharingProfiles`,
+  `GuacApi.createShareLink`, `ui/session/ShareSheet.tsx`). It is not offered in the Demo or
+  in a session opened from a share link. Not yet tried against a real server.
+
+### 6.8 TOTP enrolment field
+
+`AuthenticationCodeField` (`extensions/guacamole-auth-totp`, name `guac-totp`, type
+`GUAC_TOTP_CODE`) exposes, during enrolment only: `secret` (Base32), `digits` (number),
+`period` (number), `mode` (`"SHA1"`, `"SHA256"` or `"SHA512"`: the `TOTPGenerator.Mode` enum
+name, upper case), `issuer`, `username`, `keyUri`
+(`otpauth://totp/{issuer}:{user}?secret=&issuer=&algorithm=&digits=&period=`) and `qrCode`
+(a PNG data URL). The app stores the key from `keyUri` when it parses, else from `secret`
+with `digits`, `period` and `mode` (`core/totp/totp.ts` `totpFromEnrolmentField`).
 
 ## 7. Not verified
 

@@ -46,3 +46,17 @@ export function shouldSuspendInBackground(input: {
   }
   return input.now - input.backgroundedAt >= input.graceSeconds * 1000;
 }
+
+/**
+ * After a return to the app (checked about 2 s later): a session that still counts as
+ * connected but whose tunnel is closed or unstable (no data for 1.5 s, while a live tunnel
+ * gets a ping echo every 500 ms) has been dropped while the app was paused, e.g. iOS
+ * suspended the WebView and guacd ended the silent user after GUACD_TIMEOUT (15 s,
+ * guacamole-server `src/guacd/proc.h`). Reconnect it at once. Keep-alive `nop`s (Client.js,
+ * every 5 s) and tunnel pings (Tunnel.js, every 500 ms) only stop when the OS pauses the
+ * WebView; nothing in the app suppresses them. Tunnel states: 0 connecting, 1 open,
+ * 2 closed, 3 unstable.
+ */
+export function resumeNeedsReconnect(phase: string, tunnelState: number): boolean {
+  return phase === 'connected' && (tunnelState === 2 || tunnelState === 3);
+}

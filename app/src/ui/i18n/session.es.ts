@@ -25,6 +25,9 @@ export const sessionEs: SessionStrings = {
   },
 
   screen: {
+    resuming: 'Reconectando…',
+    viewOnlyPill: 'Solo ver · toca para desactivar',
+    reconnectToApply: 'Reconectar para aplicar',
     remoteDesktop: (title: string) => `Escritorio remoto: ${title}`,
     remoteDesktopRole: 'escritorio remoto',
     trackpadSurface: 'Trackpad para el puntero remoto',
@@ -35,6 +38,8 @@ export const sessionEs: SessionStrings = {
   },
 
   toasts: {
+    viewOnlyOn: 'Solo ver: no se envía nada al remoto',
+    viewOnlyOff: 'Solo ver desactivado',
     remoteClipboardCopied: 'Portapapeles remoto copiado a este dispositivo',
     deviceClipboardSent: 'Portapapeles del dispositivo enviado al remoto',
     pointerMode: (mode: string, hint: string) => `${mode}: ${hint}`,
@@ -86,16 +91,21 @@ export const sessionEs: SessionStrings = {
       'fit-width': 'Ajustar al ancho',
       'fit-height': 'Ajustar al alto',
       'one-to-one': 'Píxeles 1:1',
+      'css-pixels': '100 % (píxeles CSS)',
     },
     hints: {
       'fit-screen': 'Todo el escritorio a la vista',
       'fit-width': 'Ocupa el ancho; desplázate hacia abajo',
       'fit-height': 'Ocupa el alto; desplázate a los lados',
-      'one-to-one': 'Un píxel remoto por cada píxel de la pantalla',
+      'one-to-one': 'Un píxel remoto por cada píxel del dispositivo (lo más nítido, pequeño)',
+      'css-pixels': 'Un píxel remoto por cada píxel CSS (2×2 o 3×3 píxeles del dispositivo)',
     },
   },
 
   status: {
+    waking: 'Sigue conectando… ¿despertando el equipo?',
+    wakingDetail:
+      'Si el equipo estaba en reposo o apagado, el servidor puede estar despertándolo (Wake-on-LAN). Puede tardar uno o dos minutos. Puedes esperar o cancelar.',
     connecting: (title: string) => `Conectando a ${title}…`,
     waitingForNetwork: 'Esperando a la red…',
     waitingForNetworkDetail:
@@ -154,6 +164,8 @@ export const sessionEs: SessionStrings = {
     lostNotRestored: 'Se perdió la conexión y no se pudo restablecer.',
     offline: 'Este dispositivo no tiene conexión.',
     unreachable: 'No se pudo contactar con el servidor.',
+    websocketBlocked:
+      'La conexión WebSocket con el servidor falló antes de empezar la sesión. Comprueba que el servidor es accesible; un proxy o cortafuegos que bloquee WebSockets (wss://…/websocket-tunnel) también lo provoca. La app no puede recurrir al túnel HTTP.',
     tunnelUnreachable: 'No se pudo contactar con el servidor (error de red).',
     tunnelClosed: 'El servidor cerró la conexión.',
     startFailed: 'No se pudo iniciar la conexión.',
@@ -203,6 +215,7 @@ export const sessionEs: SessionStrings = {
       clipboard: 'Portapapeles',
       files: 'Archivos',
       sound: 'Sonido',
+      'view-only': 'Solo ver',
       options: 'Opciones',
       info: 'Información',
       back: 'Volver',
@@ -224,6 +237,7 @@ export const sessionEs: SessionStrings = {
       clipboard: 'Panel del portapapeles',
       files: 'Archivos',
       sound: 'Activar o silenciar el sonido',
+      'view-only': 'Solo ver (sin entrada al remoto)',
       options: 'Opciones de la sesión',
       info: 'Información de la sesión',
       back: 'Volver a las conexiones',
@@ -337,10 +351,68 @@ export const sessionEs: SessionStrings = {
       'El texto copiado en el remoto pasa al portapapeles de este dispositivo',
     clipboardAutoSendOnFocus: 'Enviar el portapapeles del dispositivo al volver a la app',
     clipboardAutoSendOnFocusHint: 'En iOS puede aparecer un aviso de permiso para pegar',
+    clipboardSendOnConnect: 'Enviar el portapapeles del dispositivo al conectar la sesión',
+    clipboardSendOnConnectHint:
+      'Una vez por conexión. Desactivado por defecto: en iOS cada lectura puede mostrar un aviso de permiso para pegar.',
+    audio: 'Sonido',
+    audioHint:
+      'Silenciado: el servidor sigue enviando sonido (unos 1,4 Mbit/s), solo que no se reproduce. Desactivado: al conectar no se pide sonido, así que no se envía. La calidad baja siempre conecta sin sonido.',
+    audioOptions: { on: 'Activado', muted: 'Silenciado aquí', off: 'Desactivado (no se pide)' },
+    quality: 'Calidad',
+    qualityHint:
+      'Se aplica al conectar. Auto: como la app web de Guacamole. Mejor: un píxel remoto por píxel del dispositivo (nítido; el texto se ve pequeño salvo que amplíes o subas la Escala). Baja: tamaño en píxeles CSS, sin sonido y menos cambios de tamaño. La calidad de imagen, la profundidad de color y los fotogramas se configuran en el servidor (editor de conexión › Rendimiento).',
+    qualityOptions: { auto: 'Auto', best: 'Mejor', low: 'Poco ancho de banda' },
+    remoteResolution: 'Resolución remota',
+    remoteResolutionHint:
+      'RDP usa el tamaño pedido (salvo que el administrador haya fijado uno). Los servidores VNC suelen mantener su propio tamaño. SSH dimensiona el terminal con él.',
+    remoteResolutionOptions: {
+      auto: 'Auto (según la calidad)',
+      device: 'Igual que el dispositivo',
+      '1280x720': '1280 × 720',
+      '1600x900': '1600 × 900',
+      '1920x1080': '1920 × 1080',
+      '2560x1440': '2560 × 1440',
+      custom: 'Personalizada',
+    },
+    remoteWidth: 'Ancho personalizado',
+    remoteHeight: 'Alto personalizado',
+    remoteSizeHint: 'Se usa cuando la resolución remota es Personalizada.',
+    remoteScale: 'Escala',
+    remoteScaleHint:
+      'Por encima del 100 % la app pide un escritorio proporcionalmente más pequeño, así que todo se dibuja más grande. Guacamole 1.6.0 no pasa una escala de pantalla (DPI) a Windows, así que es la única forma de agrandar el texto desde el cliente.',
+    viewOnly: 'Solo ver',
+    viewOnlyHint:
+      'Nada de lo que hagas llega al remoto: ni ratón, ni toques, ni teclas, ni portapapeles. Desactívalo desde la barra o Más.',
+    terminalPinchFont: 'Pellizcar para cambiar el tamaño de letra del terminal',
+    terminalPinchFontHint:
+      'Conexiones SSH, telnet y Kubernetes: al pellizcar cambia el tamaño de letra en el servidor en lugar de ampliar la vista.',
+    px: (n: number) => `${n} px`,
+    percent: (n: number) => `${n} %`,
+    commandKey: 'Tecla Comando (⌘) de un teclado físico',
+    commandKeyHint:
+      'Teclados de iPad y Mac. Control: ⌘C, ⌘V y ⌘Z copian, pegan y deshacen en Windows y Linux. Tecla Windows: como la app web de Guacamole (⌘ es la tecla Windows).',
+    commandKeyOptions: { super: 'Tecla Windows', ctrl: 'Control' },
     audioMuted: 'Silenciar el sonido remoto',
     audioMutedHint: 'También se puede cambiar en la sesión (Más › Sonido)',
     combosSummary: (n: number) => `${n} ${plural(n, 'combinación', 'combinaciones')}`,
     pointerSpeedHint: 'Modo trackpad',
+  },
+
+  share: {
+    title: 'Compartir esta sesión',
+    intro:
+      'Crea un enlace para compartir de Guacamole. Quien lo abra se une a esta sesión con el perfil elegido (por ejemplo, solo ver) hasta que la sesión termine. Los perfiles los configura un administrador.',
+    insecure:
+      'Este servidor usa http sin cifrar: el enlace y la sesión compartida no van cifrados.',
+    notConnected: 'Conecta primero.',
+    loading: 'Cargando perfiles para compartir…',
+    none: 'Esta conexión no tiene perfiles para compartir que puedas usar. Un administrador puede añadirlos a la conexión.',
+    failed: 'No se pudo crear el enlace para compartir.',
+    createFor: 'Crear un enlace con este perfil',
+    link: 'Enlace para compartir',
+    shareLink: 'Compartir',
+    copy: 'Copiar',
+    copied: 'Enlace copiado',
   },
 
   more: {
@@ -351,6 +423,33 @@ export const sessionEs: SessionStrings = {
     sendOrReceive: 'Enviar o recibir',
     clipboard: 'Portapapeles',
     clipboardHint: 'Ver, editar, enviar',
+    reconnectToApply: 'Reconectar para aplicar',
+    reconnectToApplyHint:
+      'Cambió la calidad, el tamaño o el sonido. Se aplican a una conexión nueva.',
+    viewOnly: 'Solo ver',
+    viewOnlyHint: 'Ni ratón, ni toques, ni teclas, ni portapapeles llegan al remoto',
+    quality: (q: string) => `Calidad: ${q}`,
+    qualityHint: 'Toca para cambiar. Se aplica al reconectar.',
+    fontSize: 'Tamaño de letra',
+    points: (n: number) => `${n} pt`,
+    fontSmaller: 'Letra más pequeña',
+    fontLarger: 'Letra más grande',
+    colorScheme: 'Colores',
+    colorSchemeName: (v: string) =>
+      (
+        ({
+          'gray-black': 'Gris sobre negro',
+          'black-white': 'Negro sobre blanco',
+          'green-black': 'Verde sobre negro',
+          'white-black': 'Blanco sobre negro',
+        }) as Record<string, string>
+      )[v] ?? 'Personalizado',
+    audioNotRequested: 'No se pide al servidor',
+    audioMode: (m: string) => `Sonido al conectar: ${m}`,
+    audioModeHint:
+      'Desactivado pide al servidor que no envíe sonido (ahorra datos). Se aplica al reconectar.',
+    shareSession: 'Compartir esta sesión',
+    shareSessionHint: 'Un enlace para que otros se unan (perfiles para compartir)',
     noAudio: 'Aún no hay audio',
     extraKeys: 'Teclas extra',
     keyCombos: 'Combinaciones de teclas',
@@ -364,6 +463,7 @@ export const sessionEs: SessionStrings = {
     disconnect: 'Desconectar',
     tapAgain: 'Toca de nuevo para desconectar',
     groups: {
+      terminal: 'Terminal',
       input: 'Entrada',
       view: 'Vista',
       clipFiles: 'Portapapeles y archivos',
@@ -756,6 +856,16 @@ export const sessionEs: SessionStrings = {
     connection: 'Conexión',
     protocol: 'Protocolo',
     unknownProtocol: 'Desconocido',
+    requested: 'Pedido',
+    requestedValue: (w: number, h: number, dpi: number, quality: string) =>
+      `${w} × ${h} a ${dpi} DPI (${quality})`,
+    dataRate: 'Recibiendo ahora',
+    kbps: (v: number) =>
+      v >= 1000 ? `${(v / 1000).toFixed(1).replace('.', ',')} Mbit/s` : `${Math.round(v)} kbit/s`,
+    audioNotRequested: 'desactivado (no se pide)',
+    serverSideHint:
+      'La calidad de imagen, la profundidad de color y los fotogramas son ajustes del servidor. Un administrador puede cambiarlos en el editor de conexión (perfiles de Rendimiento).',
+    editConnection: 'Editar esta conexión',
     remoteResolution: 'Resolución remota',
     view: 'Vista',
     tunnel: 'Túnel',

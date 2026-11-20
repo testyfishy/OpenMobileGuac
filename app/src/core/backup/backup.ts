@@ -1,4 +1,5 @@
 import { isRecord } from '../models/json.ts';
+import { sameServerEndpoint } from '../url/normalizeServerUrl.ts';
 import { parseServerProfile, type ServerProfile } from '../models/ServerProfile.ts';
 import type {
   ConnectionRef,
@@ -56,7 +57,15 @@ export interface BackupFile {
 
 /** Per server id in the backup. */
 export type BackupSecrets = Readonly<
-  Record<string, { readonly password?: string; readonly totpSeed?: string }>
+  Record<
+    string,
+    {
+      readonly password?: string;
+      readonly totpSeed?: string;
+      /** The server address the secrets were saved for (newer backups). */
+      readonly baseUrl?: string;
+    }
+  >
 >;
 
 export function createBackup(input: {
@@ -234,6 +243,40 @@ export interface RestorePlan {
   readonly added: number;
   readonly updated: number;
   readonly removed: number;
+  /**
+   * Backup servers whose id matched a saved server with a different address (scheme, host,
+   * port or path). They are added as separate servers with no saved secrets, so the saved
+   * server's password, token and TOTP seed are never sent to the backup's address.
+   */
+  readonly addressChanged: number;
+  /** Backup ids of those servers: their secrets in the backup are not restored either. */
+  readonly addressChangedIds: readonly string[];
+}
+
+/**
+ * Which decrypted backup secrets may be stored, and under which profile id: never for a
+ * server whose address changed against a saved one, and never when the address sealed in
+ * the encrypted part differs from the backup's plain `baseUrl` (an edited file).
+ */
+export function secretsToRestore(
+  plan: RestorePlan,
+  backup: BackupFile,
+  secrets: BackupSecrets,
+): { readonly id: string; readonly password?: string; readonly totpSeed?: string }[] {
+  const out: { id: string; password?: string; totpSeed?: string }[] = [];
+  for (const [backupId, s] of Object.entries(secrets)) {
+    const id = plan.idMap[backupId];
+    if (!id || plan.addressChangedIds.includes(backupId)) continue;
+    const server = backup.servers.find((x) => x.id === backupId);
+    if (!server) continue;
+    if (s.baseUrl !== undefined && !sameServerEndpoint(s.baseUrl, server.baseUrl)) continue;
+    out.push({
+      id,
+      ...(s.password ? { password: s.password } : {}),
+      ...(s.totpSeed ? { totpSeed: s.totpSeed } : {}),
+    });
+  }
+  return out;
 }
 
 function toProfileData(s: BackupServer, id: string): ProfileData {
@@ -256,8 +299,10 @@ function toProfileData(s: BackupServer, id: string): ProfileData {
 /**
  * - `replace`: every existing profile is removed (with its secrets) and the backup's
  *   profiles are stored under their own ids.
- * - `merge`: a backup profile matches an existing one by id, otherwise by base URL plus
- *   username; a match is updated (favourites and settings merged), anything else is added.
+ * - `merge`: a backup profile matches an existing one by id when the address (scheme, host,
+ *   port, path) is the same, otherwise by address plus username; a match is updated
+ *   (favourites and settings merged, secrets kept), anything else is added under a fresh id
+ *   with no secrets. A same-id entry with another address is counted in `addressChanged`.
  */
 export function planRestore(
   existing: readonly ServerProfile[],
@@ -278,6 +323,8 @@ export function planRestore(
       added: entries.length,
       updated: 0,
       removed: existing.length,
+      addressChanged: 0,
+      addressChangedIds: [],
     };
   }
   const used = new Set(existing.map((p) => p.id));
@@ -285,11 +332,23 @@ export function planRestore(
   const entries: RestoreEntry[] = [];
   let added = 0;
   let updated = 0;
+  let addressChanged = 0;
+  const addressChangedIds: string[] = [];
   for (const s of backup.servers) {
+    // An id match counts only when the address is the same: secrets are tied to the
+    // endpoint, and a crafted or stale backup must not repoint a saved server (AUDIT #1).
+    const byId = existing.find((p) => p.id === s.id && !claimed.has(p.id));
+    if (byId && !sameServerEndpoint(byId.baseUrl, s.baseUrl)) {
+      addressChanged++;
+      addressChangedIds.push(s.id);
+    }
     const match =
-      existing.find((p) => p.id === s.id && !claimed.has(p.id)) ??
+      (byId && sameServerEndpoint(byId.baseUrl, s.baseUrl) ? byId : undefined) ??
       existing.find(
-        (p) => !claimed.has(p.id) && p.baseUrl === s.baseUrl && p.username === s.username,
+        (p) =>
+          !claimed.has(p.id) &&
+          sameServerEndpoint(p.baseUrl, s.baseUrl) &&
+          p.username === s.username,
       );
     if (match) {
       claimed.add(match.id);
@@ -299,13 +358,25 @@ export function planRestore(
       continue;
     }
     let id = s.id;
-    while (used.has(id)) id = generateId();
+    for (let tries = 0; used.has(id); tries++) {
+      if (tries > 1000) throw new Error('generateId keeps returning ids in use');
+      id = generateId();
+    }
     used.add(id);
     idMap[s.id] = id;
     entries.push({ targetId: id, data: toProfileData(s, id), merge: false });
     added++;
   }
-  return { entries, removeIds: [], idMap, added, updated, removed: 0 };
+  return {
+    entries,
+    removeIds: [],
+    idMap,
+    added,
+    updated,
+    removed: 0,
+    addressChanged,
+    addressChangedIds,
+  };
 }
 
 // ---- optional encrypted secrets --------------------------------------------------------
@@ -389,13 +460,14 @@ export async function decryptSecrets(
     throw new Error('bad-passphrase');
   }
   const parsed = JSON.parse(new TextDecoder().decode(plain)) as unknown;
-  const out: Record<string, { password?: string; totpSeed?: string }> = {};
+  const out: Record<string, { password?: string; totpSeed?: string; baseUrl?: string }> = {};
   if (isRecord(parsed)) {
     for (const [id, v] of Object.entries(parsed)) {
       if (!isRecord(v)) continue;
       out[id] = {
         ...(typeof v['password'] === 'string' ? { password: v['password'] } : {}),
         ...(typeof v['totpSeed'] === 'string' ? { totpSeed: v['totpSeed'] } : {}),
+        ...(typeof v['baseUrl'] === 'string' ? { baseUrl: v['baseUrl'] } : {}),
       };
     }
   }

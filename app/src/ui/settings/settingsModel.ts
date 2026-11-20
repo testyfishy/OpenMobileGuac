@@ -97,7 +97,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoBackup: DEFAULT_AUTO_BACKUP,
 };
 
-const FIT_MODES = ['fit-screen', 'fit-width', 'fit-height', 'one-to-one'] as const;
+const FIT_MODES = ['fit-screen', 'fit-width', 'fit-height', 'one-to-one', 'css-pixels'] as const;
 const POINTER_MODES = ['direct', 'trackpad', 'touch'] as const;
 const BOOLEAN_KEYS = [
   'matchDeviceSize',
@@ -309,6 +309,8 @@ export interface ServerOptions {
   /** Field names the server asked for at the last sign-in (hints). */
   readonly seenTotp: boolean;
   readonly seenSso: boolean;
+  /** CON-5: ask "Open <connection> on <server>?" before an app link connects (AUDIT §3 #8). */
+  readonly confirmLinks: boolean;
 }
 
 export const DEFAULT_SERVER_OPTIONS: ServerOptions = {
@@ -317,6 +319,7 @@ export const DEFAULT_SERVER_OPTIONS: ServerOptions = {
   totpAutofill: false,
   seenTotp: false,
   seenSso: false,
+  confirmLinks: true,
 };
 
 export function parseServerOptions(raw: unknown): ServerOptions {
@@ -330,6 +333,7 @@ export function parseServerOptions(raw: unknown): ServerOptions {
     totpAutofill: bool('totpAutofill', d.totpAutofill),
     seenTotp: bool('seenTotp', d.seenTotp),
     seenSso: bool('seenSso', d.seenSso),
+    confirmLinks: bool('confirmLinks', d.confirmLinks),
   };
 }
 
@@ -341,6 +345,7 @@ export function serverOptionsToJson(o: ServerOptions): Record<string, JsonLike> 
     totpAutofill: o.totpAutofill,
     seenTotp: o.seenTotp,
     seenSso: o.seenSso,
+    confirmLinks: o.confirmLinks,
   };
 }
 

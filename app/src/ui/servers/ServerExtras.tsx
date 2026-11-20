@@ -30,6 +30,14 @@ import {
 import { strings } from '../strings.ts';
 import { isInsecureUrl } from './serverForm.ts';
 import { useServerOptions } from './useServerOptions.ts';
+// By path: the descriptor strings are already in the main chunk (settingsSchema).
+import { sessionStrings } from '../session/sessionStrings.ts';
+import {
+  AUDIO_MODES,
+  QUALITIES,
+  type AudioMode,
+  type Quality,
+} from '../../session/viewport/remoteSize.ts';
 import { seedPolicy } from './seedPolicy.ts';
 import type { BiometryAvailability } from '../services/native.ts';
 
@@ -41,6 +49,7 @@ export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
   const [warn, setWarn] = useState<boolean | undefined>(undefined);
   const f = strings.serverForm;
   const t = strings.settings;
+  const so = sessionStrings.options;
   useEffect(() => {
     let live = true;
     void services.settings.isHttpWarningDismissed(profile.id).then((d) => {
@@ -53,7 +62,10 @@ export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
   if (!options) return null;
   const patch = options.sessionDefaults;
   const setPatch = (p: SessionSettingsPatch) => save({ sessionDefaults: p });
-  const setField = <K extends 'fitMode' | 'pointerMode'>(key: K, value: string) => {
+  const setField = <K extends 'fitMode' | 'pointerMode' | 'quality' | 'audio'>(
+    key: K,
+    value: string,
+  ) => {
     const { [key]: _old, ...rest } = patch;
     void _old;
     setPatch(value === 'inherit' ? rest : ({ ...rest, [key]: value } as SessionSettingsPatch));
@@ -70,10 +82,12 @@ export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
         onChange={(v) => setField('fitMode', v)}
         options={[
           { value: 'inherit', label: f.inherit },
-          ...(['fit-screen', 'fit-width', 'fit-height', 'one-to-one'] as const).map((v) => ({
-            value: v,
-            label: t.fitModes[v] ?? v,
-          })),
+          ...(['fit-screen', 'fit-width', 'fit-height', 'one-to-one', 'css-pixels'] as const).map(
+            (v) => ({
+              value: v,
+              label: t.fitModes[v] ?? v,
+            }),
+          ),
         ]}
       />
       <Segmented<Inherit<NonNullable<SessionSettingsPatch['pointerMode']>>>
@@ -86,6 +100,25 @@ export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
             value: v,
             label: t.pointerModes[v] ?? v,
           })),
+        ]}
+      />
+      <Segmented<Inherit<Quality>>
+        label={so.quality}
+        value={patch.quality ?? 'inherit'}
+        onChange={(v) => setField('quality', v)}
+        options={[
+          { value: 'inherit', label: f.inherit },
+          ...QUALITIES.map((v) => ({ value: v, label: so.qualityOptions[v] })),
+        ]}
+      />
+      <p className="field-hint">{so.qualityHint}</p>
+      <Segmented<Inherit<AudioMode>>
+        label={so.audio}
+        value={patch.audio ?? 'inherit'}
+        onChange={(v) => setField('audio', v)}
+        options={[
+          { value: 'inherit', label: f.inherit },
+          ...AUDIO_MODES.map((v) => ({ value: v, label: so.audioOptions[v] })),
         ]}
       />
       <Segmented<ClipboardPolicy>
@@ -110,6 +143,12 @@ export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
           }}
         />
       ) : null}
+      <Toggle
+        label={f.confirmLinks}
+        hint={f.confirmLinksHint}
+        checked={options.confirmLinks}
+        onChange={(v) => save({ confirmLinks: v })}
+      />
       <h3 className="subsection-title">{f.sso.title}</h3>
       <Segmented<SsoMode>
         label={f.sso.mode}

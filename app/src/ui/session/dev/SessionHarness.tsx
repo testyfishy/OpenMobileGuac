@@ -120,7 +120,7 @@ export function SessionHarness({
         active={active}
         createTunnel={makeTunnel}
         buildConnectData={(size) =>
-          `GUAC_WIDTH=${size.width}&GUAC_HEIGHT=${size.height}&GUAC_DPI=${size.dpi}`
+          `GUAC_WIDTH=${size.width}&GUAC_HEIGHT=${size.height}&GUAC_DPI=${size.dpi}${size.audio === false ? '' : '&GUAC_AUDIO=audio/L16'}`
         }
         settings={settings}
         onSettingsChange={(patch) => setSettings((s) => ({ ...s, ...patch }))}

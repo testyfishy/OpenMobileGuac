@@ -31,9 +31,26 @@ const SCHEME_RE = /^([a-z][a-z0-9+.-]*):\/\//i;
 /** `host:port` with no scheme would otherwise parse as scheme `host:`. */
 const BARE_HOST_PORT_RE = /^[^/:?#]+:\d+(?:[/?#]|$)/;
 
+/**
+ * A bare IPv6 literal such as `fe80::1`, `::1` or `fe80::1%en0/guacamole` (host part only up
+ * to the first `/`). Needs at least two colons and only hex digits, colons, dots (embedded
+ * IPv4) and an optional zone. Returns the input with the host bracketed, or `undefined`.
+ */
+const BARE_IPV6_RE = /^([0-9a-f]*:[0-9a-f:.]*:[0-9a-f.]*)(%[\w.-]+)?(\/.*)?$/i;
+
+export function bracketBareIpv6(text: string): string | undefined {
+  const m = BARE_IPV6_RE.exec(text);
+  if (!m) return undefined;
+  const host = m[1] ?? '';
+  // `URL` does not accept zone ids in brackets; drop it (link-local needs the OS default).
+  return `[${host}]${m[3] ?? ''}`;
+}
+
 export function normalizeServerUrl(input: string): NormalizeResult {
-  const trimmed = input.trim();
+  let trimmed = input.trim();
   if (trimmed.length === 0) return { ok: false, reason: 'empty' };
+  const bracketed = bracketBareIpv6(trimmed);
+  if (bracketed !== undefined) trimmed = bracketed;
 
   let schemes: readonly ('https' | 'http')[];
   let rest: string;
@@ -44,6 +61,11 @@ export function normalizeServerUrl(input: string): NormalizeResult {
     schemes = [scheme];
     rest = trimmed.slice(schemeMatch[0].length);
   } else {
+    const hostPart = trimmed.split(/[/?#]/, 1)[0] ?? '';
+    if (!hostPart.includes('[') && (hostPart.match(/:/g)?.length ?? 0) >= 2) {
+      // Looks like an IPv6 address we could not read: say "invalid", not "wrong scheme".
+      return { ok: false, reason: 'invalid' };
+    }
     if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) && !BARE_HOST_PORT_RE.test(trimmed)) {
       // Something like "ftp:foo" or "mailto:x": a scheme we do not support.
       return { ok: false, reason: 'unsupported-scheme' };
@@ -92,6 +114,34 @@ function dedupe(candidates: ServerUrlCandidate[]): ServerUrlCandidate[] {
     seen.add(c.baseUrl);
     return true;
   });
+}
+
+/**
+ * The part of a base URL that decides where credentials go: scheme, host, port and context
+ * path (lower-cased scheme and host, no trailing slash). Two profiles with the same endpoint
+ * may share a token, password or TOTP seed; any change of endpoint must drop them.
+ */
+export function serverEndpoint(baseUrl: string): string {
+  try {
+    const u = new URL(baseUrl);
+    return `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return baseUrl.trim().replace(/\/+$/, '');
+  }
+}
+
+export function sameServerEndpoint(a: string, b: string): boolean {
+  return serverEndpoint(a) === serverEndpoint(b);
+}
+
+/** `host[:port]` of a base URL, for "old → new host" prompts. */
+export function serverHostLabel(baseUrl: string): string {
+  try {
+    const u = new URL(baseUrl);
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return baseUrl;
+  }
 }
 
 /** Joins a base URL (no trailing slash) and a relative API path such as `api/tokens`. */

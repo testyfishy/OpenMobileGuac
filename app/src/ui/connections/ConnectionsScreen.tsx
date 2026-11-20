@@ -4,7 +4,7 @@ import { FieldType, type FieldDescriptor } from '../../core/models/ApiErrorBody.
 import type { ConnectionTree } from '../../core/models/Connection.ts';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import { findSsoRedirect, type SsoRedirect } from '../../core/sso/sso.ts';
-import { parseTotpInput, serializeTotp, type TotpParams } from '../../core/totp/totp.ts';
+import { serializeTotp, totpFromEnrolmentField, type TotpParams } from '../../core/totp/totp.ts';
 import { AdminProvider } from '../admin/AdminProvider.tsx';
 import { AdminAddButton, AdminNotice } from '../admin/EntryPoints.tsx';
 import { authFlowReducer, initialAuthFlow, isBusy } from '../auth/authFlow.ts';
@@ -104,7 +104,7 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
     void services.lock.availability().then(setBiometry);
   }, [services.lock]);
   const [totpSeed, setTotpSeed] = useState<TotpParams | undefined>(undefined);
-  const enrolment = useRef<string | undefined>(undefined);
+  const enrolment = useRef<Readonly<Record<string, unknown>> | undefined>(undefined);
   const title = profile.name || hostOf(profile.baseUrl);
   const insecure = isInsecureUrl(profile.baseUrl);
 
@@ -204,7 +204,8 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
           enrolment.current = undefined;
           if (key) {
             try {
-              await auth.saveTotpSeed(profile.id, serializeTotp(parseTotpInput(key)));
+              // The server's digits, period and algorithm, not SHA1/6/30 (AUDIT #4).
+              await auth.saveTotpSeed(profile.id, serializeTotp(totpFromEnrolmentField(key)));
               saveOptions({ totpAutofill: true });
             } catch {
               // Not a key we can parse; nothing stored.
@@ -436,7 +437,9 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
                 }
               : undefined
           }
-          onEnrollSecret={canStoreSeed ? (secret) => (enrolment.current = secret) : undefined}
+          onEnrollSecret={
+            canStoreSeed ? (_secret, field) => (enrolment.current = field.extra) : undefined
+          }
         />
       ) : isBusy(flow) ? (
         <Spinner label={strings.login.restoring} />

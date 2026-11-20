@@ -39,7 +39,13 @@ import { ServersScreen } from './ui/servers/ServersScreen.tsx';
 import { SessionLayer } from './ui/sessions/SessionLayer.tsx';
 import { useSessions } from './ui/sessions/SessionsContext.ts';
 import { SessionsProvider } from './ui/sessions/SessionsProvider.tsx';
-import type { AppSettings } from './ui/settings/settingsModel.ts';
+import {
+  parseServerOptions,
+  serverOptionsToJson,
+  type AppSettings,
+} from './ui/settings/settingsModel.ts';
+import { Dialog } from './ui/components/Dialog.tsx';
+import { Toggle } from './ui/components/Form.tsx';
 import { SettingsScreen } from './ui/settings/SettingsScreen.tsx';
 import { activeLocale, setActiveLocale, strings } from './ui/strings.ts';
 import {
@@ -224,12 +230,29 @@ function DeepLinks() {
   const sessions = useSessions();
   const launch = useContext(LaunchContext);
   const latest = useRef({ nav, services, toast, sessions, launch });
+  const [ask, setAsk] = useState<PendingLink | undefined>();
+  const [dontAsk, setDontAsk] = useState(false);
   useEffect(() => {
     latest.current = { nav, services, toast, sessions, launch };
   });
+  const open = useCallback((link: PendingLink) => {
+    const { nav: n, sessions: ss, launch: l } = latest.current;
+    ss.hide();
+    l.request({
+      serverId: link.serverId,
+      identifier: link.identifier,
+      dataSource: link.dataSource,
+      type: link.type,
+    });
+    n.open({ name: 'connections', serverId: link.serverId });
+  }, []);
   useEffect(() => {
+    let last = { url: '', at: 0 };
     const sub = onAppUrlOpen((url) => {
-      const { nav: n, services: s, toast: t, sessions: ss, launch: l } = latest.current;
+      const { services: s, toast: t } = latest.current;
+      // iOS can deliver the same link as the launch URL and as `appUrlOpen`.
+      if (url === last.url && Date.now() - last.at < 3000) return;
+      last = { url, at: Date.now() };
       const link = parseAppLink(url);
       if (!link) return;
       if (link.kind === 'sso-callback') {
@@ -238,27 +261,90 @@ function DeepLinks() {
       }
       s.log.info('app', 'deep link: connect');
       void (async () => {
-        const known =
-          link.serverId === DEMO_PROFILE_ID ||
-          link.serverId === s.devServer?.profile.id ||
-          (await s.profiles.get(link.serverId)) !== undefined;
-        if (!known) {
+        // AUDIT #3: a link that arrives while the app is locked waits for the unlock.
+        await s.lock.whenUnlocked();
+        const isDemo = link.serverId === DEMO_PROFILE_ID;
+        const isDev = link.serverId === s.devServer?.profile.id;
+        const profile = isDemo || isDev ? undefined : await s.profiles.get(link.serverId);
+        if (!isDemo && !isDev && !profile) {
           t.show(strings.connections.linkServerMissing);
           return;
         }
-        ss.hide();
-        l.request({
+        const pending: PendingLink = {
           serverId: link.serverId,
           identifier: link.identifier,
           dataSource: link.dataSource,
           type: link.type,
-        });
-        n.open({ name: 'connections', serverId: link.serverId });
+          serverName: profile?.name ?? s.devServer?.profile.name ?? '',
+          connectionName: await linkConnectionName(s, link),
+        };
+        const options = parseServerOptions(await s.profiles.getOptions(link.serverId));
+        // AUDIT §3 #8: confirm first unless the user chose not to be asked for this server.
+        if (isDemo || !options.confirmLinks) open(pending);
+        else {
+          setDontAsk(false);
+          setAsk(pending);
+        }
       })();
     });
     return () => sub.dispose();
-  }, []);
-  return null;
+  }, [open]);
+  if (!ask) return null;
+  const confirm = async () => {
+    const link = ask;
+    setAsk(undefined);
+    if (dontAsk) {
+      const o = parseServerOptions(await services.profiles.getOptions(link.serverId));
+      await services.profiles.setOptions(
+        link.serverId,
+        serverOptionsToJson({ ...o, confirmLinks: false }),
+      );
+    }
+    open(link);
+  };
+  return (
+    <Dialog
+      title={strings.connections.linkConfirmTitle(ask.connectionName, ask.serverName)}
+      onCancel={() => setAsk(undefined)}
+      actions={
+        <>
+          <button type="button" className="btn" onClick={() => setAsk(undefined)}>
+            {strings.common.cancel}
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => void confirm()}>
+            {strings.connections.linkConfirmOpen}
+          </button>
+        </>
+      }
+    >
+      <p>{strings.connections.linkConfirmBody}</p>
+      <Toggle label={strings.connections.linkDontAsk} checked={dontAsk} onChange={setDontAsk} />
+    </Dialog>
+  );
+}
+
+interface PendingLink {
+  readonly serverId: string;
+  readonly identifier: string;
+  readonly dataSource: string | undefined;
+  readonly type: 'c' | 'g';
+  readonly serverName: string;
+  readonly connectionName: string;
+}
+
+/** The connection's name from recents/favourites when known; otherwise its identifier. */
+async function linkConnectionName(
+  s: AppServices,
+  link: { serverId: string; identifier: string; dataSource?: string | undefined; type: 'c' | 'g' },
+): Promise<string> {
+  const recents = await s.profiles.listRecents(link.serverId).catch(() => []);
+  const hit = recents.find(
+    (r) =>
+      r.ref.identifier === link.identifier &&
+      (link.dataSource === undefined || r.ref.dataSource === link.dataSource) &&
+      r.ref.type === link.type,
+  );
+  return hit?.name ?? link.identifier;
 }
 
 function FirstRun() {

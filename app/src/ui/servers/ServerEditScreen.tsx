@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
+import { GuacApiError } from '../../core/api/errors.ts';
+import { sameServerEndpoint, serverHostLabel } from '../../core/url/normalizeServerUrl.ts';
 import { Dialog } from '../components/Dialog.tsx';
 import { ErrorBanner, InfoBanner, Spinner } from '../components/Feedback.tsx';
 import { TextField, Toggle } from '../components/Form.tsx';
@@ -58,10 +60,16 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
   );
   const [errors, setErrors] = useState<ServerFormErrors>({});
   const [submitError, setSubmitError] = useState<UiError | undefined>();
+  /** https failed and no scheme was typed: offer plain http explicitly (AUDIT #11). */
+  const [offerHttp, setOfferHttp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [hasSavedPassword, setHasSavedPassword] = useState(false);
+  /** Address change waiting for the user's OK: old → new endpoint (AUDIT #2). */
+  const [pendingMove, setPendingMove] = useState<
+    { readonly values: ServerFormValues; readonly baseUrl: string } | undefined
+  >();
   const sessions = useSessions();
   const toast = useToast();
 
@@ -89,9 +97,10 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
         ? f.rememberHintDev
         : f.rememberHintMemory;
 
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async (e: FormEvent | null, allowHttp = false) => {
+    e?.preventDefault();
     if (busy) return;
+    setOfferHttp(false);
     const withName = values.name.trim() ? values : { ...values, name: suggestName(values.url) };
     const found = validateServerForm(withName);
     setErrors(found);
@@ -101,30 +110,58 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
     try {
       let baseUrl = profile?.baseUrl ?? '';
       const urlChanged = !profile || !urlUnchanged(withName.url, profile.baseUrl);
-      if (urlChanged) baseUrl = (await services.probeApi.probe(withName.url)).baseUrl;
+      // The probe is unauthenticated (no credential is sent) and decides the real address.
+      if (urlChanged)
+        baseUrl = (await services.probeApi.probe(withName.url, { allowHttp })).baseUrl;
+      if (profile && !sameServerEndpoint(profile.baseUrl, baseUrl)) {
+        // Saved secrets belong to the old address: ask first, showing old → new.
+        setPendingMove({ values: withName, baseUrl });
+        return;
+      }
+      await commit(withName, baseUrl);
+    } catch (err) {
+      setSubmitError(describeError(err, { browser: !services.native }));
+      setOfferHttp(err instanceof GuacApiError && err.httpFallbackAvailable);
+    } finally {
+      setBusy(false);
+    }
+  };
 
-      const fields = {
-        name: withName.name.trim(),
-        baseUrl,
-        username: withName.username.trim(),
-        rememberPassword: withName.rememberPassword,
-      };
-      const saved = profile
-        ? await services.profiles.update(profile.id, fields)
-        : await services.profiles.add(fields);
-      if (profile && urlChanged) {
-        sessions.closeServer(profile.id);
-        await services.auth.reset(profile.id);
-        await services.settings.setHttpWarningDismissed(profile.id, false);
-      }
-      if (!withName.rememberPassword) {
-        await services.auth.savePassword(saved.id, null);
-        if (withName.password) services.auth.setTransientPassword(saved.id, withName.password);
-      } else if (withName.password) {
-        await services.auth.savePassword(saved.id, withName.password);
-      }
-      bump();
-      nav.open({ name: 'connections', serverId: saved.id });
+  const commit = async (withName: ServerFormValues, baseUrl: string) => {
+    const fields = {
+      name: withName.name.trim(),
+      baseUrl,
+      username: withName.username.trim(),
+      rememberPassword: withName.rememberPassword,
+    };
+    const moved = profile !== undefined && !sameServerEndpoint(profile.baseUrl, baseUrl);
+    if (profile && moved) {
+      // Sign out on the old host and drop its token, password and TOTP seed *before* the
+      // profile points anywhere else, so none of them can reach the new host.
+      sessions.closeServer(profile.id);
+      await services.auth.reset(profile.id);
+      await services.settings.setHttpWarningDismissed(profile.id, false);
+    }
+    const saved = profile
+      ? await services.profiles.update(profile.id, fields)
+      : await services.profiles.add(fields);
+    if (!withName.rememberPassword) {
+      await services.auth.savePassword(saved.id, null);
+      if (withName.password) services.auth.setTransientPassword(saved.id, withName.password);
+    } else if (withName.password) {
+      await services.auth.savePassword(saved.id, withName.password);
+    }
+    bump();
+    nav.open({ name: 'connections', serverId: saved.id });
+  };
+
+  const confirmMove = async () => {
+    const move = pendingMove;
+    if (!move) return;
+    setPendingMove(undefined);
+    setBusy(true);
+    try {
+      await commit(move.values, move.baseUrl);
     } catch (err) {
       setSubmitError(describeError(err, { browser: !services.native }));
     } finally {
@@ -136,7 +173,9 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
     if (!profile) return;
     setConfirmDelete(false);
     sessions.closeServer(profile.id);
-    await services.auth.forgetToken(profile.id);
+    // Ends the session on the server too (with the stored token when none is live), then
+    // removes every secret (AUDIT §3 #10).
+    await services.auth.signOutLocally([profile]);
     await services.profiles.remove(profile.id);
     await services.settings.setHttpWarningDismissed(profile.id, false);
     bump();
@@ -154,11 +193,12 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
     if (!profile) return;
     setConfirmClear(false);
     sessions.closeServer(profile.id);
-    await services.auth.clearCredentials(profile.id);
+    await services.auth.signOutLocally([profile]);
     setHasSavedPassword(false);
     toast.show(f.credentialsCleared);
   };
 
+  const addressEdited = profile !== undefined && !urlUnchanged(values.url, profile.baseUrl);
   const typedInsecure = /^\s*http:\/\//i.test(values.url) || (editing && isInsecureUrl(values.url));
 
   return (
@@ -208,8 +248,10 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
           onChange={(v) => set('password', v)}
           type="password"
           autoComplete="current-password"
-          placeholder={hasSavedPassword ? f.passwordKeep : undefined}
-          hint={hasSavedPassword ? f.passwordKeep : undefined}
+          placeholder={hasSavedPassword && !addressEdited ? f.passwordKeep : undefined}
+          hint={
+            addressEdited ? f.passwordNewAddress : hasSavedPassword ? f.passwordKeep : undefined
+          }
         />
         <Toggle
           label={f.remember}
@@ -218,6 +260,19 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
           hint={rememberHint}
         />
         {submitError ? <ErrorBanner error={submitError} /> : null}
+        {offerHttp ? (
+          <div className="http-fallback">
+            <p className="field-hint">{f.httpFallbackHint}</p>
+            <button
+              type="button"
+              className="btn btn-block"
+              disabled={busy}
+              onClick={() => void onSubmit(null, true)}
+            >
+              <Icon name="alert" /> {f.httpFallback}
+            </button>
+          </div>
+        ) : null}
         <div className="form-actions">
           <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
             {busy ? f.checking : strings.common.save}
@@ -256,6 +311,30 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
             </button>
           </div>
         </div>
+      ) : null}
+      {pendingMove && profile ? (
+        <Dialog
+          title={f.moveTitle}
+          tone="warning"
+          onCancel={() => setPendingMove(undefined)}
+          actions={
+            <>
+              <button type="button" className="btn" onClick={() => setPendingMove(undefined)}>
+                {strings.common.cancel}
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => void confirmMove()}>
+                {f.moveConfirm}
+              </button>
+            </>
+          }
+        >
+          <p>
+            <span className="mono">{serverHostLabel(profile.baseUrl)}</span>
+            {' → '}
+            <span className="mono">{serverHostLabel(pendingMove.baseUrl)}</span>
+          </p>
+          <p>{f.moveBody}</p>
+        </Dialog>
       ) : null}
       {confirmClear && profile ? (
         <Dialog

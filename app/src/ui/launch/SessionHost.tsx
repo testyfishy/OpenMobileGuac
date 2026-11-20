@@ -13,9 +13,12 @@ import {
   type SessionLogEntry,
   type SessionSettings,
 } from '../integration/session.ts';
-import { useBackInterceptor } from '../nav/NavContext.ts';
+import { useBackInterceptor, useNav } from '../nav/NavContext.ts';
+import { mayEditConnection, requestConnectionEdit } from '../admin/adminBridge.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
-import { haptic, saveTextFile } from '../services/native.ts';
+import { copyText, haptic, saveTextFile, shareText } from '../services/native.ts';
+import { isShareServerId } from '../services/shareSessions.ts';
+import type { SessionSharing } from '../session/ShareSheet.tsx';
 import type { OpenSession } from '../sessions/sessionModel.ts';
 import {
   applyConnectionPatch,
@@ -136,6 +139,12 @@ export default function SessionHost({
     return createWebSocketTransport(Guacamole.WebSocketTunnel).createTunnel(auth);
   }, [isDemo, services.auth, serverId]);
 
+  // AUDIT #3: no (re)connect sends the stored token while the app lock is up.
+  const connectGate = useCallback(
+    () => (!isDemo && services.lock.isLocked() ? services.lock.whenUnlocked() : null),
+    [isDemo, services.lock],
+  );
+
   const buildConnectData = useMemo(
     () =>
       makeConnectDataBuilder({
@@ -166,6 +175,37 @@ export default function SessionHost({
     notified.current = true;
     onNeedsSignIn();
   }, [signedIn, onNeedsSignIn]);
+
+  // Quality helper: "Edit this connection" when the user may edit it (Performance presets).
+  const nav = useNav();
+  const token = isDemo ? undefined : services.auth.current(serverId)?.token;
+  const editConnection =
+    token && target.type === 'c' && mayEditConnection(token, target.dataSource, target.identifier)
+      ? () => {
+          onHide();
+          nav.open({ name: 'connections', serverId });
+          // Kept until that server's connection list (AdminProvider) can open the editor.
+          requestConnectionEdit(token, target.dataSource, target.identifier);
+        }
+      : undefined;
+
+  // "Share this session" through the server's sharing profiles (not for the demo or a
+  // session opened from a share link, which has no rights to share).
+  const sharing = useMemo<SessionSharing | undefined>(() => {
+    if (isDemo || isShareServerId(serverId)) return undefined;
+    const current = () => {
+      const s = services.auth.current(serverId);
+      if (!s) throw new Error('Not signed in');
+      return s;
+    };
+    return {
+      listProfiles: (uuid) => services.api.getTunnelSharingProfiles(current(), uuid),
+      createLink: (uuid, profile) => services.api.createShareLink(current(), uuid, profile),
+      share: (link) => shareText(strings.session.shareTitle(target.name), link),
+      copy: (link) => copyText(link),
+      insecure: (services.auth.current(serverId)?.baseUrl ?? '').startsWith('http:'),
+    };
+  }, [isDemo, serverId, services.api, services.auth, target.name]);
 
   // CON-4 thumbnails come from the session screen itself (≤ 320 px JPEG).
   const thumbnailsOn = app.thumbnails;
@@ -204,6 +244,7 @@ export default function SessionHost({
         protocol={target.protocol}
         createTunnel={createTunnel}
         buildConnectData={buildConnectData}
+        connectGate={connectGate}
         settings={settings}
         onSettingsChange={onSettingsChange}
         overriddenKeys={overridden}
@@ -217,6 +258,8 @@ export default function SessionHost({
         keyLibrary={app.keys}
         onKeyLibraryChange={onKeyLibraryChange}
         saveTextFile={saveTextFile}
+        {...(editConnection ? { onEditConnection: editConnection } : {})}
+        {...(sharing ? { sharing } : {})}
         {...(isDemo ? {} : { onSignInExpired })}
       />
       {confirmExit && active ? (

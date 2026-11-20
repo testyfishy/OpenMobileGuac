@@ -50,6 +50,17 @@ the Guacamole server: it validates the token's signature, issuer, audience and n
 redirect URI. CAS validates the `service` URL server-side and SAML posts to the server, so
 neither can use this route.
 
+**Binding the callback to the attempt (AUDIT #13, 2026-11-21).** Each attempt adds a fresh
+random `state` (128 bits) to the IdP URL; OpenID Connect requires the IdP to return it with
+the token. The app accepts an `openmobileguac://sso-callback` link only while an attempt is
+pending (at most 5 minutes) and only when its `state` matches; any other link is ignored and
+logged. The token's nonce, checked by the Guacamole server that issued the sign-in, ties it
+to that server. This stops **injection** (another app or a web page sending the app a
+callback with someone else's token). It does not stop **interception**: another app that
+registered the same custom scheme could still receive the real callback, since the implicit
+flow has no PKCE. Use the in-app browser hand-off where that matters, or an IdP that
+supports claimed https redirect links (not built).
+
 ## Not verified
 
 - Behaviour with real IdPs (Keycloak, Entra ID, Okta, Authentik), including whether they

@@ -295,6 +295,22 @@ iOS: no background mode is added. iOS does not allow keeping a remote desktop co
 in the background for this kind of app (adding one would fail App Review), so sessions keep
 the grace-period disconnect and reconnect on return.
 
+## App data backup (Android auto-backup off)
+
+Since 2026-11-21 (AUDIT #12) `AndroidManifest.xml` sets `android:allowBackup="false"` and
+`android:dataExtractionRules="@xml/data_extraction_rules"`, which excludes every domain from
+cloud backup and device-to-device transfer (Android 12+, where `allowBackup` alone does not
+stop device transfer). Reasons: the WebView storage holds server addresses, user names,
+recents and session settings; Keystore-wrapped secrets cannot be restored on another device
+anyway; and the app has its own explicit backup (Settings › Backup), which never includes
+tokens and encrypts passwords and TOTP keys with a passphrase. Session thumbnails (pictures
+of remote screens) are no longer in Preferences at all: they are files in the cache
+directory (`Library/Caches` on iOS, `getCacheDir()` on Android), which neither OS backs up.
+
+Not yet checked: an Android Gradle/lint build with these attributes (only the web build and
+unit tests were run), and `adb shell bmgr backupnow` on a device to confirm nothing is
+backed up.
+
 ## Network configuration
 
 Users connect to self-hosted Guacamole servers, usually on private networks (Tailscale

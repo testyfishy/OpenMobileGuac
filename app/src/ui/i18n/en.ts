@@ -72,6 +72,18 @@ export const en = {
     urlHint: 'With or without http(s):// and /guacamole. The app finds the right address.',
     username: 'Username',
     password: 'Password',
+    confirmLinks: 'Ask before app links connect',
+    confirmLinksHint:
+      'An openmobileguac:// link (for example from another app or a QR code) asks “Open … on this server?” first.',
+    httpFallback: 'Use http instead — not encrypted',
+    httpFallbackHint:
+      'The secure (https) address did not work, so nothing was sent. Plain http can be read by anyone on the network; use it only on a network you trust.',
+    passwordNewAddress:
+      'A new address needs the password again: the saved one is removed when you save.',
+    moveTitle: 'Change the server address?',
+    moveBody:
+      'The saved password, sign-in and TOTP key were for the old address. They will be removed and you will sign in again at the new address. Nothing saved is sent to the new address.',
+    moveConfirm: 'Change address',
     passwordKeep: 'Leave blank to keep the saved password',
     remember: 'Remember password on this device',
     rememberHintSecure: 'Stored in the device keychain / keystore.',
@@ -193,6 +205,9 @@ export const en = {
     totpHint: 'Enter the code from your authenticator app.',
     totpEnrollHint:
       'Two-factor authentication must be set up for this account. Add this key to your authenticator app, then enter the code it shows.',
+    totpQrAlt: 'QR code with the authenticator key for this account',
+    totpParams: (p: { digits: number; period: number; algorithm: string }) =>
+      `${p.digits} digits, a new code every ${p.period} s, ${p.algorithm}.`,
     totpSecret: 'Setup key',
     totpAutofilled: (seconds: number) => `Filled from the stored key · ${seconds} s left`,
     totpWaiting: (seconds: number) =>
@@ -340,6 +355,11 @@ export const en = {
       'Link copied. Add it as a home-screen shortcut with your launcher or the Shortcuts app.',
     openSessionBadge: 'Open',
     swipeHint: 'Swipe for actions',
+    linkConfirmTitle: (connection: string, server: string) => `Open “${connection}” on ${server}?`,
+    linkConfirmBody:
+      'A link asked to connect. Connecting can take over a session someone else is using or wake the computer.',
+    linkConfirmOpen: 'Open',
+    linkDontAsk: 'Don’t ask again for links to this server',
     linkServerMissing: 'That link points to a server that is not saved on this device.',
     linkConnectionMissing: 'That connection is not available on this server any more.',
   },
@@ -372,6 +392,7 @@ export const en = {
   } as Record<string, string>,
 
   session: {
+    shareTitle: (name: string) => `Join my session: ${name}`,
     disconnectTitle: (name: string) => `Leave ${name}?`,
     disconnectBody: 'Keep the session open to come back to it, or disconnect it now.',
     disconnect: 'Disconnect',
@@ -403,6 +424,15 @@ export const en = {
     unlock: 'Unlock',
     failed: 'Not unlocked. Try again.',
     reason: 'Unlock OpenMobileGuac',
+    unavailable:
+      'Face ID, fingerprint and the device passcode are not available right now. Check that a passcode is set in the device settings, then try again.',
+    retry: 'Try again',
+    reset: 'Remove saved sign-ins and turn off the lock',
+    resetTitle: 'Turn off the app lock?',
+    resetBody:
+      'Every saved password, sign-in and TOTP key on this device is deleted first. Servers, favourites and settings stay. You will sign in again.',
+    resetConfirm: 'Delete and turn off',
+    offReason: 'Turn off the app lock',
     credentialReason: 'Use saved credentials',
     cancel: 'Cancel',
   },
@@ -424,7 +454,8 @@ export const en = {
       'fit-screen': 'Fit screen',
       'fit-width': 'Fit width',
       'fit-height': 'Fit height',
-      'one-to-one': '1:1',
+      'one-to-one': '1:1 (device pixels)',
+      'css-pixels': '100% (CSS pixels)',
     } as Record<string, string>,
     pointerMode: 'Pointer mode',
     pointerModes: {
@@ -439,7 +470,7 @@ export const en = {
     haptics: 'Haptic feedback',
     clipboard: 'Clipboard',
     clipboardRemoteToDevice: 'Copy remote clipboard to this device',
-    clipboardAutoSendOnFocus: 'Send device clipboard when a session opens',
+    clipboardAutoSendOnFocus: 'Send device clipboard when returning to the app',
     clipboardAutoSendHint: 'On iOS this may show a paste permission prompt.',
     keepAwake: 'Keep screen awake during sessions',
     resetDefaults: 'Reset session defaults',
@@ -457,6 +488,8 @@ export const en = {
     maxSessions: 'Sessions open at once',
     maxSessionsHint: 'Each open session uses memory and data. Older devices may prefer 1 or 2.',
     backgroundDisconnect: 'Disconnect sessions after the app is in the background for',
+    backgroundDisconnectIos:
+      'On iPhone and iPad the system pauses the app soon after you leave it, so it cannot keep a session alive: the Guacamole server ends it about 15 seconds after the app goes quiet, whatever is chosen here. When you come back, the session reconnects by itself.',
     backgroundDisconnectHint: 'Saves battery and data. You can reconnect with one tap.',
     thumbnails: 'Save a thumbnail of each session',
     thumbnailsHint:
@@ -569,6 +602,10 @@ export const en = {
     badPassphrase: 'Wrong passphrase. Leave it blank to restore without passwords.',
     restore: 'Restore',
     restoring: 'Restoring…',
+    restoredAddressChanged: (n: number) =>
+      ` ${n} saved ${n === 1 ? 'server has' : 'servers have'} a different address in the backup, so ${n === 1 ? 'it was' : 'they were'} added as ${n === 1 ? 'a new server' : 'new servers'} without saved passwords or sign-in. Sign in to ${n === 1 ? 'it' : 'them'} again if the address is right.`,
+    restoredSecretsSkipped:
+      ' Saved passwords and TOTP keys in the backup were not restored (no passphrase).',
     restored: (added: number, updated: number, removed: number) =>
       `Restored: ${added} added, ${updated} updated${removed ? `, ${removed} removed` : ''}.`,
     replaceConfirmTitle: 'Replace all servers?',

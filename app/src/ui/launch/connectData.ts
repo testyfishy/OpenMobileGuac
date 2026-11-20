@@ -21,9 +21,12 @@ export interface ConnectDataParams {
 /** `SessionScreenProps.buildConnectData` for one connection. */
 export function makeConnectDataBuilder(
   p: ConnectDataParams,
-): (size: { width: number; height: number; dpi: number }) => string {
+): (size: { width: number; height: number; dpi: number; audio?: boolean }) => string {
   return (size) => {
     const media = p.media();
+    // Quality / Audio "off": advertise no audio types, so guacd encodes and sends none
+    // (libguac/audio.c assigns encoders only for advertised types).
+    const audio = size.audio === false ? [] : media.audio;
     return buildTunnelConnectString({
       token: p.getToken(),
       dataSource: p.dataSource,
@@ -33,7 +36,7 @@ export function makeConnectDataBuilder(
       height: size.height,
       dpi: size.dpi,
       timezone: p.timezone,
-      audioMimetypes: media.audio,
+      audioMimetypes: audio,
       videoMimetypes: media.video,
       imageMimetypes: media.image,
     });

@@ -29,6 +29,9 @@ export const sessionStringsEn = {
   },
 
   screen: {
+    resuming: 'Reconnecting…',
+    viewOnlyPill: 'View only · tap to turn off',
+    reconnectToApply: 'Reconnect to apply',
     remoteDesktop: (title: string) => `Remote desktop: ${title}`,
     remoteDesktopRole: 'remote desktop',
     trackpadSurface: 'Trackpad for the remote pointer',
@@ -39,6 +42,8 @@ export const sessionStringsEn = {
   },
 
   toasts: {
+    viewOnlyOn: 'View only: nothing is sent to the remote',
+    viewOnlyOff: 'View only off',
     remoteClipboardCopied: 'Remote clipboard copied to this device',
     deviceClipboardSent: 'Device clipboard sent to the remote',
     pointerMode: (mode: string, hint: string) => `${mode}: ${hint}`,
@@ -90,16 +95,21 @@ export const sessionStringsEn = {
       'fit-width': 'Fit width',
       'fit-height': 'Fit height',
       'one-to-one': '1:1 pixels',
+      'css-pixels': '100% (CSS pixels)',
     },
     hints: {
       'fit-screen': 'Whole desktop visible',
       'fit-width': 'Fill the width, scroll down',
       'fit-height': 'Fill the height, scroll sideways',
-      'one-to-one': 'One remote pixel per screen pixel',
+      'one-to-one': 'One remote pixel per device pixel (sharpest, small)',
+      'css-pixels': 'One remote pixel per CSS pixel (2×2 or 3×3 device pixels)',
     },
   },
 
   status: {
+    waking: 'Still connecting… waking the computer?',
+    wakingDetail:
+      'If the computer was asleep or off, the server may be waking it (Wake-on-LAN). That can take a minute or two. You can keep waiting or cancel.',
     connecting: (title: string) => `Connecting to ${title}…`,
     waitingForNetwork: 'Waiting for the network…',
     waitingForNetworkDetail:
@@ -157,6 +167,8 @@ export const sessionStringsEn = {
     lostNotRestored: 'The connection was lost and could not be restored.',
     offline: 'This device is offline.',
     unreachable: 'Could not reach the server.',
+    websocketBlocked:
+      'The WebSocket connection to the server failed before the session started. Check that the server is reachable; a proxy or firewall that blocks WebSockets (wss://…/websocket-tunnel) also causes this. The app cannot fall back to the HTTP tunnel.',
     tunnelUnreachable: 'Could not reach the server (network error).',
     tunnelClosed: 'The server closed the connection.',
     startFailed: 'The connection could not be started.',
@@ -207,6 +219,7 @@ export const sessionStringsEn = {
       clipboard: 'Clipboard',
       files: 'Files',
       sound: 'Sound',
+      'view-only': 'View only',
       options: 'Options',
       info: 'Info',
       back: 'Back',
@@ -229,6 +242,7 @@ export const sessionStringsEn = {
       clipboard: 'Clipboard panel',
       files: 'Files',
       sound: 'Sound on / off',
+      'view-only': 'View only (no input to the remote)',
       options: 'Session options',
       info: 'Session info',
       back: 'Back to connections',
@@ -340,10 +354,67 @@ export const sessionStringsEn = {
     clipboardRemoteToDeviceHint: 'Text copied on the remote is put on this device’s clipboard',
     clipboardAutoSendOnFocus: 'Send the device clipboard when returning to the app',
     clipboardAutoSendOnFocusHint: 'On iOS this can show a paste permission prompt',
+    clipboardSendOnConnect: 'Send the device clipboard when the session connects',
+    clipboardSendOnConnectHint:
+      'Once per connection. Off by default: on iOS each read can show a paste permission prompt.',
+    audio: 'Sound',
+    audioHint:
+      'Muted: the server still sends sound (about 1.4 Mbit/s), it is just not played. Off: no sound is asked for when connecting, so none is sent. Low quality always connects with sound off.',
+    audioOptions: { on: 'On', muted: 'Muted here', off: 'Off (not requested)' },
+    quality: 'Quality',
+    qualityHint:
+      'Applies when connecting. Auto: as the Guacamole web app. Best: one remote pixel per device pixel (sharp; text is small unless you zoom or raise Scale). Low: CSS-pixel size, no sound, fewer resizes. Picture quality, colour depth and frame rate are set on the server (connection editor › Performance).',
+    qualityOptions: { auto: 'Auto', best: 'Best', low: 'Low bandwidth' },
+    remoteResolution: 'Remote resolution',
+    remoteResolutionHint:
+      'RDP uses the size asked for (unless the administrator fixed one). VNC servers usually keep their own size. SSH sizes the terminal from it.',
+    remoteResolutionOptions: {
+      auto: 'Auto (from quality)',
+      device: 'Match device',
+      '1280x720': '1280 × 720',
+      '1600x900': '1600 × 900',
+      '1920x1080': '1920 × 1080',
+      '2560x1440': '2560 × 1440',
+      custom: 'Custom',
+    },
+    remoteWidth: 'Custom width',
+    remoteHeight: 'Custom height',
+    remoteSizeHint: 'Used when Remote resolution is Custom.',
+    remoteScale: 'Scale',
+    remoteScaleHint:
+      'Above 100 % the app asks for a proportionally smaller desktop, so everything is drawn larger. Guacamole 1.6.0 does not pass a display scale (DPI) to Windows, so this is the only way to get larger text from the client.',
+    viewOnly: 'View only',
+    viewOnlyHint:
+      'Nothing you do reaches the remote: no mouse, touch, keys or clipboard. Turn it off from the toolbar or More.',
+    terminalPinchFont: 'Pinch to change the terminal font size',
+    terminalPinchFontHint:
+      'SSH, telnet and Kubernetes connections: pinching changes the font size on the server instead of zooming the view.',
+    px: (n: number) => `${n} px`,
+    percent: (n: number) => `${n} %`,
+    commandKey: 'Command key (⌘) on a hardware keyboard',
+    commandKeyHint:
+      'iPad and Mac keyboards. Control: ⌘C, ⌘V and ⌘Z copy, paste and undo on Windows and Linux. Windows key: as the Guacamole web app (⌘ is the Windows key).',
+    commandKeyOptions: { super: 'Windows key', ctrl: 'Control' },
     audioMuted: 'Mute remote sound',
     audioMutedHint: 'Can also be switched in the session (More › Sound)',
     combosSummary: (n: number) => `${n} ${plural(n, 'combo', 'combos')}`,
     pointerSpeedHint: 'Trackpad mode',
+  },
+
+  share: {
+    title: 'Share this session',
+    intro:
+      'Creates a Guacamole share link. Anyone who opens it joins this session with the chosen profile (for example view only) until the session ends. Profiles are set up by an administrator.',
+    insecure: 'This server uses plain http: the link and the shared session are not encrypted.',
+    notConnected: 'Connect first.',
+    loading: 'Loading sharing profiles…',
+    none: 'This connection has no sharing profiles you may use. An administrator can add them to the connection.',
+    failed: 'Could not create a share link.',
+    createFor: 'Create a link with this profile',
+    link: 'Share link',
+    shareLink: 'Share',
+    copy: 'Copy',
+    copied: 'Link copied',
   },
 
   more: {
@@ -354,6 +425,32 @@ export const sessionStringsEn = {
     sendOrReceive: 'Send or receive',
     clipboard: 'Clipboard',
     clipboardHint: 'View, edit, send',
+    reconnectToApply: 'Reconnect to apply',
+    reconnectToApplyHint: 'Quality, size or sound changed. They apply to a new connection.',
+    viewOnly: 'View only',
+    viewOnlyHint: 'No mouse, touch, keys or clipboard reach the remote',
+    quality: (q: string) => `Quality: ${q}`,
+    qualityHint: 'Tap to switch. Applies after reconnecting.',
+    fontSize: 'Font size',
+    points: (n: number) => `${n} pt`,
+    fontSmaller: 'Smaller font',
+    fontLarger: 'Larger font',
+    colorScheme: 'Colours',
+    colorSchemeName: (v: string) =>
+      (
+        ({
+          'gray-black': 'Grey on black',
+          'black-white': 'Black on white',
+          'green-black': 'Green on black',
+          'white-black': 'White on black',
+        }) as Record<string, string>
+      )[v] ?? 'Custom',
+    audioNotRequested: 'Not requested from the server',
+    audioMode: (m: string) => `Sound when connecting: ${m}`,
+    audioModeHint:
+      'Off asks the server for no sound at all (saves data). Applies after reconnecting.',
+    shareSession: 'Share this session',
+    shareSessionHint: 'A link others can open to join (sharing profiles)',
     noAudio: 'No audio yet',
     extraKeys: 'Extra keys',
     keyCombos: 'Key combos',
@@ -367,6 +464,7 @@ export const sessionStringsEn = {
     disconnect: 'Disconnect',
     tapAgain: 'Tap again to disconnect',
     groups: {
+      terminal: 'Terminal',
       input: 'Input',
       view: 'View',
       clipFiles: 'Clipboard and files',
@@ -752,6 +850,16 @@ export const sessionStringsEn = {
     connection: 'Connection',
     protocol: 'Protocol',
     unknownProtocol: 'Unknown',
+    requested: 'Asked for',
+    requestedValue: (w: number, h: number, dpi: number, quality: string) =>
+      `${w} × ${h} at ${dpi} DPI (${quality})`,
+    dataRate: 'Receiving now',
+    kbps: (v: number) =>
+      v >= 1000 ? `${(v / 1000).toFixed(1)} Mbit/s` : `${Math.round(v)} kbit/s`,
+    audioNotRequested: 'off (not requested)',
+    serverSideHint:
+      'Picture quality, colour depth and frame rate are server settings. An administrator can change them in the connection editor (Performance presets).',
+    editConnection: 'Edit this connection',
     remoteResolution: 'Remote resolution',
     view: 'View',
     tunnel: 'Tunnel',

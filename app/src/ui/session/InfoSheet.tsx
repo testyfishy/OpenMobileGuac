@@ -18,6 +18,8 @@ export interface InfoSheetProps {
   readonly mutableArguments: readonly MutableArgument[];
   readonly onSetArgument: (name: string, value: string) => boolean;
   readonly onClose: () => void;
+  /** Open this connection in the connection editor (only with permission to edit it). */
+  readonly onEditConnection?: () => void;
 }
 
 function duration(ms: number): string {
@@ -45,6 +47,17 @@ export function InfoSheet(props: InfoSheetProps) {
     [t.connection, props.title],
     [t.protocol, props.protocol ? props.protocol.toUpperCase() : t.unknownProtocol],
     [
+      t.requested,
+      info.requested
+        ? t.requestedValue(
+            info.requested.width,
+            info.requested.height,
+            info.requested.dpi,
+            sessionStrings.options.qualityOptions[info.requested.quality],
+          )
+        : '–',
+    ],
+    [
       t.remoteResolution,
       info.remoteSize.width > 0 ? `${info.remoteSize.width} × ${info.remoteSize.height}` : '–',
     ],
@@ -59,6 +72,7 @@ export function InfoSheet(props: InfoSheetProps) {
       t.received,
       `${formatBytes(info.receivedBytes)} · ${t.instructions(info.receivedInstructions)}`,
     ],
+    [t.dataRate, info.receivedKbps === null ? t.notKnownYet : t.kbps(info.receivedKbps)],
     [t.sent, `${formatBytes(info.sentBytes)} · ${t.instructions(info.sentInstructions)}`],
     [t.frames, String(info.frames)],
     [t.processingLag, fmt(info.processingLagMs, 0, ' ms')],
@@ -67,7 +81,9 @@ export function InfoSheet(props: InfoSheetProps) {
     [t.dropped, fmt(info.dropRate, 1, ` ${t.perSecond}`)],
     [
       t.audio,
-      `${props.settings.audioMuted ? t.audioMuted : t.audioOn} · ${t.audioOutput(t.audioStates[info.audioContext] ?? info.audioContext)}`,
+      info.requested && !info.requested.audio
+        ? t.audioNotRequested
+        : `${props.settings.audio === 'muted' ? t.audioMuted : t.audioOn} · ${t.audioOutput(t.audioStates[info.audioContext] ?? info.audioContext)}`,
     ],
     [t.keepScreenOn, props.keepAwake],
     [t.network, info.online ? t.online : t.offline],
@@ -84,6 +100,12 @@ export function InfoSheet(props: InfoSheetProps) {
         ))}
       </dl>
       <p className="omg-muted">{t.footnote}</p>
+      <p className="omg-muted">{t.serverSideHint}</p>
+      {props.onEditConnection ? (
+        <ChromeButton className="omg-btn--ghost" onClick={props.onEditConnection}>
+          {t.editConnection}
+        </ChromeButton>
+      ) : null}
       {props.mutableArguments.length > 0 && (
         <section className="omg-section" aria-labelledby="omg-info-args">
           <h3 id="omg-info-args" className="omg-section__title">

@@ -105,8 +105,12 @@ export async function runConnectionTest(
   }
   const candidates: CandidateResult[] = [];
   let workingUrl: string | undefined;
-  for (const c of normalized.candidates) {
-    if (workingUrl) {
+  const all = normalized.candidates;
+  // As `GuacApi.probe` (AUDIT #11): without a typed scheme only https is tried; plain http
+  // is listed as skipped. Typing `http://` tests it.
+  const schemeTyped = !(all.some((c) => c.secure) && all.some((c) => !c.secure));
+  for (const c of all) {
+    if (workingUrl || (!schemeTyped && !c.secure)) {
       candidates.push({ baseUrl: c.baseUrl, status: 'skipped' });
       continue;
     }

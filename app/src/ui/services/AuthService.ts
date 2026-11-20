@@ -68,6 +68,8 @@ export class AuthService {
   /** Servers where the user agreed to send credentials over plain http in this run. */
   private readonly httpConfirmed = new Set<string>();
   private gate: CredentialGate | undefined;
+  /** Waits while the app lock is shown; every use of a stored secret passes it. */
+  private unlocked: () => Promise<void> = () => Promise.resolve();
   private readonly listeners = new Set<(profileId: string) => void>();
 
   constructor(api: GuacApi, secure: SecureStore, profiles: ProfileStore, log?: Logger) {
@@ -80,6 +82,14 @@ export class AuthService {
   /** Installs the biometric gate (SRV-6). Without one, saved credentials are used freely. */
   setCredentialGate(gate: CredentialGate | undefined): void {
     this.gate = gate;
+  }
+
+  /**
+   * Installs the wait for the app lock (AUDIT #3): stored tokens, passwords and TOTP seeds
+   * are not read, and no silent re-login or token check runs, while the lock screen is up.
+   */
+  setUnlockWaiter(wait: () => Promise<void>): void {
+    this.unlocked = wait;
   }
 
   /** Called when a server's session changes (signed in, out, or expired). */
@@ -114,6 +124,7 @@ export class AuthService {
     // Share-link sessions are memory only (CON-6): their "stored" token is the live one, so
     // the sign-in flow resumes it instead of showing a password form.
     if (isShareServerId(profileId)) return this.sessions.get(profileId)?.token ?? null;
+    await this.unlocked();
     return this.secure.get(secretKeys.authToken(profileId)).catch(() => null);
   }
 
@@ -134,6 +145,7 @@ export class AuthService {
       return { token, password: transient || null };
     }
     if (!(await this.hasSavedPassword(profile))) return { token, password: null };
+    await this.unlocked();
     if (this.gate && !(await this.gate())) {
       this.log?.info('auth', 'saved password not used: unlock cancelled');
       return { token, password: null, lockedOut: true };
@@ -144,6 +156,7 @@ export class AuthService {
 
   /** Re-validates the stored token. Rejects with `GuacApiError` (`session-expired`, …). */
   async resume(profile: ServerProfile, token: string): Promise<AuthSession> {
+    await this.unlocked();
     const live = this.sessions.get(profile.id);
     if (live && live.token === token) return live;
     try {
@@ -161,6 +174,7 @@ export class AuthService {
   }
 
   async login(profile: ServerProfile, req: LoginRequest): Promise<AuthSession> {
+    await this.unlocked();
     const session = await this.api.login(
       profile,
       { username: req.username, password: req.password },
@@ -190,6 +204,7 @@ export class AuthService {
     profile: ServerProfile,
     parameters: Readonly<Record<string, string>>,
   ): Promise<AuthSession> {
+    await this.unlocked();
     const session = await this.api.loginWithParameters(profile, parameters);
     await this.adopt(profile.id, session);
     return session;
@@ -252,7 +267,20 @@ export class AuthService {
    * first, so an unreachable server cannot keep anything on the device.
    * Returns how many servers confirmed the sign-out.
    */
-  async signOutEverywhere(profiles: readonly ServerProfile[]): Promise<{ serverSignOuts: number }> {
+  /**
+   * Like `signOutEverywhere`, but returns as soon as everything is removed from this device;
+   * the servers are told in the background (no wait for an unreachable server).
+   */
+  async signOutLocally(profiles: readonly ServerProfile[]): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.signOutEverywhere(profiles, resolve).catch(() => resolve());
+    });
+  }
+
+  async signOutEverywhere(
+    profiles: readonly ServerProfile[],
+    onLocalDone?: () => void,
+  ): Promise<{ serverSignOuts: number }> {
     const revoke: AuthSession[] = [];
     for (const p of profiles) {
       const live = this.sessions.get(p.id);
@@ -270,13 +298,25 @@ export class AuthService {
       this.emit(p.id);
     }
     this.log?.info('auth', `signed out of ${profiles.length} server(s) on this device`);
+    onLocalDone?.();
     const results = await Promise.allSettled(revoke.map((s) => this.api.logout(s)));
     return { serverSignOuts: results.filter((r) => r.status === 'fulfilled').length };
   }
 
-  /** Called when a profile's URL changes or it is deleted. */
+  /**
+   * Called when a profile's address (scheme, host, port or path) changes or it is deleted.
+   * Signs out on the old host with the live session, then drops every secret tied to the old
+   * endpoint (token, saved password, TOTP seed) and this run's http confirmation, so nothing
+   * saved for the old host can be sent to the new one (AUDIT #2).
+   */
   async reset(profileId: string): Promise<void> {
     await this.logout(profileId);
+    this.transientPasswords.delete(profileId);
+    this.lastTotpCounter.delete(profileId);
+    this.httpConfirmed.delete(profileId);
+    for (const key of secretKeys.all(profileId)) {
+      await this.secure.remove(key).catch(() => undefined);
+    }
   }
 
   // ---- TOTP seed (SRV-9) -----------------------------------------------------------------
@@ -294,6 +334,7 @@ export class AuthService {
   async loadTotpSeed(profileId: string): Promise<TotpParams | undefined> {
     const raw = await this.secure.get(secretKeys.totpSeed(profileId)).catch(() => null);
     if (raw === null) return undefined;
+    await this.unlocked();
     if (this.gate && !(await this.gate())) return undefined;
     try {
       return parseTotpInput(raw);
@@ -342,6 +383,7 @@ export class AuthService {
     profile: ServerProfile,
     opts: { readonly httpAllowed: boolean; readonly totpAutofill: boolean },
   ): Promise<RevalidateResult> {
+    await this.unlocked();
     const live = this.sessions.get(profile.id);
     if (live && (await this.api.isSessionValid(live))) return 'ok';
     if (isShareServerId(profile.id)) {

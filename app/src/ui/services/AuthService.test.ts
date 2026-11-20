@@ -31,6 +31,48 @@ describe('AuthService', () => {
     expect(auth.current(profile.id)?.token).toBe(authResultJson.authToken);
   });
 
+  it('reset after an address change signs out on the old host and drops every secret (AUDIT #2)', async () => {
+    const http = new FakeHttpClient()
+      .on('POST', TOKENS, () => jsonResponse(200, authResultJson))
+      .on('DELETE', `${BASE}/api/session`, () => jsonResponse(204, null));
+    const { auth, profile, secure, profiles } = await setup(http);
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: true, extra: {} });
+    await auth.saveTotpSeed(profile.id, 'otpauth://totp/x?secret=JBSWY3DPEHPK3PXP');
+    auth.markHttpConfirmed(profile.id);
+    await auth.reset(profile.id);
+    const moved = await profiles.update(profile.id, { baseUrl: 'https://new.example/guacamole' });
+    for (const k of secretKeys.all(profile.id)) expect(await secure.get(k)).toBeNull();
+    expect(auth.isHttpConfirmed(profile.id)).toBe(false);
+    expect((await auth.loadSecrets(moved)).password).toBeNull();
+    expect(await auth.loadToken(profile.id)).toBeNull();
+    // The only request after sign-in was the DELETE to the *old* host.
+    expect(http.requests.map((r) => `${r.method} ${r.url}`).slice(1)).toEqual([
+      `DELETE ${BASE}/api/session`,
+    ]);
+  });
+
+  it('does not read a stored token or password while the app lock is up (AUDIT #3)', async () => {
+    const http = new FakeHttpClient();
+    const { auth, profile, secure } = await setup(http);
+    await secure.set(secretKeys.authToken(profile.id), 'tok');
+    await secure.set(secretKeys.password(profile.id), 'pw');
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    auth.setUnlockWaiter(() => gate);
+    let got: unknown = 'pending';
+    void auth.loadSecrets(profile).then((v) => (got = v));
+    const revalidated = auth
+      .revalidate(profile, { httpAllowed: true, totpAutofill: false })
+      .catch(() => 'rejected');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(got).toBe('pending');
+    expect(http.requests).toHaveLength(0);
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(got).toEqual({ token: 'tok', password: 'pw' });
+    await revalidated;
+  });
+
   it('keeps the token when resuming fails because the server is unreachable', async () => {
     const http = new FakeHttpClient().on('POST', TOKENS, (req) => {
       throw new HttpTransportError('unreachable', req.url, 'offline');
@@ -287,5 +329,25 @@ describe('sign out of all servers', () => {
     await auth.signOutEverywhere([profile]);
     expect(http.requests).toEqual([]);
     expect(await secure.get(secretKeys.password(profile.id))).toBeNull();
+  });
+});
+
+describe('signOutLocally', () => {
+  it('returns once local data is gone, without waiting for the server', async () => {
+    let release: () => void = () => undefined;
+    const http = new FakeHttpClient()
+      .on('POST', TOKENS, () => jsonResponse(200, authResultJson))
+      .on(
+        'DELETE',
+        `${BASE}/api/session`,
+        () => new Promise((r) => (release = () => r(jsonResponse(204, null)))),
+      );
+    const { auth, profile, secure } = await setup(http);
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: true, extra: {} });
+    await auth.signOutLocally([profile]);
+    for (const k of secretKeys.all(profile.id)) expect(await secure.get(k)).toBeNull();
+    expect(auth.current(profile.id)).toBeUndefined();
+    release();
+    await auth.signOutLocally([]);
   });
 });

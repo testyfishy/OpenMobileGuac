@@ -4,7 +4,13 @@ import {
   InAppBrowser,
 } from '@capacitor/inappbrowser';
 import type { Logger } from '../../core/diagnostics/log.ts';
-import { extractSsoParam, withAppCallback, type SsoRedirect } from '../../core/sso/sso.ts';
+import {
+  extractCallbackParam,
+  extractSsoParam,
+  newSsoState,
+  withAppCallback,
+  type SsoRedirect,
+} from '../../core/sso/sso.ts';
 import { isNative } from '../services/native.ts';
 import type { SsoMode } from '../settings/settingsModel.ts';
 
@@ -27,6 +33,8 @@ export type SsoOutcome =
   | { readonly ok: false; readonly reason: 'cancelled' | 'unavailable' | 'timeout' };
 
 const TIMEOUT_MS = 10 * 60_000;
+/** App-callback attempts expire sooner: the window in which a callback is accepted. */
+const CALLBACK_TIMEOUT_MS = 5 * 60_000;
 
 let callbackWaiter: ((url: string) => void) | null = null;
 
@@ -46,9 +54,12 @@ export async function runSso(
   log?: Logger,
 ): Promise<SsoOutcome> {
   if (!ssoAvailable()) return { ok: false, reason: 'unavailable' };
+  // One random `state` per attempt; a callback without it is ignored (AUDIT #13). The
+  // id_token's nonce, checked by this server, binds it to the expected server as well.
+  const state = newSsoState();
   const callbackUrl =
     mode === 'app-callback' && redirect.kind === 'openid'
-      ? withAppCallback(redirect.redirectUrl)
+      ? withAppCallback(redirect.redirectUrl, state)
       : undefined;
   log?.info(
     'sso',
@@ -68,7 +79,10 @@ export async function runSso(
       log?.info('sso', outcome.ok ? 'received sign-in result' : `ended: ${outcome.reason}`);
       resolve(outcome);
     };
-    const timer = setTimeout(() => finish({ ok: false, reason: 'timeout' }), TIMEOUT_MS);
+    const timer = setTimeout(
+      () => finish({ ok: false, reason: 'timeout' }),
+      callbackUrl ? CALLBACK_TIMEOUT_MS : TIMEOUT_MS,
+    );
     const check = (url: string | undefined) => {
       if (!url) return;
       const value = extractSsoParam(url, baseUrl, redirect.paramName);
@@ -84,7 +98,11 @@ export async function runSso(
           ),
         );
         if (callbackUrl) {
-          callbackWaiter = (url) => check(url);
+          callbackWaiter = (url) => {
+            const value = extractCallbackParam(url, redirect.paramName, state);
+            if (value) finish({ ok: true, value });
+            else log?.warn('sso', 'ignored an app callback that does not match this sign-in');
+          };
           await InAppBrowser.openInSystemBrowser({
             url: callbackUrl,
             options: DefaultSystemBrowserOptions,

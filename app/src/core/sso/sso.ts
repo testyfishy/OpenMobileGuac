@@ -78,7 +78,7 @@ function normalisePath(p: string): string {
 
 /**
  * The SSO parameter from a URL the in-app browser reached, if that URL is the Guacamole web
- * app at `baseUrl` (same origin, path at or below the base path) or the app callback.
+ * app at `baseUrl` (same origin, path at or below the base path).
  */
 export function extractSsoParam(
   rawUrl: string,
@@ -91,19 +91,18 @@ export function extractSsoParam(
   } catch {
     return undefined;
   }
-  const isCallback = rawUrl.toLowerCase().startsWith(APP_SSO_CALLBACK);
-  if (!isCallback) {
-    let base: URL;
-    try {
-      base = new URL(baseUrl);
-    } catch {
-      return undefined;
-    }
-    if (url.origin !== base.origin) return undefined;
-    const basePath = normalisePath(base.pathname);
-    const path = normalisePath(url.pathname);
-    if (basePath && path !== basePath && !path.startsWith(`${basePath}/`)) return undefined;
+  // The app callback is never accepted here: only `extractCallbackParam`, with the
+  // attempt's `state`, takes values from it.
+  let base: URL;
+  try {
+    base = new URL(baseUrl);
+  } catch {
+    return undefined;
   }
+  if (url.origin !== base.origin) return undefined;
+  const basePath = normalisePath(base.pathname);
+  const path = normalisePath(url.pathname);
+  if (basePath && path !== basePath && !path.startsWith(`${basePath}/`)) return undefined;
   for (const p of paramsOf(url)) {
     const v = p.get(paramName);
     if (v) return v;
@@ -119,6 +118,7 @@ export function extractSsoParam(
  */
 export function withAppCallback(
   redirectUrl: string,
+  state: string,
   callback = APP_SSO_CALLBACK,
 ): string | undefined {
   let url: URL;
@@ -129,5 +129,41 @@ export function withAppCallback(
   }
   if (!url.searchParams.has('redirect_uri')) return undefined;
   url.searchParams.set('redirect_uri', callback);
+  // OpenID Connect Core §3.2.2.5: the IdP returns `state` unchanged with the token, which
+  // binds the callback to this attempt (AUDIT #13). Guacamole's own request has none.
+  url.searchParams.set('state', state);
   return url.toString();
+}
+
+/** A fresh unguessable `state` for one app-callback attempt (128 bits, URL-safe). */
+export function newSsoState(crypto: Crypto = globalThis.crypto): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The SSO value from an `openmobileguac://sso-callback` URL, only when it carries the
+ * `state` of the pending attempt. Any other link (another app claiming the scheme, a
+ * replayed or stale callback) is rejected.
+ */
+export function extractCallbackParam(
+  rawUrl: string,
+  paramName: string,
+  expectedState: string,
+): string | undefined {
+  if (!rawUrl.toLowerCase().startsWith(APP_SSO_CALLBACK)) return undefined;
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return undefined;
+  }
+  const sets = paramsOf(url);
+  const state = sets.map((p) => p.get('state')).find((v) => v);
+  if (!expectedState || state !== expectedState) return undefined;
+  for (const p of sets) {
+    const v = p.get(paramName);
+    if (v) return v;
+  }
+  return undefined;
 }

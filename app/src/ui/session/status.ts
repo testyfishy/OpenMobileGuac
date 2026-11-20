@@ -339,7 +339,12 @@ export function reduceSession(
       const text =
         e.display ??
         (e.source === 'tunnel'
-          ? tunnelErrorMessage(e.code, e.message)
+          ? // Never connected and the WebSocket closed without a Guacamole status (1006): the
+            // handshake was refused, typically a proxy that blocks WebSockets. The upstream
+            // HTTP-tunnel fallback cannot work from the app (docs/protocol-notes.md §3.5).
+            !m.everConnected && e.code === STATUS.UPSTREAM_NOT_FOUND
+            ? sessionStrings.status.websocketBlocked
+            : tunnelErrorMessage(e.code, e.message)
           : statusMessage(e.code, e.message, e.source));
       const reason: EndReason =
         e.source === 'tunnel' && e.code === STATUS.UPSTREAM_UNAVAILABLE
@@ -364,7 +369,12 @@ export function reduceSession(
     case 'closed': {
       if (m.phase.kind === 'error' || m.phase.kind === 'disconnected') return m;
       const err = m.lastError;
-      const retryable = err === null || isRetryableStatus(err.code);
+      // A close with no error is a clean close (WebSocket 1000 / status SUCCESS): the server
+      // ended the session, e.g. an administrator's "Kill" from Active Sessions closes the
+      // tunnel with SUCCESS and guacd sends nothing (AUDIT #7). Upstream's web client shows
+      // "Disconnected" with a manual Reconnect for it. A real network drop always reports
+      // an error first (1006 → UPSTREAM_NOT_FOUND, receive timeout → UPSTREAM_TIMEOUT).
+      const retryable = err !== null && isRetryableStatus(err.code);
       const canRetry =
         !e.intentional && m.everConnected && retryable && m.attempts < policy.maxAttempts;
       if (canRetry) {

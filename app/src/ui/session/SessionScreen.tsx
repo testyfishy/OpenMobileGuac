@@ -34,14 +34,17 @@ import { ClipboardSheet } from './ClipboardSheet.tsx';
 import { ComboMenu } from './ComboMenu.tsx';
 import { CredentialSheet } from './CredentialSheet.tsx';
 import { FilesSheet } from './FilesSheet.tsx';
-import { CursorArrow } from './icons.tsx';
+import { ChromeButton } from './ChromeButton.tsx';
+import { CursorArrow, IconEye } from './icons.tsx';
 import { InfoSheet } from './InfoSheet.tsx';
 import { InputMenu } from './InputMenu.tsx';
 import { KeyBar } from './KeyBar.tsx';
 import { IncomingFileSheet } from './IncomingFileSheet.tsx';
 import { KeySetManager, KeySetPicker, type SaveTextFile } from './KeySetManager.tsx';
 import { keySetName, keySetNameIn } from './keySetNames.ts';
-import { MoreSheet } from './MoreSheet.tsx';
+import { MoreSheet, type TerminalControls } from './MoreSheet.tsx';
+import { ShareSheet, type SessionSharing } from './ShareSheet.tsx';
+import { nextColorScheme, parseFontSize, stepFontSize } from '../../session/terminalFont.ts';
 import {
   enterImmersive,
   keepScreenAwake,
@@ -83,7 +86,15 @@ export interface SessionScreenProps {
   /** A fresh tunnel for each (re)connect attempt. */
   createTunnel: () => TunnelLike;
   /** Passed to client.connect(). */
-  buildConnectData: (size: { width: number; height: number; dpi: number }) => string;
+  buildConnectData: (size: {
+    width: number;
+    height: number;
+    dpi: number;
+    /** false: request no audio (Quality low / Audio off). */
+    audio?: boolean;
+  }) => string;
+  /** Holds a (re)connect while it returns a promise (the app lock). */
+  connectGate?: () => Promise<void> | null;
   settings: SessionSettings;
   /** Persist per connection. */
   onSettingsChange: (patch: Partial<SessionSettings>) => void;
@@ -123,6 +134,10 @@ export interface SessionScreenProps {
   onKeyLibraryChange?: (next: KeyLibrary) => void;
   /** Save a text file for the user (key set export); default: a browser download. */
   saveTextFile?: SaveTextFile;
+  /** Session info "Edit this connection" (only when the user may edit it). */
+  onEditConnection?: () => void;
+  /** "Share this session" (sharing profiles); absent for the demo. */
+  sharing?: SessionSharing;
 }
 
 /** Longest clipboard text typed as keystrokes (each character is two key events). */
@@ -143,6 +158,7 @@ type Menu =
   | 'files'
   | 'clipboard'
   | 'info'
+  | 'share'
   | null;
 
 /**
@@ -244,13 +260,19 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
 
   // ---- Controller lifecycle. Options first (effects run in order), then attach.
   useEffect(() => {
+    // Before attach (which connects): the protocol decides terminal-only sizing.
+    controller.setProtocol(latest.current.protocol);
     controller.setOptions({
       createTunnel: () => latest.current.createTunnel(),
       buildConnectData: (size) => latest.current.buildConnectData(size),
+      connectGate: () => latest.current.connectGate?.() ?? null,
       haptic: playHaptic,
       onRemoteClipboard: (text) => {
         clipDispatch({ type: 'add', text, direction: 'from-remote', at: Date.now() });
         if (!latest.current.settings.clipboardRemoteToDevice) return;
+        // A hidden session (behind the app or another session) does not write the device
+        // clipboard (AUDIT MUL-1); the text stays in its clipboard history.
+        if (latest.current.active === false) return;
         void writeDeviceClipboard(text).then((ok) => {
           if (ok) setToast({ id: Date.now(), text: sessionStrings.toasts.remoteClipboardCopied });
         });
@@ -328,8 +350,31 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
 
   // ---- Audio (AUD-1)
   useEffect(() => {
-    controller.setAudioMuted(settings.audioMuted);
-  }, [controller, settings.audioMuted]);
+    controller.setAudioMuted(settings.audio === 'muted');
+  }, [controller, settings.audio]);
+
+  useEffect(() => {
+    controller.setProtocol(protocol);
+  }, [controller, protocol]);
+
+  const lastAutoSent = useRef<string | null>(null);
+  // ---- Clipboard send on connect (CLP-1, opt-in, default off: iOS may show a paste prompt)
+  const connectedNow = snap.phase.kind === 'connected';
+  const sentOnConnect = useRef(false);
+  useEffect(() => {
+    // Once per open session (not on every reconnect, which would prompt again on iOS).
+    if (!connectedNow) return;
+    if (!settings.clipboardSendOnConnect || !active || sentOnConnect.current) return;
+    sentOnConnect.current = true;
+    void readDeviceClipboard().then((r) => {
+      if (!r.ok || r.text === '') return;
+      if (controller.sendClipboard(r.text)) {
+        lastAutoSent.current = r.text;
+        clipDispatch({ type: 'add', text: r.text, direction: 'to-remote', at: Date.now() });
+        setToast({ id: Date.now(), text: sessionStrings.toasts.deviceClipboardSent });
+      }
+    });
+  }, [connectedNow, settings.clipboardSendOnConnect, active, controller]);
 
   // ---- Split layout (DSP-8): display above, trackpad surface + key bar below
   const [fold, setFold] = useState<FoldInfo>(() => readFold());
@@ -459,7 +504,6 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   }, [settings.keepAwake, connected, active]);
 
   // ---- Clipboard auto-send on foreground (CLP-1, opt-in; CLP-4: never read otherwise)
-  const lastAutoSent = useRef<string | null>(null);
   useEffect(() => {
     if (!settings.clipboardAutoSendOnFocus || !active) return;
     const sub = onForeground(() => {
@@ -618,15 +662,22 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const prompt = snap.credentials;
 
   const toggleAudio = () => {
-    const muted = !settings.audioMuted;
-    onSettingsChange({ audioMuted: muted });
-    showToast(muted ? t.toasts.soundOff : t.toasts.soundOn);
+    // On ↔ muted here. "Off (not requested)" is changed back to on, which needs a reconnect.
+    const next = settings.audio === 'on' ? 'muted' : 'on';
+    onSettingsChange({ audio: next });
+    showToast(next === 'muted' ? t.toasts.soundOff : t.toasts.soundOn);
+  };
+  const toggleViewOnly = () => {
+    const on = !settings.viewOnly;
+    onSettingsChange({ viewOnly: on });
+    showToast(on ? t.toasts.viewOnlyOn : t.toasts.viewOnlyOff);
   };
   const actionContext: SessionActionContext = {
     pointerMode: effectiveMode,
     keyboardActive,
     keyBarVisible,
-    audioMuted: settings.audioMuted,
+    audioMuted: settings.audio !== 'on',
+    viewOnly: settings.viewOnly,
     showCtrlAltDel,
     canMinimize: onMinimize !== undefined,
     pasteHint: terminal ? t.screen.pasteHintTerminal : t.screen.pasteHint,
@@ -662,6 +713,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     onClipboard: () => setMenu('clipboard'),
     onFiles: () => setMenu('files'),
     onToggleAudio: toggleAudio,
+    onToggleViewOnly: toggleViewOnly,
     onOptions: () => setMenu('input'),
     onInfo: () => setMenu('info'),
     onMinimize: () => {
@@ -831,6 +883,24 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                   else onSettingsChange({ [key]: on });
                 }}
                 onEditToolbar={() => setMenu('toolbar')}
+                quality={settings.quality}
+                audio={settings.audio}
+                viewOnly={settings.viewOnly}
+                reconnectToApply={snap.reconnectToApply}
+                onQuality={(q) => onSettingsChange({ quality: q })}
+                onAudio={(a) => onSettingsChange({ audio: a })}
+                onReconnect={() => {
+                  setMenu(null);
+                  controller.reconnect();
+                }}
+                terminal={
+                  terminal
+                    ? terminalControls(snap.mutableArguments, (n, v) =>
+                        controller.setArgument(n, v),
+                      )
+                    : null
+                }
+                {...(props.sharing ? { onShare: () => setMenu('share') } : {})}
                 onClose={closeMenu}
               />
             )}
@@ -878,6 +948,13 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 onClose={closeMenu}
               />
             )}
+            {menu === 'share' && props.sharing && (
+              <ShareSheet
+                sharing={props.sharing}
+                tunnelUuid={controller.tunnelUuid()}
+                onClose={closeMenu}
+              />
+            )}
             {menu === 'info' && (
               <InfoSheet
                 title={title}
@@ -891,6 +968,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                     : t.info.keepAwakeOffInSettings
                 }
                 mutableArguments={snap.mutableArguments}
+                {...(props.onEditConnection ? { onEditConnection: props.onEditConnection } : {})}
                 onSetArgument={(name, value) => {
                   const ok = controller.setArgument(name, value);
                   showToast(
@@ -999,7 +1077,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                   nativeHideKeyboard();
                 }}
               />
-            ) : (
+            ) : snap.quietReconnect ? null : (
               <StatusOverlay
                 phase={snap.phase}
                 title={title}
@@ -1007,6 +1085,26 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 onClose={exit}
               />
             )}
+
+            {snap.viewOnly || snap.reconnectToApply || snap.quietReconnect ? (
+              <div className="omg-pills">
+                {snap.quietReconnect ? (
+                  <span className="omg-pill" role="status">
+                    {t.screen.resuming}
+                  </span>
+                ) : null}
+                {snap.viewOnly ? (
+                  <ChromeButton className="omg-pill omg-pill--viewonly" onClick={toggleViewOnly}>
+                    <IconEye off={false} /> {t.screen.viewOnlyPill}
+                  </ChromeButton>
+                ) : null}
+                {snap.reconnectToApply ? (
+                  <ChromeButton className="omg-pill" onClick={() => controller.reconnect()}>
+                    {t.screen.reconnectToApply}
+                  </ChromeButton>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="omg-toast-region" role="status" aria-live="polite">
               {toast && (
@@ -1020,4 +1118,24 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       </div>
     </div>
   );
+}
+
+/** − / + font size and colour scheme for terminal sessions, when the server offers them. */
+function terminalControls(
+  args: readonly { name: string; value: string }[],
+  set: (name: string, value: string) => boolean,
+): TerminalControls | null {
+  const font = args.find((a) => a.name === 'font-size');
+  const scheme = args.find((a) => a.name === 'color-scheme');
+  if (!font && !scheme) return null;
+  return {
+    fontSize: font ? parseFontSize(font.value) : null,
+    colorScheme: scheme ? scheme.value || 'gray-black' : null,
+    onFontStep: (delta) => {
+      if (font) set('font-size', String(stepFontSize(parseFontSize(font.value), delta)));
+    },
+    onNextScheme: () => {
+      if (scheme) set('color-scheme', nextColorScheme(scheme.value));
+    },
+  };
 }

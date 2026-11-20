@@ -244,3 +244,41 @@ export function waitForFreshCode(
   if (totpCounter(unixMs, period) > lastUsedCounter) return 0;
   return (lastUsedCounter + 1) * period * 1000 - unixMs;
 }
+
+/**
+ * The TOTP key from the Guacamole 1.6.0 TOTP extension's enrolment field (AUDIT #4).
+ * `AuthenticationCodeField` (extensions/guacamole-auth-totp) exposes, during enrolment only:
+ * `secret` (Base32), `digits` (number), `period` (number), `mode` (`"SHA1"`, `"SHA256"` or
+ * `"SHA512"`, the `TOTPGenerator.Mode` enum name), `issuer`, `username`, `keyUri`
+ * (`otpauth://totp/…&algorithm=&digits=&period=`) and `qrCode`. The key URI is the server's
+ * own complete description, so it wins; otherwise the separate fields are used. Throws
+ * `TotpParseError` when there is no usable key.
+ */
+export function totpFromEnrolmentField(extra: Readonly<Record<string, unknown>>): TotpParams {
+  const str = (k: string) => (typeof extra[k] === 'string' ? (extra[k] as string) : undefined);
+  const num = (k: string) =>
+    typeof extra[k] === 'number' || typeof extra[k] === 'string'
+      ? (extra[k] as number | string)
+      : undefined;
+  const keyUri = str('keyUri');
+  if (keyUri) {
+    try {
+      return parseTotpInput(keyUri);
+    } catch {
+      // Fall back to the separate fields.
+    }
+  }
+  const secret = str('secret');
+  if (!secret) throw new TotpParseError('empty', 'The enrolment field has no secret');
+  const digits = num('digits');
+  const period = num('period');
+  const mode = str('mode');
+  const base = parseTotpInput(secret, {
+    ...(mode !== undefined ? { algorithm: mode } : {}),
+    ...(digits !== undefined ? { digits } : {}),
+    ...(period !== undefined ? { period } : {}),
+  });
+  const issuer = str('issuer');
+  const account = str('username');
+  return { ...base, ...(issuer ? { issuer } : {}), ...(account ? { account } : {}) };
+}

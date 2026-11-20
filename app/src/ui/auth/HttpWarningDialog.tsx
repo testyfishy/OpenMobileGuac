@@ -7,10 +7,13 @@ export function HttpWarningDialog({
   host,
   onCancel,
   onProceed,
+  rememberable = true,
 }: {
   host: string;
   onCancel: () => void;
   onProceed: (dontShowAgain: boolean) => void;
+  /** Offer "Don't show again" (not for one-off share links). */
+  rememberable?: boolean;
 }) {
   const w = strings.httpWarning;
   const [dontShow, setDontShow] = useState(false);
@@ -32,15 +35,17 @@ export function HttpWarningDialog({
       }
     >
       <p>{w.body(host)}</p>
-      <label className="check-row" htmlFor={id}>
-        <input
-          id={id}
-          type="checkbox"
-          checked={dontShow}
-          onChange={(e) => setDontShow(e.target.checked)}
-        />
-        <span>{w.dontShowAgain}</span>
-      </label>
+      {rememberable ? (
+        <label className="check-row" htmlFor={id}>
+          <input
+            id={id}
+            type="checkbox"
+            checked={dontShow}
+            onChange={(e) => setDontShow(e.target.checked)}
+          />
+          <span>{w.dontShowAgain}</span>
+        </label>
+      ) : null}
     </Dialog>
   );
 }

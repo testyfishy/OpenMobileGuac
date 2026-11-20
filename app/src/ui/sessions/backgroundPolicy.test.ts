@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  resumeNeedsReconnect,
   graceApplies,
   keepAliveSupported,
   shouldSuspendInBackground,
@@ -51,5 +52,16 @@ describe('background keep-alive decisions', () => {
         keepAliveRunning: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe('resume after the background (AUDIT #8, guacd 15 s timeout)', () => {
+  it('reconnects only a connected session whose tunnel is closed or unstable', () => {
+    expect(resumeNeedsReconnect('connected', 2)).toBe(true);
+    expect(resumeNeedsReconnect('connected', 3)).toBe(true);
+    // Still open (e.g. kept alive by the Android foreground service): left alone.
+    expect(resumeNeedsReconnect('connected', 1)).toBe(false);
+    expect(resumeNeedsReconnect('reconnecting', 2)).toBe(false);
+    expect(resumeNeedsReconnect('disconnected', 2)).toBe(false);
   });
 });

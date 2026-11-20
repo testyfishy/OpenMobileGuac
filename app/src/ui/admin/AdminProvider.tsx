@@ -5,6 +5,11 @@ import type { ConnectionTree } from '../../core/models/Connection.ts';
 import { useServices } from '../services/context.ts';
 import { AdminContext, type AdminAction, type AdminContextValue } from './AdminContext.ts';
 import {
+  onConnectionEditRequest,
+  publishAdminPermissions,
+  takeConnectionEdit,
+} from './adminBridge.ts';
+import {
   canCreateConnection,
   canCreateGroup,
   canManage,
@@ -72,6 +77,19 @@ export function AdminProvider({
   }, []);
 
   const close = useCallback(() => setAction(null), []);
+
+  // "Edit this connection" from an open session (Session info).
+  const token = session?.token;
+  useEffect(() => {
+    if (!token) return undefined;
+    publishAdminPermissions(token, perms);
+    const take = () => {
+      const req = takeConnectionEdit(token, (ds) => perms.has(ds));
+      if (req) setAction({ type: 'edit-connection', ...req });
+    };
+    take();
+    return onConnectionEditRequest(take);
+  }, [token, perms]);
 
   const value = useMemo<AdminContextValue | null>(() => {
     if (!session || !tree) return null;

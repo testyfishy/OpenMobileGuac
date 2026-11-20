@@ -170,6 +170,8 @@ export function SettingsScreen() {
       if (ok) update({ ...settings, lock: { ...settings.lock, enabled: true } });
       return;
     }
+    // Turning the lock off is itself protected (AUDIT #3): it needs a successful unlock.
+    if ((await services.lock.prompt(strings.lock.offReason, strings.lock.cancel)) !== 'ok') return;
     // Stored TOTP seeds are only allowed behind the lock (SRV-9): turning it off deletes them.
     const ids = [...(await services.profiles.list()).map((p) => p.id)];
     const withSeeds: string[] = [];
@@ -297,6 +299,7 @@ export function SettingsScreen() {
             }))}
           />
           <p className="field-hint">{t.backgroundDisconnectHint}</p>
+          {ios ? <p className="field-hint">{t.backgroundDisconnectIos}</p> : null}
           <Toggle
             label={t.keepAlive}
             hint={android ? t.keepAliveHintAndroid : ios ? t.keepAliveHintIos : t.keepAliveHintWeb}

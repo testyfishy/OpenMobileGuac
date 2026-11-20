@@ -9,7 +9,19 @@
  */
 
 import Guacamole from '../../vendor/guacamole-common-js';
-import { optimalDisplaySize } from '../../core/api/tunnel.ts';
+import { resumeNeedsReconnect } from '../sessions/backgroundPolicy.ts';
+import {
+  TERMINAL_PROTOCOLS,
+  fontSizeAfterPinch,
+  parseFontSize,
+} from '../../session/terminalFont.ts';
+import {
+  requestedDisplaySize,
+  requestsAudio,
+  resizeDebounceMs,
+  type DisplayRequest,
+  type Quality,
+} from '../../session/viewport/remoteSize.ts';
 import { TunnelState, type TunnelLike } from '../../core/transport/TunnelLike.ts';
 import {
   GestureRecognizer,
@@ -20,6 +32,7 @@ import {
   HardwareKeyboard,
   decideHardwareKey,
   isModifierKey,
+  mapCommandKey,
 } from '../../session/keys/HardwareKeyboard.ts';
 import { comboSchedule, type ComboStep } from '../../session/keys/ComboLibrary.ts';
 import { onTapRecognised, onTouchDown } from './tapDismiss.ts';
@@ -143,13 +156,19 @@ export interface SessionSnapshot {
   readonly audioStreams: number;
   /** Connection parameters the server lets the user change in session (`argv`). */
   readonly mutableArguments: readonly MutableArgument[];
+  /** Reconnecting right after a return to the app: show a small pill, not the overlay. */
+  readonly quietReconnect: boolean;
+  /** Quality, size or audio settings changed since connecting: offer "Reconnect to apply". */
+  readonly reconnectToApply: boolean;
+  /** View only: no input reaches the remote. */
+  readonly viewOnly: boolean;
 }
 
 export type SessionLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface SessionControllerOptions {
   readonly createTunnel: () => TunnelLike;
-  readonly buildConnectData: (size: { width: number; height: number; dpi: number }) => string;
+  readonly buildConnectData: (size: ConnectSize) => string;
   readonly haptic: (hint: HapticHint) => void;
   /** Text arrived from the remote clipboard. */
   readonly onRemoteClipboard: (text: string) => void;
@@ -161,11 +180,30 @@ export interface SessionControllerOptions {
   readonly notify?: (text: string) => void;
   /** Hide the native soft keyboard (tap-to-dismiss; the field is blurred as well). */
   readonly hideNativeKeyboard?: () => void;
+  /**
+   * Called before every (re)connect. A promise holds the connect until it settles: the app
+   * lock uses it so no reconnect sends the stored token while the lock screen is up.
+   */
+  readonly connectGate?: () => Promise<void> | null;
+}
+
+/** The `size` sent at connect, plus whether audio types are advertised (Quality, AUD-1). */
+export interface ConnectSize {
+  readonly width: number;
+  readonly height: number;
+  readonly dpi: number;
+  /** false: advertise no audio mimetypes, so guacd sends no audio. Default true. */
+  readonly audio?: boolean;
 }
 
 /** Figures for the session info sheet. */
 export interface SessionInfo {
   readonly remoteSize: Size;
+  /** What was asked for at connect (null before the first connect). */
+  readonly requested:
+    (DisplayRequest & { readonly audio: boolean; readonly quality: Quality }) | null;
+  /** Received data rate over the last few seconds, kbit/s; null until measurable. */
+  readonly receivedKbps: number | null;
   /** Remote pixels → CSS pixels. */
   readonly scale: number;
   readonly tunnelType: string;
@@ -188,6 +226,26 @@ export interface SessionInfo {
 }
 
 const MATCH_SIZE_DEBOUNCE_MS = 400;
+
+/** The settings a connection is made with; a change means "Reconnect to apply". */
+function connectSettingsKey(s: ResolvedSessionSettings): string {
+  return [
+    s.quality,
+    s.audio === 'off' ? 'noaudio' : 'audio',
+    s.remoteResolution,
+    s.remoteResolution === 'custom' ? `${s.remoteWidth}x${s.remoteHeight}` : '',
+    s.remoteScale,
+  ].join('|');
+}
+
+/** How long after a return to the app a drop is reconnected quietly (no overlay, no delay). */
+const QUIET_RECONNECT_MS = 10_000;
+/** After a return to the app, look at the tunnel this much later (longer than UNSTABLE's 1.5 s). */
+const RESUME_CHECK_MS = 2000;
+function devicePixelRatio(): number {
+  const r = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
+  return Number.isFinite(r) && r > 0 ? r : 1;
+}
 const FOLLOW_MARGIN_PX = 48;
 const MOUSE_WHEEL_STEP_PX = 50;
 /** Wait before acting on a caret move in the hidden field (IMEs move it transiently). */
@@ -238,13 +296,30 @@ export class SessionController {
   private machine: SessionMachine = INITIAL_SESSION_MACHINE;
   /** Set while we close on purpose (user, unmount, retry teardown). */
   private closingOnPurpose = false;
-  /** The server ended the session (`disconnect`/`error` instruction). */
-  private serverClosed = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A connect is waiting on `connectGate`. */
+  private gateHeld = false;
+  private protocol = '';
+  /** When the page was last hidden (app in the background), for the resume decision. */
+  private hiddenAt: number | null = null;
+  /** Until this time, reconnects are immediate and the overlay stays hidden. */
+  private quietUntil = 0;
+  private resumeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** `connectSettingsKey` of the settings the current connection was made with. */
+  private connectKey: string | null = null;
+  /** What the last connect asked for (Session info). */
+  private requested: (DisplayRequest & { audio: boolean; quality: Quality }) | null = null;
+  /** The last `size` sent (connect or resize), to skip repeats. */
+  private lastSentSize: { width: number; height: number } | null = null;
+  /** (time, received bytes) samples for the data rate. */
+  private rateSamples: { at: number; bytes: number }[] = [];
   /** Fields of an open `required` prompt. */
   private credentials: readonly RequiredField[] | null = null;
   private active = true;
-  private readonly audio = new SessionAudio((m) => this.log('info', m));
+  private readonly audio = new SessionAudio(
+    (m) => this.log('info', m),
+    () => this.publish(),
+  );
   private readonly argv = new ArgvTracker(() => this.publish());
   /** File transfers (FIL-1); the screen subscribes to it directly. */
   readonly transfers = new TransferManager({
@@ -301,6 +376,7 @@ export class SessionController {
       remote: { width: 0, height: 0 },
       screen: { width: 0, height: 0 },
       mode: this.settings.fitMode,
+      pixelRatio: devicePixelRatio(),
     });
     this.snapshot = this.buildSnapshot();
   }
@@ -348,6 +424,15 @@ export class SessionController {
       active: this.active,
       audioStreams: this.audio.streamCount(),
       mutableArguments: this.argv.arguments(),
+      quietReconnect:
+        (this.machine.phase.kind === 'reconnecting' || this.machine.phase.kind === 'connecting') &&
+        this.machine.everConnected &&
+        this.quiet(),
+      reconnectToApply:
+        this.machine.phase.kind === 'connected' &&
+        this.connectKey !== null &&
+        this.connectKey !== connectSettingsKey(this.settings),
+      viewOnly: this.settings.viewOnly,
     };
   }
 
@@ -367,6 +452,9 @@ export class SessionController {
       prev.credentials === next.credentials &&
       prev.active === next.active &&
       prev.audioStreams === next.audioStreams &&
+      prev.reconnectToApply === next.reconnectToApply &&
+      prev.quietReconnect === next.quietReconnect &&
+      prev.viewOnly === next.viewOnly &&
       prev.mutableArguments === next.mutableArguments &&
       (Object.keys(next.modifiers) as Modifier[]).every(
         (m) => prev.modifiers[m] === next.modifiers[m],
@@ -446,6 +534,7 @@ export class SessionController {
   /** AUD-1: mute or unmute this session's audio. */
   setAudioMuted(muted: boolean): void {
     this.audio.setMuted(muted);
+    this.publish();
   }
 
   /** Change a connection parameter the server reported as changeable (`argv`). */
@@ -492,6 +581,29 @@ export class SessionController {
     this.applySettings(settings);
   }
 
+  /** The connection's protocol (lower case), for terminal-only features. */
+  setProtocol(protocol: string | undefined): void {
+    this.protocol = (protocol ?? '').toLowerCase();
+  }
+
+  /** Pinch sets the terminal font size: the option is on and the server offers `font-size`. */
+  private pinchChangesFont(): boolean {
+    return (
+      this.settings.terminalPinchFont &&
+      TERMINAL_PROTOCOLS.has(this.protocol) &&
+      this.argv.arguments().some((a) => a.name === 'font-size')
+    );
+  }
+
+  /** "Reconnect to apply": a fresh connection with the current Quality settings. */
+  reconnect(): void {
+    if (this.disposed) return;
+    this.log('info', 'Reconnecting to apply changed settings');
+    this.releaseInputs();
+    this.machine = { ...INITIAL_SESSION_MACHINE, everConnected: true };
+    this.connect();
+  }
+
   /** User pressed Retry. */
   retry(): void {
     if (this.disposed) return;
@@ -517,7 +629,7 @@ export class SessionController {
         if (this.retryTimer) clearTimeout(this.retryTimer);
         this.retryTimer = null;
       } else {
-        this.scheduleRetry(phase.delayMs);
+        this.scheduleRetry(this.quiet() && phase.attempt === 1 ? 0 : phase.delayMs);
       }
     }
     this.publish();
@@ -594,19 +706,59 @@ export class SessionController {
 
   private onResume(): void {
     const t = this.tunnel;
+    const away = this.hiddenAt === null ? 0 : Date.now() - this.hiddenAt;
+    this.hiddenAt = null;
     if (this.machine.phase.kind === 'connected' && t && t.state === TunnelState.UNSTABLE) {
       this.log('warn', 'Resumed with an unstable tunnel');
     }
+    // A drop caused by the time away is reconnected at once and without the error overlay
+    // (AUDIT #8: iOS pauses the WebView, so keep-alives stop and guacd ends the user after
+    // GUACD_TIMEOUT, 15 s). The viewport, pointer mode and settings stay as they were. The
+    // decision is made from what the tunnel reports, never from the time alone: a session
+    // the Android foreground service kept alive is left untouched.
+    this.quietUntil = Date.now() + QUIET_RECONNECT_MS;
     this.retrySoon('App resumed');
+    if (this.resumeTimer) clearTimeout(this.resumeTimer);
+    this.resumeTimer = setTimeout(() => {
+      this.resumeTimer = null;
+      if (this.disposed) return;
+      const state = this.tunnel ? this.tunnel.state : TunnelState.CLOSED;
+      if (resumeNeedsReconnect(this.machine.phase.kind, state)) {
+        this.log(
+          'info',
+          `Back after ${Math.round(away / 1000)} s with a dead tunnel: reconnecting`,
+        );
+        this.reconnect();
+      }
+    }, RESUME_CHECK_MS);
+  }
+
+  /**
+   * Hidden, or within a quiet window after returning to the app: a network drop is
+   * reconnected at once and silently. (A clean close is never retried; see status.ts.)
+   */
+  private quiet(): boolean {
+    return document.visibilityState === 'hidden' || Date.now() < this.quietUntil;
   }
 
   private connect(): void {
     const els = this.els;
     if (!els || this.disposed) return;
+    const hold = this.opts?.connectGate?.() ?? null;
+    if (hold) {
+      if (!this.gateHeld) {
+        this.gateHeld = true;
+        this.log('info', 'Connect held until the app is unlocked');
+        void hold.then(() => {
+          this.gateHeld = false;
+          if (!this.disposed) this.connect();
+        });
+      }
+      return;
+    }
     this.teardownClient(true);
     const gen = ++this.generation;
     this.closingOnPurpose = false;
-    this.serverClosed = false;
     this.dispatch({ type: 'connect' });
 
     const opts = this.opts;
@@ -640,8 +792,10 @@ export class SessionController {
       if (!live()) return;
       if (state === TunnelState.UNSTABLE) this.log('warn', 'Tunnel unstable (no data for a while)');
       if (state !== TunnelState.CLOSED) return;
-      const byServer =
-        !this.closingOnPurpose && this.serverClosed && this.machine.lastError === null;
+      // Not by us and no error first: the server closed the tunnel cleanly (a `disconnect`,
+      // or an administrator killing the connection, which closes with SUCCESS and no
+      // instruction). Never auto-reconnected (AUDIT #7).
+      const byServer = !this.closingOnPurpose && this.machine.lastError === null;
       const intentional = this.closingOnPurpose || byServer;
       this.dispatch({ type: 'closed', intentional, byServer });
       this.releaseInputs();
@@ -654,7 +808,6 @@ export class SessionController {
     };
     client.onerror = (status) => {
       if (!live()) return;
-      this.serverClosed = true;
       this.log('warn', `Server error 0x${status.code.toString(16).padStart(4, '0')}`);
       this.dispatch({
         type: 'error',
@@ -668,9 +821,6 @@ export class SessionController {
       if (state === Guacamole.Client.State.CONNECTED) {
         this.dispatch({ type: 'connected' });
         this.onConnected();
-      } else if (state === Guacamole.Client.State.DISCONNECTING && !this.closingOnPurpose) {
-        // Server sent `disconnect` or `error`.
-        this.serverClosed = true;
       }
     };
     // Server credential prompt (SRV-11): `required` arrives while the client is WAITING,
@@ -734,14 +884,20 @@ export class SessionController {
     this.setCursorImage(null, 0, 0);
 
     const avail = this.availableSize();
-    const dpr = window.devicePixelRatio || 1;
-    const size = optimalDisplaySize(
+    const size = this.displayRequest(
       avail.width || window.innerWidth,
       avail.height || window.innerHeight,
-      dpr,
+    );
+    const audio = requestsAudio(this.settings.quality, this.settings.audio);
+    this.requested = { ...size, audio, quality: this.settings.quality };
+    this.connectKey = connectSettingsKey(this.settings);
+    this.lastSentSize = { width: size.width, height: size.height };
+    this.log(
+      'info',
+      `Requesting ${size.width}x${size.height} at ${size.dpi} DPI (quality ${this.settings.quality}, audio ${audio ? 'on' : 'off'})`,
     );
     try {
-      client.connect(opts.buildConnectData(size));
+      client.connect(opts.buildConnectData({ ...size, audio }));
     } catch (err) {
       const status = err as { code?: number; message?: string };
       this.dispatch({
@@ -874,8 +1030,20 @@ export class SessionController {
     const num = (v: number | null | undefined) =>
       typeof v === 'number' && Number.isFinite(v) ? v : null;
     const t = this.tunnel;
+    const now = Date.now();
+    this.rateSamples = [
+      ...this.rateSamples.filter((x) => now - x.at <= 5000),
+      { at: now, bytes: this.stats.rxBytes },
+    ];
+    const first = this.rateSamples[0];
+    const receivedKbps =
+      first && now - first.at >= 900 && this.stats.rxBytes >= first.bytes
+        ? ((this.stats.rxBytes - first.bytes) * 8) / (now - first.at)
+        : null;
     return {
       remoteSize: this.viewport.remote,
+      requested: this.requested,
+      receivedKbps,
       scale: scaleOf(this.viewport),
       tunnelType: this.infoTunnel
         ? describeTunnel(this.infoTunnel)
@@ -913,6 +1081,7 @@ export class SessionController {
   private clearTimers(): void {
     const timers = [
       this.retryTimer,
+      this.resumeTimer,
       this.tickTimer,
       this.matchSizeTimer,
       this.caretTimer,
@@ -920,6 +1089,7 @@ export class SessionController {
     ];
     for (const t of timers) if (t) clearTimeout(t);
     this.retryTimer = this.tickTimer = this.matchSizeTimer = this.caretTimer = null;
+    this.resumeTimer = null;
     this.thumbTimer = null;
     if (this.flingFrame !== null) cancelAnimationFrame(this.flingFrame);
     this.flingFrame = null;
@@ -959,6 +1129,19 @@ export class SessionController {
     if (prev.largeCursor !== next.largeCursor) this.updateCursor();
     if (prev.pointerLock && !next.pointerLock) this.exitPointerLock();
     if (!prev.matchDeviceSize && next.matchDeviceSize) this.scheduleMatchSize();
+    if (!prev.viewOnly && next.viewOnly) {
+      // Let go of anything held, while sending is still allowed, then block all input.
+      this.settings = prev;
+      this.releaseInputs();
+      this.settings = next;
+      this.log('info', 'View only on');
+    } else if (prev.viewOnly && !next.viewOnly) {
+      // Resync: locked key-bar modifiers were not held on the remote while blocked.
+      this.releaseInputs();
+      this.log('info', 'View only off');
+    }
+    if (prev.audio !== next.audio) this.audio.setMuted(next.audio === 'muted');
+    this.publish();
   }
 
   /** The effective pointer mode changed: drop in-flight input and reconfigure. */
@@ -1112,6 +1295,7 @@ export class SessionController {
         insets,
         keyboardInset,
         mode: this.settings.fitMode,
+        pixelRatio: devicePixelRatio(),
       });
     } else if (!screenChanged && !insetsChanged) {
       next = relayout(prev, { keyboardInset });
@@ -1136,6 +1320,7 @@ export class SessionController {
             insets: prev.insets,
             keyboardInset: prev.keyboardInset,
             mode: this.settings.fitMode,
+            pixelRatio: devicePixelRatio(),
           })
         : relayout(prev, { remote });
     this.viewport = next;
@@ -1148,22 +1333,46 @@ export class SessionController {
   }
 
   /** DSP-4: ask the server to match the device (debounced, only when different). */
+  /** The size to request for an available area (CSS px), from the Quality settings. */
+  private displayRequest(cssWidth: number, cssHeight: number): DisplayRequest {
+    const s = this.settings;
+    return requestedDisplaySize({
+      quality: s.quality,
+      resolution: s.remoteResolution,
+      customWidth: s.remoteWidth,
+      customHeight: s.remoteHeight,
+      scalePercent: s.remoteScale,
+      cssWidth,
+      cssHeight,
+      devicePixelRatio: devicePixelRatio(),
+      terminal: TERMINAL_PROTOCOLS.has(this.protocol),
+    });
+  }
+
   private scheduleMatchSize(): void {
     if (!this.settings.matchDeviceSize) return;
+    // A fixed remote resolution never follows the device.
+    const r = this.settings.remoteResolution;
+    if (r !== 'auto' && r !== 'device') return;
     if (this.matchSizeTimer) clearTimeout(this.matchSizeTimer);
-    this.matchSizeTimer = setTimeout(() => {
-      this.matchSizeTimer = null;
-      const client = this.client;
-      if (!client || !this.settings.matchDeviceSize) return;
-      if (this.machine.phase.kind !== 'connected') return;
-      const { width, height } = this.availableSize();
-      if (width <= 0 || height <= 0) return;
-      const size = optimalDisplaySize(width, height, window.devicePixelRatio || 1);
-      const display = client.getDisplay();
-      if (size.width !== display.getWidth() || size.height !== display.getHeight()) {
+    this.matchSizeTimer = setTimeout(
+      () => {
+        this.matchSizeTimer = null;
+        const client = this.client;
+        if (!client || !this.settings.matchDeviceSize) return;
+        if (this.machine.phase.kind !== 'connected') return;
+        const { width, height } = this.availableSize();
+        if (width <= 0 || height <= 0) return;
+        const size = this.displayRequest(width, height);
+        // Compare with what was last asked for, not the remote size: guacd converts the
+        // request (DPI, multiple of 4), so the two rarely match and would resize forever.
+        const last = this.lastSentSize;
+        if (last && last.width === size.width && last.height === size.height) return;
+        this.lastSentSize = { width: size.width, height: size.height };
         client.sendSize(size.width, size.height);
-      }
-    }, MATCH_SIZE_DEBOUNCE_MS);
+      },
+      Math.max(MATCH_SIZE_DEBOUNCE_MS, resizeDebounceMs(this.settings.quality)),
+    );
   }
 
   private startFlingLoop(): void {
@@ -1268,7 +1477,7 @@ export class SessionController {
    */
   private sendMouse(states: readonly MouseState[]): void {
     if (states.length === 0) return;
-    const client = this.client;
+    const client = this.inputClient();
     let shiftPressed = false;
     const shiftHeld = () => {
       const held = new Set([...this.keys.heldKeysyms(), ...this.hw.held()]);
@@ -1286,7 +1495,7 @@ export class SessionController {
         // Text held by commit-on-word goes first; lazy hardware Ctrl/Alt apply to the
         // click / drag / wheel (Ctrl+click, Ctrl+wheel, Alt+drag).
         this.flushText();
-        const mods = this.hw.flush();
+        const mods = this.hwOut(this.hw.flush());
         if (mods.length > 0) this.sendKeyEvents(mods);
       }
       if (s.withShift && !shiftPressed && !shiftHeld()) {
@@ -1303,8 +1512,13 @@ export class SessionController {
     this.updateCursor();
   }
 
+  /** The client for remote input, or null in view-only mode (nothing is sent). */
+  private inputClient(): GuacClient | null {
+    return this.settings.viewOnly ? null : this.client;
+  }
+
   private sendTouches(contacts: readonly TouchContact[]): void {
-    const client = this.client;
+    const client = this.inputClient();
     if (!client) return;
     for (const c of contacts) {
       const state = new Guacamole.Touch.State({
@@ -1322,7 +1536,7 @@ export class SessionController {
   }
 
   sendKeyEvents(events: readonly KeyEvent[]): void {
-    const client = this.client;
+    const client = this.inputClient();
     if (client) for (const e of events) client.sendKeyEvent(e.pressed ? 1 : 0, e.keysym);
     this.publish();
   }
@@ -1380,10 +1594,15 @@ export class SessionController {
    * `TextEncoder` UTF-8 bytes: upstream StringWriter mis-encodes characters above U+FFFF.
    */
   sendClipboard(text: string): boolean {
-    const client = this.client;
+    const client = this.inputClient();
     if (!client || this.machine.phase.kind !== 'connected') return false;
     writeTextStream(client.createClipboardStream('text/plain'), text);
     return true;
+  }
+
+  /** The open tunnel's UUID (session sharing), or null. */
+  tunnelUuid(): string | null {
+    return this.machine.phase.kind === 'connected' ? (this.tunnel?.uuid ?? null) : null;
   }
 
   isConnected(): boolean {
@@ -1410,6 +1629,15 @@ export class SessionController {
         if (g.type === 'pinch') continue;
         this.applyPointerOutput(this.pointer.handle(g, this.viewport, 'trackpad'));
       } else {
+        if (g.type === 'pinch' && this.pinchChangesFont()) {
+          // Terminal option: the pinch sets the server font size instead of zooming.
+          if (g.phase === 'end' && !g.cancelled) {
+            const cur = this.argv.arguments().find((a) => a.name === 'font-size');
+            const next = fontSizeAfterPinch(parseFontSize(cur?.value), g.totalScale);
+            if (cur && String(next) !== cur.value) this.setArgument('font-size', String(next));
+          }
+          continue;
+        }
         if (g.type === 'tap' || g.type === 'two-finger-tap' || g.type === 'three-finger-tap') {
           this.flushBeforeClick();
         }
@@ -1441,7 +1669,7 @@ export class SessionController {
   /** Before a click: send text held by commit-on-word and press lazy hardware modifiers. */
   private flushBeforeClick(): void {
     this.flushText();
-    const mods = this.hw.flush();
+    const mods = this.hwOut(this.hw.flush());
     if (mods.length > 0) this.sendKeyEvents(mods);
   }
 
@@ -1466,7 +1694,7 @@ export class SessionController {
     this.cancelCombo();
     this.swallowed.clear();
     const client = this.client;
-    const released: KeyEvent[] = [...this.hw.releaseAll(), ...this.keys.releaseAll()];
+    const released: KeyEvent[] = [...this.hwOut(this.hw.releaseAll()), ...this.keys.releaseAll()];
     if (client) for (const e of released) client.sendKeyEvent(e.pressed ? 1 : 0, e.keysym);
     this.sendTouches(this.touches.releaseAll());
     this.handleGestures(this.recognizer.reset(performance.now()));
@@ -1778,7 +2006,13 @@ export class SessionController {
     // ---- Focus loss: release everything so nothing stays stuck on the remote
     this.onWindow('blur', () => this.releaseInputs());
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') this.releaseInputs();
+      if (document.visibilityState === 'hidden') {
+        this.hiddenAt = Date.now();
+        this.releaseInputs();
+      } else {
+        // Visible again: start the quiet window before any queued close event runs.
+        this.quietUntil = Date.now() + QUIET_RECONNECT_MS;
+      }
     };
     document.addEventListener('visibilitychange', onVisibility);
     this.cleanups.push(() => document.removeEventListener('visibilitychange', onVisibility));
@@ -1835,7 +2069,12 @@ export class SessionController {
     }
     if (r.events.length === 0) return;
     if (type === 'down' && !r.toField) this.flushText();
-    this.sendKeyEvents(r.events);
+    this.sendKeyEvents(this.hwOut(r.events));
+  }
+
+  /** Hardware keyboard output with the Command-key setting applied. */
+  private hwOut(events: readonly KeyEvent[]): KeyEvent[] {
+    return mapCommandKey(events, this.settings.commandKey);
   }
 
   /** PTR-5: hardware mouse (absolute, or relative under pointer lock). */

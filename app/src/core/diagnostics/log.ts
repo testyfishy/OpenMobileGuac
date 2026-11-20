@@ -76,8 +76,15 @@ export class Logger {
 }
 
 const SECRET_PARAM =
-  /([?&#;\s"']|^)(token|authToken|password|passwd|pass|id_token|access_token|ticket|state|key|secret|code|guac-totp|SAMLResponse)(["']?\s*[=:]\s*["']?)([^&\s"',;}]+)/gi;
-const TOKEN_HEADER = /(Guacamole-Token|Authorization)(\s*[:=]\s*)(\S+)/gi;
+  /([?&#;\s"'(,{]|^)(token|authToken|password|passwd|pwd|pass|passphrase|pin|id_token|access_token|refresh_token|ticket|state|key|secret|seed|totpSeed|code|guac-totp|SAMLResponse)(["']?\s*[=:]\s*["']?)([^&\s"',;})]+)/gi;
+/** "password is hunter2", "token was abc": prose that a careless message might contain. */
+const SECRET_PROSE =
+  /\b(password|passphrase|passwd|token|secret|seed|pin)(\s+(?:is|was|=)\s+)(["']?)([^\s"',;]+)/gi;
+const TOKEN_HEADER =
+  /(Guacamole-Token|Authorization|Guacamole-Tunnel-Token)(\s*[:=]\s*)((?:Bearer|Basic|Token|Digest)\s+)?(\S+)/gi;
+const BEARER = /\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]{6,})/g;
+/** `scheme://user:password@host`: keep the user name, drop the password. */
+const URL_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)([^/\s@:]*):([^/\s@]+)@/gi;
 const OTPAUTH = /otpauth:\/\/\S+/gi;
 /** Long opaque runs (hex tokens, base64, JWTs). */
 const OPAQUE = /\b[A-Za-z0-9_-]{32,}(\.[A-Za-z0-9_-]{8,}){0,2}\b/g;
@@ -86,14 +93,30 @@ const OPAQUE = /\b[A-Za-z0-9_-]{32,}(\.[A-Za-z0-9_-]{8,}){0,2}\b/g;
 export function redactSecrets(text: string): string {
   return text
     .replace(OTPAUTH, 'otpauth://[redacted]')
-    .replace(TOKEN_HEADER, '$1$2[redacted]')
+    .replace(URL_USERINFO, '$1$2:[redacted]@')
+    .replace(TOKEN_HEADER, '$1$2$3[redacted]')
+    .replace(BEARER, '$1$2[redacted]')
     .replace(SECRET_PARAM, '$1$2$3[redacted]')
+    .replace(SECRET_PROSE, '$1$2$3[redacted]')
     .replace(OPAQUE, '[redacted]');
 }
 
 const URL_HOST = /\b([a-z][a-z0-9+.-]*:\/\/)(\[[^\]]+\]|[^/\s:?#]+)/gi;
 const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
-const IPV6 = /\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}\b/gi;
+/**
+ * IPv6 candidates, full or compressed (`fe80::1`, `::1`, `2001:db8::5%en0`). The leading
+ * delimiter is captured instead of using a lookbehind, which iOS 15–16.3 WebViews cannot
+ * parse (a regex literal that fails to parse would stop the whole bundle loading).
+ */
+const IPV6 = /(^|[^0-9a-z:.])([0-9a-f:]*:[0-9a-f:]*[0-9a-f:](?:%[\w.]+)?)(?![0-9a-z:])/gi;
+
+function looksLikeIpv6(m: string): boolean {
+  const addr = m.split('%')[0] ?? '';
+  const colons = (addr.match(/:/g) ?? []).length;
+  if (addr.includes(':::') || colons < 2 || colons > 7) return false;
+  // `::` compression, or hex letters (not a clock time like 12:30:45), or a full address.
+  return addr.includes('::') || /[a-f]/i.test(addr) || colons === 7;
+}
 const HOSTNAME = /\b(?:[a-z0-9-]+\.)+(?:[a-z]{2,63}|ts\.net)\b/gi;
 
 /** Also hides host names and IP addresses (optional, on by default when exporting). */
@@ -101,7 +124,7 @@ export function redactHosts(text: string): string {
   return text
     .replace(URL_HOST, '$1<host>')
     .replace(IPV4, '<ip>')
-    .replace(IPV6, '<ip>')
+    .replace(IPV6, (m, lead: string, addr: string) => (looksLikeIpv6(addr) ? `${lead}<ip>` : m))
     .replace(HOSTNAME, (m) => (/^\d+(\.\d+)+$/.test(m) ? m : '<host>'));
 }
 

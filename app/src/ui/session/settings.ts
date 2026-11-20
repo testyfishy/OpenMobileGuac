@@ -9,8 +9,17 @@
 
 import type { GestureConfig } from '../../session/gesture/GestureRecognizer.ts';
 import type { FitMode } from '../../session/viewport/Viewport.ts';
+import {
+  AUDIO_MODES,
+  QUALITIES,
+  REMOTE_RESOLUTIONS,
+  type AudioMode,
+  type Quality,
+  type RemoteResolution,
+} from '../../session/viewport/remoteSize.ts';
 import type { PointerConfig, PointerMode } from '../../session/pointer/PointerModel.ts';
 import { GENERAL_SET_ID, isKeySetId } from '../../session/keys/KeySets.ts';
+import type { CommandKeyMode } from '../../session/keys/HardwareKeyboard.ts';
 import { normalizeKeyBarLayout } from './keyBarLayout.ts';
 import { TOOLBAR_STYLES, normalizeToolbarItems, type ToolbarStyle } from './toolbarItems.ts';
 
@@ -72,8 +81,30 @@ export interface SessionSettings {
   immersive?: boolean;
   /** Hardware mouse in trackpad mode: capture the pointer for relative motion. */
   pointerLock?: boolean;
-  /** AUD-1: remote audio muted for this connection. */
+  /** AUD-1 (legacy): remote audio muted. Now derived from `audio === 'muted'`. */
   audioMuted?: boolean;
+  /**
+   * AUD-1: `on`; `muted` (received, not played: local mute); `off` (no audio types are
+   * advertised at connect, so guacd sends no audio at all and saves the bandwidth).
+   */
+  audio?: AudioMode;
+  /** CLP-1: send the device clipboard once when the session connects (iOS may prompt). */
+  clipboardSendOnConnect?: boolean;
+  /** Quality (AUDIT §4.4): what size, DPI and media to request at connect. */
+  quality?: Quality;
+  /** Remote desktop size to request; `auto` follows the quality. */
+  remoteResolution?: RemoteResolution;
+  /** `custom` remote size in pixels. */
+  remoteWidth?: number;
+  remoteHeight?: number;
+  /** 100..300 %: request a proportionally smaller desktop so it is drawn larger. */
+  remoteScale?: number;
+  /** View only: no mouse, keyboard, touch or clipboard reaches the remote. */
+  viewOnly?: boolean;
+  /** Terminal protocols (SSH, telnet, Kubernetes): pinch changes the font size. */
+  terminalPinchFont?: boolean;
+  /** Hardware keyboard ⌘ / Meta: send Super (Win) as upstream, or Control (⌘C = Ctrl+C). */
+  commandKey?: CommandKeyMode;
 
   // ---- Toolbar and keyboard dismissal (optional for compatibility)
   /**
@@ -106,7 +137,7 @@ export const REMOTE_FILES_POLICIES: readonly RemoteFilesPolicy[] = ['ask', 'acce
  * Fields still read (for migration and old stored values) but no longer edited as session
  * settings: key sets and the key library replace them. The descriptor table skips them.
  */
-export const LEGACY_SESSION_KEYS = ['keyBarLayout', 'customCombos'] as const;
+export const LEGACY_SESSION_KEYS = ['keyBarLayout', 'customCombos', 'audioMuted'] as const;
 
 /** Settings with every optional field resolved. */
 export type ResolvedSessionSettings = Required<SessionSettings>;
@@ -138,6 +169,16 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   immersive: false,
   pointerLock: false,
   audioMuted: false,
+  audio: 'on',
+  clipboardSendOnConnect: false,
+  quality: 'auto',
+  remoteResolution: 'auto',
+  remoteWidth: 1280,
+  remoteHeight: 720,
+  remoteScale: 100,
+  viewOnly: false,
+  terminalPinchFont: false,
+  commandKey: 'super',
   toolbarStyle: 'dock-bottom',
   toolbarItems: null,
   toolbarLabels: 'auto',
@@ -159,6 +200,9 @@ export const INPUT_RANGES = {
   longPressMs: [300, 1200, 50],
   doubleTapWindowMs: [150, 600, 25],
   tapSlopPx: [4, 30, 1],
+  remoteWidth: [320, 7680, 2],
+  remoteHeight: [240, 4320, 2],
+  remoteScale: [100, 300, 25],
 } as const satisfies Record<string, readonly [number, number, number]>;
 
 export type NumericInputSetting = keyof typeof INPUT_RANGES;
@@ -184,6 +228,16 @@ function bool(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+/** `audio`, or the legacy `audioMuted` flag; `audioMuted` is kept in step for old readers. */
+function audioFields(raw: Record<string, unknown>): { audio: AudioMode; audioMuted: boolean } {
+  const audio: AudioMode = (AUDIO_MODES as readonly unknown[]).includes(raw['audio'])
+    ? (raw['audio'] as AudioMode)
+    : raw['audioMuted'] === true
+      ? 'muted'
+      : 'on';
+  return { audio, audioMuted: audio === 'muted' };
+}
+
 /** Three-way tap-to-hide; booleans from older versions: true → hide and click. */
 function tapDismiss(value: unknown): TapDismissMode {
   if (value === true) return 'hide-click';
@@ -191,7 +245,13 @@ function tapDismiss(value: unknown): TapDismissMode {
   return oneOf(value, TAP_DISMISS_MODES, DEFAULT_SESSION_SETTINGS.tapDismissKeyboard);
 }
 
-const FIT_MODES_LIST: readonly FitMode[] = ['fit-screen', 'fit-width', 'fit-height', 'one-to-one'];
+const FIT_MODES_LIST: readonly FitMode[] = [
+  'fit-screen',
+  'fit-width',
+  'fit-height',
+  'one-to-one',
+  'css-pixels',
+];
 const POINTER_MODES_LIST: readonly PointerMode[] = ['direct', 'trackpad', 'touch'];
 
 /** Fill gaps and repair out-of-range values in settings coming from storage. */
@@ -228,7 +288,16 @@ export function normalizeSessionSettings(
     splitLayout: oneOf(raw['splitLayout'], ['auto', 'on', 'off'] as const, d.splitLayout),
     immersive: bool(raw['immersive'], d.immersive),
     pointerLock: bool(raw['pointerLock'], d.pointerLock),
-    audioMuted: bool(raw['audioMuted'], d.audioMuted),
+    ...audioFields(raw),
+    clipboardSendOnConnect: bool(raw['clipboardSendOnConnect'], d.clipboardSendOnConnect),
+    quality: oneOf(raw['quality'], QUALITIES, d.quality),
+    remoteResolution: oneOf(raw['remoteResolution'], REMOTE_RESOLUTIONS, d.remoteResolution),
+    remoteWidth: Math.round(clampTo(raw['remoteWidth'], 'remoteWidth')),
+    remoteHeight: Math.round(clampTo(raw['remoteHeight'], 'remoteHeight')),
+    remoteScale: clampTo(raw['remoteScale'], 'remoteScale'),
+    viewOnly: bool(raw['viewOnly'], d.viewOnly),
+    terminalPinchFont: bool(raw['terminalPinchFont'], d.terminalPinchFont),
+    commandKey: oneOf(raw['commandKey'], ['super', 'ctrl'] as const, d.commandKey),
     toolbarStyle: oneOf(raw['toolbarStyle'], TOOLBAR_STYLES, d.toolbarStyle),
     toolbarItems: normalizeToolbarItems(raw['toolbarItems']),
     toolbarLabels: oneOf(
@@ -267,6 +336,16 @@ export const INPUT_SETTING_KEYS = [
   'immersive',
   'pointerLock',
   'audioMuted',
+  'audio',
+  'clipboardSendOnConnect',
+  'quality',
+  'remoteResolution',
+  'remoteWidth',
+  'remoteHeight',
+  'remoteScale',
+  'viewOnly',
+  'terminalPinchFont',
+  'commandKey',
   'toolbarStyle',
   'toolbarItems',
   'toolbarLabels',
@@ -293,6 +372,10 @@ export function sanitizeSessionSettingsPatch(raw: unknown): Partial<SessionSetti
     if (r[key] === undefined) continue;
     // Present keys keep their normalised (type-checked, clamped) value.
     out[key] = n[key];
+  }
+  // A stored legacy mute becomes the new three-way `audio` choice.
+  if ('audioMuted' in r && !('audio' in r) && typeof r['audioMuted'] === 'boolean') {
+    out['audio'] = r['audioMuted'] ? 'muted' : 'on';
   }
   return out as Partial<SessionSettings>;
 }

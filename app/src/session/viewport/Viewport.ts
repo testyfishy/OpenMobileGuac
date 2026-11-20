@@ -24,13 +24,19 @@
  *   with zoom 1 the view re-fits; a zoomed-in view keeps its relative zoom.
  */
 
-export type FitMode = 'fit-screen' | 'fit-width' | 'fit-height' | 'one-to-one';
+/**
+ * - `one-to-one`: one remote pixel per **device** pixel (scale `1 / devicePixelRatio` in CSS
+ *   px), the pixel-exact view of a desktop negotiated in device pixels (AUDIT #6).
+ * - `css-pixels`: "100 %": one remote pixel per CSS pixel (2 × 2 device pixels at DPR 2).
+ */
+export type FitMode = 'fit-screen' | 'fit-width' | 'fit-height' | 'one-to-one' | 'css-pixels';
 
 export const FIT_MODES: readonly FitMode[] = [
   'fit-screen',
   'fit-width',
   'fit-height',
   'one-to-one',
+  'css-pixels',
 ];
 
 export interface Point {
@@ -85,6 +91,8 @@ export interface ViewportState {
   /** Height in screen px covered by the soft keyboard, measured from the screen bottom. */
   readonly keyboardInset: number;
   readonly mode: FitMode;
+  /** Device pixels per CSS pixel (`window.devicePixelRatio`); used by `one-to-one`. */
+  readonly pixelRatio: number;
   /** Zoom relative to the mode's base scale. 1 = the mode's framing. */
   readonly zoom: number;
   /** Screen position of remote (0, 0). */
@@ -102,6 +110,8 @@ export interface CreateViewportOptions {
   readonly insets?: Insets;
   readonly keyboardInset?: number;
   readonly mode?: FitMode;
+  /** Default 1. */
+  readonly pixelRatio?: number;
   readonly config?: Partial<ViewportConfig>;
 }
 
@@ -209,6 +219,8 @@ export function baseScale(state: ViewportState, mode: FitMode = state.mode): num
     case 'fit-height':
       return ratio(area.height, state.remote.height);
     case 'one-to-one':
+      return 1 / state.pixelRatio;
+    case 'css-pixels':
       return 1;
   }
 }
@@ -342,6 +354,12 @@ export function createViewport(options: CreateViewportOptions): ViewportState {
     insets: sanitizeInsets(options.insets ?? ZERO_INSETS),
     keyboardInset: nonNegative(options.keyboardInset ?? 0),
     mode: options.mode ?? 'fit-screen',
+    pixelRatio:
+      options.pixelRatio !== undefined &&
+      Number.isFinite(options.pixelRatio) &&
+      options.pixelRatio > 0
+        ? options.pixelRatio
+        : 1,
     zoom: 1,
     offsetX: 0,
     offsetY: 0,

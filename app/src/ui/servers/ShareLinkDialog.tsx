@@ -10,7 +10,8 @@ import { useServices } from '../services/context.ts';
 import { haptic } from '../services/native.ts';
 import { makeShareProfile } from '../services/shareSessions.ts';
 import { strings } from '../strings.ts';
-import { hostOf } from './serverForm.ts';
+import { HttpWarningDialog } from '../auth/HttpWarningDialog.tsx';
+import { hostOf, isInsecureUrl } from './serverForm.ts';
 
 /**
  * CON-6: open a Guacamole share link (`…/#/?key=…`). Signs in with the key (no username or
@@ -29,10 +30,16 @@ export function ShareLinkDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const link = parseShareLink(text);
+  /** AUDIT §3 #9: a share key goes over plain http only after the same warning as sign-in. */
+  const [httpAsk, setHttpAsk] = useState(false);
 
-  const open = async () => {
+  const open = async (httpConfirmed = false) => {
     if (!link) {
       setError(s.invalid);
+      return;
+    }
+    if (isInsecureUrl(link.baseUrl) && !httpConfirmed) {
+      setHttpAsk(true);
       return;
     }
     setBusy(true);
@@ -104,6 +111,17 @@ export function ShareLinkDialog({ onClose }: { onClose: () => void }) {
         <InfoBanner>
           {hostOf(link.baseUrl)}. {s.separate}
         </InfoBanner>
+      ) : null}
+      {httpAsk && link ? (
+        <HttpWarningDialog
+          host={hostOf(link.baseUrl)}
+          rememberable={false}
+          onCancel={() => setHttpAsk(false)}
+          onProceed={() => {
+            setHttpAsk(false);
+            void open(true);
+          }}
+        />
       ) : null}
     </Dialog>
   );

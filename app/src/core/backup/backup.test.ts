@@ -9,6 +9,7 @@ import {
   encryptSecrets,
   parseBackup,
   planRestore,
+  secretsToRestore,
 } from './backup.ts';
 
 const profile = (id: string, over: Partial<ServerProfile> = {}): ServerProfile => ({
@@ -124,7 +125,7 @@ describe('planRestore', () => {
     expect([plan.added, plan.updated, plan.removed]).toEqual([1, 2, 0]);
   });
 
-  it('merge matches by id even when the URL changed', () => {
+  it('merge never maps a backup server onto a saved one at another address (AUDIT #1)', () => {
     const dupFile = createBackup({
       profiles: [
         data(profile('a')),
@@ -139,8 +140,42 @@ describe('planRestore', () => {
       'merge',
       () => 'gen',
     );
-    expect(plan.idMap['a2']).toBe('a2');
-    expect(plan.entries.map((e) => e.merge)).toEqual([false, true]);
+    // Same id, different host: added under a fresh id, so the saved server (and its
+    // secrets) is untouched and nothing saved for x.example is ever sent to guac.example.
+    expect(plan.idMap['a2']).toBe('gen');
+    expect(plan.entries.map((e) => [e.targetId, e.merge])).toEqual([
+      ['a', false],
+      ['gen', false],
+    ]);
+    expect(plan.addressChanged).toBe(1);
+    expect(plan.updated).toBe(0);
+  });
+
+  it.each([
+    ['scheme', 'http://guac.example/guacamole'],
+    ['port', 'https://guac.example:8443/guacamole'],
+    ['path', 'https://guac.example/other'],
+    ['host', 'https://evil.example/guacamole'],
+  ])('a changed %s counts as a different server', (_label, baseUrl) => {
+    const f = createBackup({
+      profiles: [data(profile('a', { baseUrl }))],
+      appVersion: '0',
+      now: 0,
+    });
+    const plan = planRestore([profile('a')], f, 'merge', () => 'fresh');
+    expect(plan.entries[0]?.targetId).toBe('fresh');
+    expect(plan.addressChanged).toBe(1);
+  });
+
+  it('a cosmetic difference (trailing slash, host case) is still the same server', () => {
+    const f = createBackup({
+      profiles: [data(profile('a', { baseUrl: 'https://GUAC.example/guacamole/' }))],
+      appVersion: '0',
+      now: 0,
+    });
+    const plan = planRestore([profile('a')], f, 'merge', () => 'fresh');
+    expect(plan.entries[0]).toMatchObject({ targetId: 'a', merge: true });
+    expect(plan.addressChanged).toBe(0);
   });
 
   it('replace removes everything and keeps backup ids', () => {
@@ -169,5 +204,44 @@ describe('encrypted secrets', () => {
     const file = createBackup({ profiles: [], appVersion: '0', now: 0, secrets: blob });
     const parsed = parseBackup(JSON.stringify(file));
     expect(parsed.ok && parsed.backup.secrets).toEqual(blob);
+  });
+});
+
+describe('secretsToRestore (AUDIT #1: secrets never follow a changed address)', () => {
+  const backup = createBackup({
+    profiles: [
+      data(profile('a')),
+      data(profile('b', { baseUrl: 'https://b.example/guacamole' })),
+      data(profile('c', { baseUrl: 'https://evil.example/guacamole' })),
+    ],
+    appVersion: '0',
+    now: 0,
+  });
+  const existing = [
+    profile('a'),
+    profile('b', { baseUrl: 'https://old-b.example/guacamole' }),
+    profile('c', { baseUrl: 'https://c.example/guacamole' }),
+  ];
+  let gen = 0;
+  const plan = planRestore(existing, backup, 'merge', () => `fresh${++gen}`);
+
+  it('skips servers whose address changed and secrets sealed for another address', () => {
+    const out = secretsToRestore(plan, backup, {
+      a: { password: 'pa', baseUrl: 'https://guac.example/guacamole' },
+      b: { password: 'pb', baseUrl: 'https://b.example/guacamole' },
+      // The plain file says evil.example, the sealed address says c.example: edited file.
+      c: { password: 'pc', baseUrl: 'https://c.example/guacamole' },
+    });
+    expect(out).toEqual([{ id: 'a', password: 'pa' }]);
+    expect(plan.addressChangedIds).toEqual(['b', 'c']);
+  });
+
+  it('a fresh server from a backup gets its own sealed secrets', () => {
+    const p = planRestore([], backup, 'merge', () => 'never');
+    const out = secretsToRestore(p, backup, {
+      c: { totpSeed: 'otpauth://totp/x?secret=AAAA', baseUrl: 'https://c.example/guacamole' },
+      b: { password: 'pb', baseUrl: 'https://b.example/guacamole' },
+    });
+    expect(out).toEqual([{ id: 'b', password: 'pb' }]);
   });
 });

@@ -90,13 +90,19 @@ export async function buildBackup(
   const profiles = await services.profiles.exportAll();
   let secrets;
   if (passphrase) {
-    const plain: Record<string, { password?: string; totpSeed?: string }> = {};
+    const plain: Record<string, { password?: string; totpSeed?: string; baseUrl?: string }> = {};
     for (const p of profiles) {
       const id = p.profile.id;
       const password = await services.secure.get(secretKeys.password(id)).catch(() => null);
       const totpSeed = await services.secure.get(secretKeys.totpSeed(id)).catch(() => null);
       if (password || totpSeed) {
-        plain[id] = { ...(password ? { password } : {}), ...(totpSeed ? { totpSeed } : {}) };
+        // The address goes inside the encrypted part too, so an edited plain `baseUrl`
+        // cannot carry these secrets to another host (AUDIT #1).
+        plain[id] = {
+          ...(password ? { password } : {}),
+          ...(totpSeed ? { totpSeed } : {}),
+          baseUrl: p.profile.baseUrl,
+        };
       }
     }
     secrets = await encryptSecrets(plain, passphrase);

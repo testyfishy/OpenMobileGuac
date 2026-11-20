@@ -351,3 +351,65 @@ Verified only in a desktop browser (demo desktop and the dev harness); check on 
       without clicking the remote; Hide and click hides it and clicks; Off only clicks.
 - [ ] Android: rotate the phone while the soft keyboard is open: the toolbar layout follows
       the new orientation at once (not only after the keyboard closes).
+
+## Re-test after the audit fixes (2026-11-21)
+
+Not run on a device or a real server yet. Use a Windows RDP connection where the
+administrator has **not** fixed width, height or DPI, then a VNC and an SSH connection.
+
+**Quality and resolution (AUDIT #9, §4.4)** — note Session info › "Asked for" and "Remote
+resolution" for each:
+
+- [ ] iPhone (DPR 3), Quality Auto: expect about 1170 × 2532 @ 288 asked, ≈ 484 × 1055
+      received (portrait; less if the toolbar is docked).
+- [ ] Quality Best: ≈ 1168 × 2532 received; text is tiny at Fit; 1:1 is pixel-sharp.
+- [ ] Quality Low: ≈ 388 × 844 received; Session info › Audio "off (not requested)"; the
+      "Receiving now" rate is clearly lower than Auto on a moving desktop.
+- [ ] Changing Quality mid-session shows "Reconnect to apply"; tapping it reconnects and the
+      new size appears.
+- [ ] Remote resolution 1920 × 1080 and Custom 1366 × 768: received as asked. Scale 200 %:
+      roughly half the Auto pixel size, larger text.
+- [ ] VNC: the size usually stays the server's own (as the helper text says). SSH: Best keeps
+      the same text size as Auto.
+- [ ] Sound "Off (not requested)": no audio and lower data rate; "Muted here": no audio but
+      the data rate stays as with sound on.
+- [ ] Session info › "Edit this connection" appears only for an account that may edit it,
+      and opens the connection editor.
+
+**1:1 and 100 % (AUDIT #6)**
+
+- [ ] View › 1:1 on an iPhone with Quality Best: one remote pixel per device pixel (very
+      small, sharp). View › 100 % (CSS pixels): three times larger.
+
+**Combos with Shift (AUDIT #5)** — in Windows:
+
+- [ ] Ctrl+Shift+T in a browser reopens a closed tab; Ctrl+T opens a new one.
+- [ ] Ctrl+Shift+Esc opens Task Manager; Super+Shift+S opens the snipping bar;
+      Alt+Shift+Tab steps backwards.
+- [ ] Key bar: sticky Shift then "1" types "!"; sticky Shift then "a" types "A".
+- [ ] iPad hardware keyboard with "Command key (⌘)" = Control: ⌘C / ⌘V copy and paste in
+      Notepad; with "Windows key", ⌘ opens the Start menu.
+
+**Background and resume (AUDIT #8)** — iPhone:
+
+- [ ] Background for 5 s and return: the session is still there, no overlay.
+- [ ] Background for 20 s and 70 s, return: at most a small "Reconnecting…" pill, no error
+      overlay; zoom, pan position, pointer mode and key bar are as before.
+- [ ] Settings › "Disconnect sessions after …" shows the iOS explanation (about 15 s).
+- [ ] Android with "Keep sessions connected in the background" on: background for 2 min;
+      the session is still connected on return (not reconnected).
+- [ ] Administrator kills the session from Active Sessions: "Session ended", **no**
+      automatic reconnect.
+
+**View only, terminal, sharing, waking**
+
+- [ ] View only (More › Input, or the toolbar button): taps, keys, scroll and Paste do
+      nothing remotely; the pill at the top turns it off.
+- [ ] SSH: More › Terminal › Font size − / + changes the font; Colours cycles presets;
+      with "Pinch to change the terminal font size" on, a pinch changes the font.
+- [ ] More › Share this session: with a sharing profile set up, the link opens the
+      session read-only in a desktop browser; without profiles, the sheet says so.
+- [ ] A connection with Wake-on-LAN to a sleeping PC: after 8 s the overlay says "Still
+      connecting… waking the computer?" and the session opens when the PC is up.
+- [ ] "Send the device clipboard when the session connects" on: one paste prompt (iOS) at
+      connect, not on every reconnect.

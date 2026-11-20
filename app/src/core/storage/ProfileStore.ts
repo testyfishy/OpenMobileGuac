@@ -4,7 +4,8 @@ import {
   type ServerProfile,
 } from '../models/ServerProfile.ts';
 import { isRecord } from '../models/json.ts';
-import type { KeyValueStore } from './KeyValueStore.ts';
+import { sameServerEndpoint } from '../url/normalizeServerUrl.ts';
+import { MemoryKeyValueStore, type KeyValueStore } from './KeyValueStore.ts';
 import { secretKeys, type SecureStore } from './SecureStore.ts';
 
 /**
@@ -23,7 +24,9 @@ import { secretKeys, type SecureStore } from './SecureStore.ts';
  * - `profile/<id>/recents`: `RecentEntry[]`
  * - `profile/<id>/connectionSettings`: `{ [refKey]: JsonObject }`
  * - `profile/<id>/options`: per-server options (`JsonObject`, interpreted by the UI)
- * - `profile/<id>/thumb/<refKey>`: `Thumbnail`
+ * - thumbnails (`profile/<id>/thumb/<refKey>`: `Thumbnail`) live in a separate store, not in
+ *   `kv` (AUDIT #12): on native the app's cache directory (not backed up), on the web memory
+ *   only. Thumbnails left in `kv` by older versions are purged by `purgeLegacyThumbnails`.
  */
 
 /** Identifies a connectable item on a server. `type` uses tunnel `GUAC_TYPE` values. */
@@ -91,6 +94,11 @@ export interface ProfileStoreOptions {
    * as share-link sessions (CON-6). Writes for them are silently skipped.
    */
   readonly isEphemeral?: (profileId: string) => boolean;
+  /**
+   * Where thumbnails (pictures of remote screens) are kept. Default: memory only. Never the
+   * main `kv` (Preferences / localStorage), which is plain, persistent app data.
+   */
+  readonly thumbnails?: KeyValueStore;
 }
 
 const PROFILES_KEY = 'profiles';
@@ -131,6 +139,7 @@ export class ProfileStore {
   private readonly now: () => number;
   private readonly maxRecents: number;
   private readonly isEphemeral: (profileId: string) => boolean;
+  private readonly thumbs: KeyValueStore;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(kv: KeyValueStore, options: ProfileStoreOptions = {}) {
@@ -140,6 +149,18 @@ export class ProfileStore {
     this.now = options.now ?? (() => Date.now());
     this.maxRecents = options.maxRecents ?? 20;
     this.isEphemeral = options.isEphemeral ?? (() => false);
+    this.thumbs = options.thumbnails ?? new MemoryKeyValueStore();
+  }
+
+  /** Removes thumbnails that older versions kept in the main store. Never throws. */
+  async purgeLegacyThumbnails(): Promise<void> {
+    try {
+      for (const k of await this.kv.keys('profile/')) {
+        if (k.includes('/thumb/')) await this.kv.remove(k);
+      }
+    } catch {
+      // best effort
+    }
   }
 
   // ---- profiles -------------------------------------------------------------------------
@@ -190,6 +211,9 @@ export class ProfileStore {
       const next = [...profiles];
       next[index] = updated;
       await this.writeProfiles(next);
+      // Secrets belong to an endpoint (scheme, host, port, path), not to a profile id: a
+      // token, password or TOTP seed must never follow the profile to another host.
+      if (!sameServerEndpoint(current.baseUrl, updated.baseUrl)) await this.dropSecrets(id);
       return updated;
     });
   }
@@ -204,6 +228,11 @@ export class ProfileStore {
         for (const key of secretKeys.all(id)) await this.secureStore.remove(key);
       }
     });
+  }
+
+  private async dropSecrets(id: string): Promise<void> {
+    if (!this.secureStore) return;
+    for (const key of secretKeys.all(id)) await this.secureStore.remove(key).catch(() => undefined);
   }
 
   /**
@@ -273,6 +302,12 @@ export class ProfileStore {
         assertHttpBaseUrl(e.data.profile.baseUrl);
         const profile: ServerProfile = { ...e.data.profile, id: e.targetId };
         const index = profiles.findIndex((p) => p.id === e.targetId);
+        const previous = profiles[index];
+        if (previous && !sameServerEndpoint(previous.baseUrl, profile.baseUrl)) {
+          // Defence in depth: `planRestore` never maps a different endpoint onto an existing
+          // id, but if a caller does, the old host's secrets must not survive.
+          await this.dropSecrets(e.targetId);
+        }
         if (index >= 0) {
           profiles = profiles.map((p, i) => (i === index ? profile : p));
         } else {
@@ -324,7 +359,9 @@ export class ProfileStore {
   // ---- thumbnails -----------------------------------------------------------------------
 
   async getThumbnail(profileId: string, ref: ConnectionRef): Promise<Thumbnail | undefined> {
-    const data = parseJson(await this.kv.get(thumbPrefix(profileId) + connectionRefKey(ref)));
+    const data = parseJson(
+      await this.thumbs.get(thumbPrefix(profileId) + connectionRefKey(ref)).catch(() => null),
+    );
     if (!isRecord(data) || typeof data['dataUrl'] !== 'string' || typeof data['at'] !== 'number') {
       return undefined;
     }
@@ -334,13 +371,16 @@ export class ProfileStore {
 
   async setThumbnail(profileId: string, ref: ConnectionRef, thumb: Thumbnail): Promise<void> {
     if (this.isEphemeral(profileId)) return;
-    await this.kv.set(thumbPrefix(profileId) + connectionRefKey(ref), JSON.stringify(thumb));
+    await this.thumbs.set(thumbPrefix(profileId) + connectionRefKey(ref), JSON.stringify(thumb));
   }
 
   /** Removes the thumbnails of one profile, or of every profile when `profileId` is omitted. */
   async clearThumbnails(profileId?: string): Promise<void> {
-    const keys = await this.kv.keys(profileId === undefined ? 'profile/' : thumbPrefix(profileId));
-    for (const k of keys) if (k.includes('/thumb/')) await this.kv.remove(k);
+    const keys = await this.thumbs.keys(
+      profileId === undefined ? 'profile/' : thumbPrefix(profileId),
+    );
+    for (const k of keys) if (k.includes('/thumb/')) await this.thumbs.remove(k);
+    if (profileId === undefined) await this.purgeLegacyThumbnails();
   }
 
   /** Reorders profiles. `orderedIds` must be a permutation of the current ids. */
@@ -508,7 +548,9 @@ export class ProfileStore {
 
   private async removeLocalData(id: string): Promise<void> {
     for (const part of DATA_PARTS) await this.kv.remove(profileKey(id, part));
-    for (const k of await this.kv.keys(thumbPrefix(id))) await this.kv.remove(k);
+    for (const k of await this.thumbs.keys(thumbPrefix(id)).catch(() => [])) {
+      await this.thumbs.remove(k).catch(() => undefined);
+    }
   }
 
   private async readOptions(profileId: string): Promise<ConnectionSettings | undefined> {

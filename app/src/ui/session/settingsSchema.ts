@@ -18,6 +18,14 @@ import {
   type ResolvedSessionSettings,
 } from './settings.ts';
 import { sessionStrings } from './sessionStrings.ts';
+import {
+  AUDIO_MODES,
+  QUALITIES,
+  REMOTE_RESOLUTIONS,
+  type AudioMode,
+  type Quality,
+  type RemoteResolution,
+} from '../../session/viewport/remoteSize.ts';
 import { TOOLBAR_STYLES, resolveToolbarItems, type ToolbarStyle } from './toolbarItems.ts';
 
 /** Fields with a control: every field except the legacy ones (`LEGACY_SESSION_KEYS`). */
@@ -150,6 +158,18 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
   ),
 
   // ---- Pointer
+  sw(
+    'viewOnly',
+    'pointer',
+    () => S().options.viewOnly,
+    () => S().options.viewOnlyHint,
+  ),
+  sw(
+    'terminalPinchFont',
+    'pointer',
+    () => S().options.terminalPinchFont,
+    () => S().options.terminalPinchFontHint,
+  ),
   {
     key: 'pointerMode',
     section: 'pointer',
@@ -234,6 +254,15 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
 
   // ---- Keyboard
   {
+    key: 'commandKey',
+    section: 'keyboard',
+    control: 'choice',
+    options: ['super', 'ctrl'],
+    label: () => S().options.commandKey,
+    hint: () => S().options.commandKeyHint,
+    optionLabel: (v) => S().options.commandKeyOptions[v as 'super' | 'ctrl'] ?? v,
+  },
+  {
     key: 'textInputMode',
     section: 'keyboard',
     control: 'choice',
@@ -281,13 +310,52 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
 
   // ---- Display
   {
+    key: 'quality',
+    section: 'display',
+    control: 'choice',
+    options: QUALITIES,
+    label: () => S().options.quality,
+    hint: () => S().options.qualityHint,
+    optionLabel: (v) => S().options.qualityOptions[v as Quality] ?? v,
+  },
+  {
+    key: 'remoteResolution',
+    section: 'display',
+    control: 'choice',
+    options: REMOTE_RESOLUTIONS,
+    label: () => S().options.remoteResolution,
+    hint: () => S().options.remoteResolutionHint,
+    optionLabel: (v) => S().options.remoteResolutionOptions[v as RemoteResolution] ?? v,
+  },
+  range(
+    'remoteWidth',
+    'display',
+    () => S().options.remoteWidth,
+    (v) => S().options.px(Math.round(v)),
+    () => S().options.remoteSizeHint,
+  ),
+  range(
+    'remoteHeight',
+    'display',
+    () => S().options.remoteHeight,
+    (v) => S().options.px(Math.round(v)),
+    () => S().options.remoteSizeHint,
+  ),
+  range(
+    'remoteScale',
+    'display',
+    () => S().options.remoteScale,
+    (v) => S().options.percent(Math.round(v)),
+    () => S().options.remoteScaleHint,
+  ),
+  {
     key: 'fitMode',
     section: 'display',
     control: 'choice',
-    options: ['fit-screen', 'fit-width', 'fit-height', 'one-to-one'],
+    options: ['fit-screen', 'fit-width', 'fit-height', 'one-to-one', 'css-pixels'],
     label: () => S().options.fitMode,
     optionLabel: (v) =>
-      S().fitModes.labels[v as 'fit-screen' | 'fit-width' | 'fit-height' | 'one-to-one'] ?? v,
+      S().fitModes.labels[v as keyof ReturnType<typeof S>['fitModes']['labels']] ?? v,
   },
   sw(
     'matchDeviceSize',
@@ -325,6 +393,12 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     () => S().options.clipboardRemoteToDeviceHint,
   ),
   sw(
+    'clipboardSendOnConnect',
+    'clipboard',
+    () => S().options.clipboardSendOnConnect,
+    () => S().options.clipboardSendOnConnectHint,
+  ),
+  sw(
     'clipboardAutoSendOnFocus',
     'clipboard',
     () => S().options.clipboardAutoSendOnFocus,
@@ -343,12 +417,15 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
   },
 
   // ---- Sound
-  sw(
-    'audioMuted',
-    'sound',
-    () => S().options.audioMuted,
-    () => S().options.audioMutedHint,
-  ),
+  {
+    key: 'audio',
+    section: 'sound',
+    control: 'choice',
+    options: AUDIO_MODES,
+    label: () => S().options.audio,
+    hint: () => S().options.audioHint,
+    optionLabel: (v) => S().options.audioOptions[v as AudioMode] ?? v,
+  },
 ];
 
 export function descriptorsIn(section: SettingSection): SettingDescriptor[] {

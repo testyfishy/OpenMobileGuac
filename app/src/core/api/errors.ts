@@ -68,6 +68,12 @@ interface ServerDetail {
 
 export class GuacApiError extends Error {
   readonly info: GuacErrorInfo;
+  /**
+   * Set by `GuacApi.probe` when no scheme was typed and every https candidate failed: the
+   * caller may offer "Use http instead — not encrypted" and probe again with `allowHttp`.
+   * Nothing was sent over http (AUDIT #11).
+   */
+  httpFallbackAvailable = false;
 
   constructor(info: GuacErrorInfo, options?: ErrorOptions) {
     super(describe(info), options);

@@ -10,7 +10,8 @@ import {
   createSecureStore,
   isNativePlatform,
 } from '../../core/platform.ts';
-import type { KeyValueStore } from '../../core/storage/KeyValueStore.ts';
+import { CacheFileKeyValueStore } from '../../core/storage/CacheFileKeyValueStore.ts';
+import { MemoryKeyValueStore, type KeyValueStore } from '../../core/storage/KeyValueStore.ts';
 import { ProfileStore } from '../../core/storage/ProfileStore.ts';
 import type { SecureStore } from '../../core/storage/SecureStore.ts';
 import { AuthService } from './AuthService.ts';
@@ -63,7 +64,14 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
     : secure.persistent
       ? 'insecure-dev'
       : 'memory';
-  const profiles = new ProfileStore(kv, { secureStore: secure, isEphemeral: isShareServerId });
+  // AUDIT #12: thumbnails of remote screens go to the cache directory (never backed up) on
+  // native, and stay in memory on the web, never in Preferences/localStorage.
+  const profiles = new ProfileStore(kv, {
+    secureStore: secure,
+    isEphemeral: isShareServerId,
+    thumbnails: native ? new CacheFileKeyValueStore() : new MemoryKeyValueStore(),
+  });
+  void profiles.purgeLegacyThumbnails();
   const api = new GuacApi(http, { timeoutMs: 20_000 });
   const probeApi = new GuacApi(http, { timeoutMs: 6_000 });
   const admin = new GuacAdminApi(http, { timeoutMs: 20_000 });
@@ -76,6 +84,7 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
   auth.setCredentialGate(() =>
     lock.ensureUnlocked(strings.lock.credentialReason, strings.lock.cancel),
   );
+  auth.setUnlockWaiter(() => lock.whenUnlocked());
   log.info('app', `started (${native ? 'native' : 'web'}, secrets: ${secretStorage})`);
   return {
     native,

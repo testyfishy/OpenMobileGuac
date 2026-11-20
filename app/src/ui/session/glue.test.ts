@@ -106,18 +106,34 @@ describe('session machine', () => {
     expect(m.phase).toEqual({ kind: 'error', code: null, message: 'Could not reach the server.' });
   });
 
-  it('retries an unexpected close after connecting, with backoff, then gives up', () => {
+  it('retries a network drop after connecting, with backoff, then gives up', () => {
+    // A drop is a tunnel error (WebSocket 1006 → 0x0207) followed by the close.
     let m = run([
       { type: 'connect' },
       { type: 'connected' },
+      { type: 'error', code: 0x0207, source: 'tunnel' },
       { type: 'closed', intentional: false },
     ]);
     expect(m.phase).toMatchObject({ kind: 'reconnecting', attempt: 1, delayMs: 1000 });
     for (let i = 2; i <= 4; i++) {
-      m = run([{ type: 'connect' }, { type: 'closed', intentional: false }], m);
+      m = run(
+        [
+          { type: 'connect' },
+          { type: 'error', code: 0x0207, source: 'tunnel' },
+          { type: 'closed', intentional: false },
+        ],
+        m,
+      );
       expect(m.phase).toMatchObject({ kind: 'reconnecting', attempt: i });
     }
-    m = run([{ type: 'connect' }, { type: 'closed', intentional: false }], m);
+    m = run(
+      [
+        { type: 'connect' },
+        { type: 'error', code: 0x0207, source: 'tunnel' },
+        { type: 'closed', intentional: false },
+      ],
+      m,
+    );
     expect(m.phase.kind).toBe('error');
   });
 
@@ -125,6 +141,7 @@ describe('session machine', () => {
     const m = run([
       { type: 'connect' },
       { type: 'connected' },
+      { type: 'error', code: 0x0207, source: 'tunnel' },
       { type: 'closed', intentional: false },
       { type: 'connect' },
       { type: 'connected' },
@@ -202,7 +219,8 @@ describe('mouse mapping', () => {
     expect(pointerKind('')).toBe('touch');
   });
   it('converts wheel deltas', () => {
-    expect(wheelDeltaPx(3, 1, 800)).toBe(48);
+    // 18 px per line as upstream Mouse.js: one 3-line notch passes the 50 px step.
+    expect(wheelDeltaPx(3, 1, 800)).toBe(54);
     expect(wheelDeltaPx(1, 2, 1000)).toBe(900);
     expect(wheelDeltaPx(12, 0, 1000)).toBe(12);
   });

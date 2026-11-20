@@ -8,12 +8,14 @@ function makeStore() {
   let t = 1000;
   const kv = new MemoryKeyValueStore();
   const secure = new MemorySecureStore();
+  const thumbs = new MemoryKeyValueStore();
   const store = new ProfileStore(kv, {
     secureStore: secure,
     generateId: () => `id${++n}`,
     now: () => t++,
+    thumbnails: thumbs,
   });
-  return { store, kv, secure };
+  return { store, kv, secure, thumbs };
 }
 
 const ref: ConnectionRef = { dataSource: 'postgresql', identifier: '1', type: 'c' };
@@ -41,9 +43,9 @@ describe('ProfileStore extras', () => {
   });
 
   it('thumbnails reject non-image data and can be cleared globally', async () => {
-    const { store, kv } = makeStore();
+    const { store, thumbs } = makeStore();
     const a = await store.add({ name: 'A', ...base });
-    await kv.set(
+    await thumbs.set(
       `profile/${a.id}/thumb/c/postgresql/1`,
       JSON.stringify({ dataUrl: 'javascript:x', at: 1 }),
     );
@@ -51,6 +53,21 @@ describe('ProfileStore extras', () => {
     await store.setThumbnail(a.id, ref2, { dataUrl: 'data:image/png;base64,AA', at: 2 });
     await store.clearThumbnails();
     expect(await store.getThumbnail(a.id, ref2)).toBeUndefined();
+  });
+
+  it('never writes thumbnails to the main store and purges old ones there (AUDIT #12)', async () => {
+    const { store, kv, thumbs } = makeStore();
+    const a = await store.add({ name: 'A', ...base });
+    await kv.set(
+      `profile/${a.id}/thumb/c/postgresql/9`,
+      '{"dataUrl":"data:image/jpeg;base64,A","at":1}',
+    );
+    await store.setThumbnail(a.id, ref, { dataUrl: 'data:image/jpeg;base64,AA', at: 1 });
+    expect((await kv.keys()).filter((k) => k.includes('/thumb/'))).toHaveLength(1);
+    expect(await thumbs.keys(`profile/${a.id}/thumb/`)).toHaveLength(1);
+    await store.purgeLegacyThumbnails();
+    expect((await kv.keys()).filter((k) => k.includes('/thumb/'))).toEqual([]);
+    expect(await store.getThumbnail(a.id, ref)).toBeDefined();
   });
 
   it('recents keep the display name and protocol', async () => {

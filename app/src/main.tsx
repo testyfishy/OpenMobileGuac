@@ -58,8 +58,9 @@ async function boot(): Promise<void> {
   );
   const initialSettings = await services.settings.load();
   applyTheme(initialSettings.theme, services.native);
-  // SRV-6: start locked before the first paint. LockGate re-checks device support and
-  // releases the lock if biometrics / a passcode are no longer available.
+  // SRV-6: start locked before the first paint. The lock fails closed: LockGate never
+  // releases it because biometrics / a passcode are unavailable (AUDIT #3); it explains and
+  // offers Retry instead.
   if (services.native && initialSettings.lock.enabled) {
     services.lock.setEnabled(true);
     services.lock.lock();

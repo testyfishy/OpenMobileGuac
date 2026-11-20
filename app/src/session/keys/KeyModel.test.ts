@@ -495,3 +495,117 @@ describe('combos (KEY-4)', () => {
     ]);
   });
 });
+
+/**
+ * AUDIT #5: chords send what a physical US keyboard sends through `Guacamole.Keyboard`, so
+ * guacd's RDP Shift adjustment (keymaps/en_us_qwerty.keymap: `t` = -shift, `T` = +shift,
+ * `1` = -shift, `!` = +shift; keyboard.c presses/releases Shift to match before the
+ * scancode) leaves the chord intact. Each row: what is sent, and why.
+ */
+describe('Shift in chords and on the key bar (guacd 1.6.0 RDP keymap rule)', () => {
+  const parse = (text: string): Combo => {
+    const r = parseCombo(text);
+    if (!r.ok) throw new Error(r.error);
+    return r.combo;
+  };
+  const T = 0x54;
+  const t = 0x74;
+  const TAB = 0xff09;
+  const ESC = 0xff1b;
+  const comboRows: [string, string[], string][] = [
+    [
+      'Ctrl+Shift+T',
+      [down(CTRL), down(SHIFT), down(T), up(T), up(SHIFT), up(CTRL)],
+      'uppercase T keeps the held Shift (keymap `T` = +shift); `t` would make guacd release it',
+    ],
+    [
+      'Ctrl+T',
+      [down(CTRL), down(t), up(t), up(CTRL)],
+      'no Shift: lowercase, or guacd would add a synthetic Shift (Ctrl+Shift+T)',
+    ],
+    [
+      'Ctrl+Shift+1',
+      [down(CTRL), down(SHIFT), down(0x21), up(0x21), up(SHIFT), up(CTRL)],
+      'Shift+1 is "!" on a US keyboard; keysym `1` (-shift) would drop the Shift',
+    ],
+    [
+      'Ctrl+!',
+      [down(CTRL), down(SHIFT), down(0x21), up(0x21), up(SHIFT), up(CTRL)],
+      'a shifted symbol needs Shift, so it is added as a physical keyboard would',
+    ],
+    [
+      'Alt+Shift+Tab',
+      [down(ALT), down(SHIFT), down(TAB), up(TAB), up(SHIFT), up(ALT)],
+      'Tab has no Shift constraint in base.keymap; never ISO_Left_Tab (unmapped, dropped)',
+    ],
+    [
+      'Ctrl+Shift+Esc',
+      [down(CTRL), down(SHIFT), down(ESC), up(ESC), up(SHIFT), up(CTRL)],
+      'named keys are sent as their base keysym',
+    ],
+    [
+      'Super+Shift+S',
+      [down(SUPER), down(SHIFT), down(0x53), up(0x53), up(SHIFT), up(SUPER)],
+      'Win+Shift+S (snip): uppercase S with Shift held',
+    ],
+    ['Shift+A', [down(SHIFT), down(0x41), up(0x41), up(SHIFT)], 'plain Shift+letter: uppercase'],
+    [
+      'T+Shift+Ctrl',
+      [down(SHIFT), down(CTRL), down(T), up(T), up(CTRL), up(SHIFT)],
+      'modifiers are pressed before the key whatever the written order',
+    ],
+  ];
+
+  it.each(comboRows)('combo %s', (text, expected) => {
+    expect(ev(comboEvents(parse(text)))).toEqual(expected);
+  });
+
+  it('a combo run while the key-bar Shift is locked keeps the case consistent with it', () => {
+    const k = new KeyModel();
+    k.tapModifier('Shift');
+    expect(ev(k.tapModifier('Shift'))).toEqual([down(SHIFT)]); // locked, held on the remote
+    expect(ev(k.runCombo(parse('Ctrl+T')))).toEqual([down(CTRL), down(T), up(T), up(CTRL)]);
+  });
+
+  it('key bar: sticky Shift + "1" sends "!" with Shift held', () => {
+    const k = new KeyModel();
+    k.tapModifier('Shift');
+    expect(ev(k.typeText('1'))).toEqual([down(SHIFT), down(0x21), up(0x21), up(SHIFT)]);
+  });
+
+  it('key bar: sticky Ctrl + Shift + "t" sends Ctrl, Shift, T', () => {
+    const k = new KeyModel();
+    k.tapModifier('Ctrl');
+    k.tapModifier('Shift');
+    expect(ev(k.typeText('t'))).toEqual([
+      down(CTRL),
+      down(SHIFT),
+      down(T),
+      up(T),
+      up(SHIFT),
+      up(CTRL),
+    ]);
+  });
+
+  it('key bar: sticky Shift + "a" sends A; sticky Ctrl + "C" sends lowercase c', () => {
+    const k = new KeyModel();
+    k.tapModifier('Shift');
+    expect(ev(k.typeText('a'))).toEqual([down(SHIFT), down(0x41), up(0x41), up(SHIFT)]);
+    k.tapModifier('Ctrl');
+    expect(ev(k.typeText('C'))).toEqual([down(CTRL), down(0x63), up(0x63), up(CTRL)]);
+  });
+
+  it('key bar: sticky Alt + Shift + Tab key', () => {
+    const k = new KeyModel();
+    k.tapModifier('Alt');
+    k.tapModifier('Shift');
+    expect(ev(k.pressKey('Tab'))).toEqual([
+      down(ALT),
+      down(SHIFT),
+      down(TAB),
+      up(TAB),
+      up(SHIFT),
+      up(ALT),
+    ]);
+  });
+});

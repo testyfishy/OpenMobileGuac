@@ -18,6 +18,7 @@ import {
   IconTrackpad,
   IconView,
   IconVolume,
+  IconEye,
   IconZoomIn,
   IconZoomOut,
   IconZoomReset,
@@ -51,6 +52,7 @@ export interface SessionActionContext {
   readonly keyboardActive: boolean;
   readonly keyBarVisible: boolean;
   readonly audioMuted: boolean;
+  readonly viewOnly: boolean;
   readonly showCtrlAltDel: boolean;
   readonly canMinimize: boolean;
   readonly pasteHint: string;
@@ -70,6 +72,7 @@ export interface SessionActionContext {
   readonly onClipboard: () => void;
   readonly onFiles: () => void;
   readonly onToggleAudio: () => void;
+  readonly onToggleViewOnly: () => void;
   readonly onOptions: () => void;
   readonly onInfo: () => void;
   readonly onMinimize: () => void;
@@ -146,6 +149,9 @@ export function buildSessionActions(c: SessionActionContext): SessionActions {
       label: c.audioMuted ? sessionStrings.toasts.soundOff : short.sound,
       name: c.audioMuted ? t.soundOff : t.soundOn,
       pressed: c.audioMuted,
+    }),
+    'view-only': a('view-only', <IconEye off={false} />, c.onToggleViewOnly, {
+      pressed: c.viewOnly,
     }),
     options: a('options', <IconSliders />, c.onOptions, { opensSheet: true }),
     info: a('info', <IconInfo />, c.onInfo, { opensSheet: true }),

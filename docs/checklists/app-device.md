@@ -140,3 +140,52 @@ Compare each step with the Guacamole web client (Settings › Connections).
       Every server then asks for its password; open sessions closed; in the web client's
       active sessions the app's session is gone (for servers that were reachable). With
       "Remove servers too" ticked, the server list is empty afterwards.
+
+## Re-test after the audit fixes (2026-11-21)
+
+Nothing below has run on a device. iPhone first, then Android.
+
+**App lock (AUDIT #3)**
+
+- [ ] Lock on, cold start: the lock screen is the first thing drawn (no flash of the server
+      list or of a session).
+- [ ] Lock on, "Lock after" set to 5 min: background for 10 s and return. The app is
+      hidden while away (blank cover), then shows again **without** a prompt.
+- [ ] Lock on, background for longer than "Lock after": the lock screen is drawn first on
+      return, before any session frame.
+- [ ] Cancel the Face ID prompt 3 times: the app stays locked; "Try again" works; there is
+      **no** "turn off the lock" button.
+- [ ] Turn the device passcode off (or remove all biometrics) with the lock on, then
+      relaunch: the app stays locked and says biometrics/passcode are not available.
+      "Remove saved sign-ins and turn off the lock" asks first, then closes sessions and
+      deletes passwords, tokens and TOTP keys; servers and settings stay.
+- [ ] Settings › Security: turning the lock **off** asks for Face ID / passcode first;
+      cancelling leaves it on.
+- [ ] While locked, open an `openmobileguac://connect?...` link from Notes: nothing
+      connects until unlocked; after unlocking, "Open … on …?" appears.
+- [ ] While locked, with a session open, turn Wi-Fi off and on: the session does not
+      reconnect (no token use) until unlocked, then reconnects.
+- [ ] Automatic backup due while locked: not written until unlocked.
+
+**Servers, links, backup (AUDIT #1, #2, #11, §3 #8, #9)**
+
+- [ ] Edit a server with a saved password, change the host: a dialog shows old → new
+      address. After "Change address" the server list asks for the password again; the
+      old host's session ended (Active Sessions on the old server).
+- [ ] Add a server as `host:8443` where https fails: the error shows with "Use http
+      instead — not encrypted"; nothing appears in the http server's access log before
+      tapping it.
+- [ ] Deep link to a saved server: "Open <connection> on <server>?" with "Don't ask again for
+      links to this server"; the server options show "Ask before app links connect".
+- [ ] Share link to an `http://` server: the plain-http warning appears before sign-in.
+- [ ] Restore a backup where one server's address was edited (keep the id): the summary
+      says it was added as a new server without saved passwords; the old server keeps its
+      sign-in; nothing is sent to the edited address before signing in there.
+- [ ] Delete a server while signed in, with the server offline: the screen returns at once.
+
+**Android backup and thumbnails (AUDIT #12)**
+
+- [ ] `adb shell bmgr backupnow <package>` reports nothing backed up; a device-to-device
+      transfer to a new phone carries no OpenMobileGuac data.
+- [ ] Thumbnails still appear in "Jump back in" after reopening the app; "Clear cache" in
+      Android app info removes them; turning thumbnails off removes them.

@@ -17,6 +17,7 @@ import {
 } from '../testing/fixtures.ts';
 import { GuacApiError, isGuacApiError, type GuacErrorInfo } from './errors.ts';
 import { GuacApi, TOKEN_HEADER } from './GuacApi.ts';
+import { parseShareLink } from '../links/links.ts';
 
 const profile = { baseUrl: BASE_URL };
 const creds = { username: 'testuser', password: 'pw & =?' };
@@ -327,7 +328,9 @@ describe('GuacApi.probe', () => {
         throw new HttpTransportError('unreachable', req.url, 'refused');
       },
     );
-    expect((await errorInfo(new GuacApi(http).probe('guac.example'))).kind).toBe('tls');
+    expect(
+      (await errorInfo(new GuacApi(http).probe('guac.example', { allowHttp: true }))).kind,
+    ).toBe('tls');
 
     const http2 = new FakeHttpClient().on(
       'GET',
@@ -337,7 +340,9 @@ describe('GuacApi.probe', () => {
         throw new HttpTransportError('unreachable', req.url, 'refused');
       },
     );
-    expect((await errorInfo(new GuacApi(http2).probe('guac.example'))).kind).toBe('not-guacamole');
+    expect(
+      (await errorInfo(new GuacApi(http2).probe('guac.example', { allowHttp: true }))).kind,
+    ).toBe('not-guacamole');
 
     const http3 = new FakeHttpClient().on(
       'GET',
@@ -346,7 +351,31 @@ describe('GuacApi.probe', () => {
         throw new HttpTransportError('unreachable', req.url, 'refused');
       },
     );
-    expect((await errorInfo(new GuacApi(http3).probe('guac.example'))).kind).toBe('unreachable');
+    expect(
+      (await errorInfo(new GuacApi(http3).probe('guac.example', { allowHttp: true }))).kind,
+    ).toBe('unreachable');
+  });
+
+  it('never falls back to http on its own when https fails (AUDIT #11)', async () => {
+    const http = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      (req) => {
+        if (req.url.startsWith('https://')) throw new HttpTransportError('tls', req.url, 'cert');
+        return jsonResponse(200, languagesJson);
+      },
+    );
+    const err = await new GuacApi(http).probe('guac.example:8443').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GuacApiError);
+    expect((err as GuacApiError).info.kind).toBe('tls');
+    expect((err as GuacApiError).httpFallbackAvailable).toBe(true);
+    expect(http.requests.every((r) => r.url.startsWith('https://'))).toBe(true);
+    // Only after the user's explicit choice.
+    const found = await new GuacApi(http).probe('guac.example:8443', { allowHttp: true });
+    expect(found).toEqual({ baseUrl: 'http://guac.example:8443/guacamole', secure: false });
+    // A typed http:// is the user's choice already; no fallback flag needed.
+    const typed = await new GuacApi(http).probe('http://guac.example:8443');
+    expect(typed.secure).toBe(false);
   });
 
   it('rejects unusable input without any request', async () => {
@@ -356,5 +385,50 @@ describe('GuacApi.probe', () => {
       reason: 'empty',
     });
     expect(http.requests).toHaveLength(0);
+  });
+});
+
+describe('session sharing (1.6.0 tunnel REST)', () => {
+  const tunnel = '0b1f6a3e-1111-2222-3333-444455556666';
+  const base = `${session.baseUrl}/api/session/tunnels/${tunnel}/activeConnection`;
+
+  it('lists the sharing profiles of the connection behind the tunnel', async () => {
+    const http = new FakeHttpClient().on('GET', `${base}/connection/sharingProfiles`, () =>
+      jsonResponse(200, {
+        '7': { identifier: '7', name: 'Watch only', primaryConnectionIdentifier: '1' },
+        '3': { identifier: '3', name: 'Collaborate', primaryConnectionIdentifier: '1' },
+      }),
+    );
+    const list = await new GuacApi(http).getTunnelSharingProfiles(session, tunnel);
+    expect(list).toEqual([
+      { identifier: '3', name: 'Collaborate' },
+      { identifier: '7', name: 'Watch only' },
+    ]);
+    expect(http.requests[0]?.headers?.[TOKEN_HEADER]).toBe(session.token);
+  });
+
+  it('builds the web client share link from the sharing credentials', async () => {
+    const http = new FakeHttpClient().on('GET', `${base}/sharingCredentials/7`, () =>
+      jsonResponse(200, {
+        expected: [{ name: 'key', type: 'QUERY_PARAMETER' }],
+        values: { key: 'abc+/=' },
+      }),
+    );
+    const link = await new GuacApi(http).createShareLink(session, tunnel, '7');
+    expect(link).toBe(`${session.baseUrl}/#/?key=abc%2B%2F%3D`);
+    expect(parseShareLink(link)).toEqual({ baseUrl: session.baseUrl, key: 'abc+/=' });
+  });
+
+  it('reports a refused profile as an error', async () => {
+    const http = new FakeHttpClient().on('GET', `${base}/sharingCredentials/9`, () =>
+      jsonResponse(403, {
+        message: 'Permission denied.',
+        type: 'PERMISSION_DENIED',
+        expected: null,
+      }),
+    );
+    await expect(new GuacApi(http).createShareLink(session, tunnel, '9')).rejects.toBeInstanceOf(
+      GuacApiError,
+    );
   });
 });

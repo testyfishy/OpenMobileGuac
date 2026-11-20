@@ -46,9 +46,12 @@ export class SessionAudio {
   private streams = 0;
   private readonly cleanups: (() => void)[] = [];
   private readonly log: (message: string) => void;
+  /** Called when the stream count changes, so the UI (More sheet) updates (AUDIT #15). */
+  private readonly changed: () => void;
 
-  constructor(log: (message: string) => void) {
+  constructor(log: (message: string) => void, changed: () => void = () => undefined) {
     this.log = log;
+    this.changed = changed;
   }
 
   /** Number of audio streams the server opened in this session. */
@@ -87,6 +90,7 @@ export class SessionAudio {
       };
       this.streams++;
       this.log(`Audio stream opened (${mimetype})`);
+      this.changed();
       return player;
     };
   }

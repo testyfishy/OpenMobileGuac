@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { joinUrl, normalizeServerUrl } from './normalizeServerUrl.ts';
+import {
+  joinUrl,
+  normalizeServerUrl,
+  sameServerEndpoint,
+  serverEndpoint,
+} from './normalizeServerUrl.ts';
 
 function urls(input: string): string[] {
   const r = normalizeServerUrl(input);
@@ -72,6 +77,21 @@ describe('normalizeServerUrl', () => {
     ]);
   });
 
+  it('brackets a bare IPv6 address (AUDIT #16)', () => {
+    expect(urls('fe80::1')).toEqual([
+      'https://[fe80::1]/guacamole',
+      'https://[fe80::1]',
+      'http://[fe80::1]/guacamole',
+      'http://[fe80::1]',
+    ]);
+    expect(urls('::1/guacamole')).toEqual(['https://[::1]/guacamole', 'http://[::1]/guacamole']);
+    expect(urls('2001:db8::10')[0]).toBe('https://[2001:db8::10]/guacamole');
+    expect(urls('[fe80::1]:8080')[0]).toBe('https://[fe80::1]:8080/guacamole');
+    // Not an IPv6 literal and not a scheme: "invalid", never "only http(s)".
+    expect(normalizeServerUrl('fe80::zz')).toEqual({ ok: false, reason: 'invalid' });
+    expect(normalizeServerUrl('host:1:2')).toEqual({ ok: false, reason: 'invalid' });
+  });
+
   it('rejects empty, invalid and unsupported input', () => {
     expect(normalizeServerUrl('   ')).toEqual({ ok: false, reason: 'empty' });
     expect(normalizeServerUrl('ftp://guac.example')).toEqual({
@@ -96,5 +116,28 @@ describe('joinUrl', () => {
       'https://guac.example/guacamole/api/tokens',
     );
     expect(joinUrl('https://guac.example/', '/api/tokens')).toBe('https://guac.example/api/tokens');
+  });
+});
+
+describe('serverEndpoint', () => {
+  it('compares scheme, host, port and path, ignoring case of host and trailing slashes', () => {
+    expect(serverEndpoint('https://Guac.Example:443/guacamole/')).toBe(
+      'https://guac.example/guacamole',
+    );
+    expect(
+      sameServerEndpoint('https://guac.example/guacamole', 'https://GUAC.example/guacamole/'),
+    ).toBe(true);
+    expect(
+      sameServerEndpoint('https://guac.example/guacamole', 'http://guac.example/guacamole'),
+    ).toBe(false);
+    expect(
+      sameServerEndpoint('https://guac.example/guacamole', 'https://guac.example:8443/guacamole'),
+    ).toBe(false);
+    expect(
+      sameServerEndpoint('https://guac.example/guacamole', 'https://guac.example/remote'),
+    ).toBe(false);
+    expect(
+      sameServerEndpoint('https://guac.example/guacamole', 'https://other.example/guacamole'),
+    ).toBe(false);
   });
 });

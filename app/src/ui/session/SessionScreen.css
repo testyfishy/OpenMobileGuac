@@ -1855,3 +1855,64 @@
   width: 100%;
   box-sizing: border-box;
 }
+
+/* View-only indicator and "Reconnect to apply" (Quality). Top centre, above the toast. */
+.omg-pills {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(env(safe-area-inset-top, 0px) + var(--omg-dock-top, 0px) + 52px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 29;
+}
+
+.omg-pill {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--_accent, #4a90e2) 60%, transparent);
+  background: var(--_surface);
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.omg-pill svg {
+  width: 18px;
+  height: 18px;
+}
+
+.omg-pill--viewonly {
+  border-color: color-mix(in srgb, var(--_danger) 70%, transparent);
+}
+
+.omg-row--stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.omg-row--stepper .omg-row__text {
+  flex: 1;
+}
+
+.omg-row--stepper .omg-btn--ghost {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 1.25rem;
+}
+
+.omg-more__notice {
+  margin-bottom: 12px;
+  border: 1px solid color-mix(in srgb, var(--_accent, #4a90e2) 55%, transparent);
+  border-radius: var(--_radius);
+  overflow: hidden;
+}
