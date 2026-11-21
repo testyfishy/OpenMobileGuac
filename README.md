@@ -13,7 +13,9 @@ for the specification and [docs/PLAN.md](docs/PLAN.md) for the delivery plan.
 
 > **Why this exists.** There are good Guacamole clients for other platforms, and I respect
 > the people who make them. But I use an iPhone and needed one for iOS, so I made this one
-> myself. All of the source is here if you want to build your own. If you just want to use mine, the iPhone
+> myself. It is an independent work: the app's own code was written for this project, on
+> top of the official Guacamole library, with no code, text or assets from any other client. All
+> of the source is here if you want to build your own. If you just want to use mine, the iPhone
 > and iPad app is published under my Apple developer account (App Store listing in
 > preparation) and the Android APK is on the
 > [Releases page](https://github.com/testyfishy/OpenMobileGuac/releases/latest). Missing a

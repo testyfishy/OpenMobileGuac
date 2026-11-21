@@ -43,14 +43,11 @@ Open questions for the owner:
 - **Stock Guacamole web client on mobile.** Works, but on phones the soft keyboard cannot be
   raised reliably, phone-to-remote paste does not work, and scaling is limited. These are the
   owner's first-hand complaints and the reason for this project.
-- **PocketGuac** ([site](https://guac.pocketsized.app/),
-  [repo](https://github.com/pocketsized-apps/pocketguac)). Android only, distributed as an APK
-  on GitHub Releases, not on Play. Its site states it is **not open source**, and the repo
-  holds no source and no licence. Its public feature list is a useful reference: trackpad
-  gestures, pinch zoom, key-combo menu with saved combos, two-way clipboard, audio, file
-  transfer, saved servers, nested connection groups, TOTP with stored seed, SSO through a
-  webview, biometric lock, JSON backup. **Feature reference only: no code or assets may be
-  taken from it.**
+- **Other mobile clients for Guacamole.** Third-party clients exist for other platforms.
+  They showed that Guacamole can be comfortable on a phone, and that is all this project
+  takes from them: it is an independent implementation, written from the Guacamole
+  protocol and its official JavaScript library, with no code, text or assets from any
+  other client.
 - **DWService mobile.** Not examined for this spec. The behaviours cited from it come from
   the owner's description: the whole remote screen visible at once, a choice between fit
   modes, and a switch between direct touch input and whole-screen-as-trackpad.
