@@ -227,10 +227,23 @@ export class RequestCoordinator implements HttpClient {
 
   private send(req: HttpRequest, origin: string, key: string | undefined): Promise<HttpResponse> {
     const s = this.state(origin);
+    // For a foreground caller the deadline counts from the call, time spent waiting for a
+    // slot included (a sign-in spinner must not wait behind a stuck server twice). Background
+    // reads (badges) keep the full deadline once sent: late is fine for them.
+    const deadline = (req.timeoutMs ?? DEFAULT_TIMEOUT_MS) + this.graceMs;
+    const enqueuedAt = this.now();
+    const timedOut = () =>
+      new HttpTransportError(
+        'timeout',
+        req.url,
+        `No answer within ${Math.round(deadline / 1000)} s`,
+      );
     return new Promise<HttpResponse>((resolve, reject) => {
+      let queueTimer: ReturnType<typeof setTimeout> | undefined;
       const waiter: Waiter = {
         background: req.priority === 'background',
         start: () => {
+          clearTimeout(queueTimer);
           if (key !== undefined && this.queued.get(key) === waiter) this.queued.delete(key);
           // Read at start: a queued background request may have been promoted.
           const background = waiter.background;
@@ -246,17 +259,11 @@ export class RequestCoordinator implements HttpClient {
             this.pump(origin, s);
             return true;
           };
-          const deadline = (req.timeoutMs ?? DEFAULT_TIMEOUT_MS) + this.graceMs;
+          const left = queueTimer ? Math.max(1, enqueuedAt + deadline - this.now()) : deadline;
           const timer = setTimeout(() => {
             if (!finish()) return;
-            reject(
-              new HttpTransportError(
-                'timeout',
-                req.url,
-                `No answer within ${Math.round(deadline / 1000)} s`,
-              ),
-            );
-          }, deadline);
+            reject(timedOut());
+          }, left);
           let sent: Promise<HttpResponse>;
           try {
             sent = this.inner.request(req);
@@ -280,6 +287,18 @@ export class RequestCoordinator implements HttpClient {
       } else {
         s.waiting.push(waiter);
         if (key !== undefined) this.queued.set(key, waiter);
+        // A foreground request still without a slot at the deadline: the caller gets its
+        // answer, nothing is sent.
+        if (!waiter.background) {
+          queueTimer = setTimeout(() => {
+            const i = s.waiting.indexOf(waiter);
+            if (i < 0) return;
+            s.waiting.splice(i, 1);
+            if (key !== undefined && this.queued.get(key) === waiter) this.queued.delete(key);
+            reject(timedOut());
+            this.pump(origin, s);
+          }, deadline);
+        }
       }
     });
   }

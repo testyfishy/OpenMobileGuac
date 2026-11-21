@@ -264,6 +264,18 @@ describe('pre-release review R7: secrets need a sealed address', () => {
   });
 });
 
+describe('secrets sealed with a trusted certificate', () => {
+  const backup = createBackup({ profiles: [data(profile('a'))], appVersion: '0', now: 0 });
+  const plan = planRestore([], backup, 'merge', () => 'never');
+
+  it('releases nothing when the plain part dropped the pin the sealed part names', () => {
+    const sealed = {
+      a: { password: 'pa', baseUrl: 'https://guac.example/guacamole', tlsPin: 'ab'.repeat(32) },
+    };
+    expect(secretsToRestore(plan, backup, sealed)).toEqual([]);
+  });
+});
+
 describe('pre-release review R6: security settings are not restored', () => {
   const risky: ProfileData = {
     ...data(profile('a')),

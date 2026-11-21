@@ -298,8 +298,10 @@ export function secretsToRestore(
     if (!server) continue;
     if (s.baseUrl === undefined || !sameServerEndpoint(s.baseUrl, server.baseUrl)) continue;
     // SRV-8: a password must never reach a certificate the user did not trust for it. When
-    // the plain part names a trusted certificate, the sealed part must name the same one.
-    if (server.tlsPin && s.tlsPin !== server.tlsPin.sha256) continue;
+    // the plain part names a trusted certificate, the sealed part must name the same one, and
+    // a pin sealed with the password must not have been dropped from the (unauthenticated)
+    // plain part, or the password would go out over system trust.
+    if ((server.tlsPin || s.tlsPin) && server.tlsPin?.sha256 !== s.tlsPin) continue;
     out.push({
       id,
       ...(s.password ? { password: s.password } : {}),

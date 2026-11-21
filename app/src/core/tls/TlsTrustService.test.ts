@@ -281,6 +281,49 @@ describe('PinRoutingHttpClient', () => {
     expect(err).toMatchObject({ kind: 'tls', der: s.presented.der });
   });
 
+  it('keeps a pinned server pinned when the profiles cannot be read', async () => {
+    const s = await setup();
+    await s.store.add({ name: 'A', baseUrl: HOST });
+    await s.tls.trust((await s.tls.check(HOST)).presented);
+    const system = systemClient();
+    const http = s.tls.wrapHttpClient(system);
+    vi.spyOn(s.store, 'list').mockRejectedValue(new Error('storage read failed'));
+    const res = await http.request({ method: 'POST', url: `${HOST}/api/tokens` });
+    expect(res.connection).toEqual({ path: 'pinned' });
+    expect(s.requests[0]?.pins).toEqual([s.shaA]);
+    expect(system.calls).toHaveLength(0);
+  });
+
+  it('sends nothing over system trust when the profiles were never read', async () => {
+    const s = await setup();
+    await s.store.add({ name: 'A', baseUrl: HOST });
+    await s.tls.trust((await s.tls.check(HOST)).presented);
+    // A fresh service (as after a restart) whose first read of the profiles fails.
+    const tls = new TlsTrustService({ plugin: s.plugin, store: s.store });
+    const system = systemClient();
+    const http = tls.wrapHttpClient(system);
+    vi.spyOn(s.store, 'list').mockRejectedValue(new Error('storage read failed'));
+    await expect(http.request({ method: 'POST', url: `${HOST}/api/tokens` })).rejects.toMatchObject(
+      { kind: 'unreachable' },
+    );
+    expect(system.calls).toHaveLength(0);
+    expect(s.requests).toHaveLength(0);
+  });
+
+  it('a failed read does not answer "no pin" from a cache that may be stale', async () => {
+    const s = await setup();
+    await s.store.add({ name: 'A', baseUrl: HOST });
+    const system = systemClient();
+    const http = s.tls.wrapHttpClient(system);
+    // A good read found no pin; a later failed read cannot tell whether one was saved since.
+    expect(await s.tls.pinsFor(HOST)).toEqual([]);
+    vi.spyOn(s.store, 'list').mockRejectedValue(new Error('storage read failed'));
+    await expect(http.request({ method: 'GET', url: `${HOST}/api/x` })).rejects.toMatchObject({
+      kind: 'unreachable',
+    });
+    expect(system.calls).toHaveLength(0);
+  });
+
   it('maps other native failures to transport error kinds', async () => {
     const s = await setup();
     await s.store.add({ name: 'A', baseUrl: HOST });

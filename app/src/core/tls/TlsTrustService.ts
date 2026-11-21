@@ -130,7 +130,12 @@ export class TlsTrustService {
     return pin ? [pin.sha256] : [];
   }
 
-  /** Fingerprints trusted for `url`'s origin, after refreshing from the profiles. */
+  /**
+   * Fingerprints trusted for `url`'s origin, after refreshing from the profiles. Fails closed:
+   * when the profiles cannot be read, a pin already known for that address still applies,
+   * and otherwise this rejects (the cache may predate a pin just saved, and an empty answer
+   * would send the token or password over system trust).
+   */
   async pinsFor(url: string): Promise<readonly string[]> {
     if (!this.plugin || pinOrigin(url) === undefined) return [];
     // Requests that start together share one re-read of the profiles: a burst of REST calls
@@ -139,7 +144,11 @@ export class TlsTrustService {
     this.refreshing ??= this.refresh().finally(() => {
       this.refreshing = undefined;
     });
-    await this.refreshing;
+    try {
+      await this.refreshing;
+    } catch (err) {
+      if (this.pinsForSync(url).length === 0) throw err;
+    }
     return this.pinsForSync(url);
   }
 

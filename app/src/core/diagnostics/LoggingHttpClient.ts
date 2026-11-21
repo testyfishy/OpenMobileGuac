@@ -68,11 +68,15 @@ export function describeConnection(c: HttpConnectionInfo | undefined): string {
   return `, ${parts.join(', ')}`;
 }
 
-/** `https://host:port/path` with the query and fragment removed. */
+/**
+ * `https://host:port/path` with the query and fragment removed, and the user or group name
+ * after `/users/` or `/userGroups/` replaced (a change of password puts it in the path).
+ */
 export function describeUrl(raw: string): string {
   try {
     const u = new URL(raw);
-    return `${u.protocol}//${u.host}${u.pathname}`;
+    const path = u.pathname.replace(/(\/users|\/userGroups)\/[^/]+/g, '$1/<user>');
+    return `${u.protocol}//${u.host}${path}`;
   } catch {
     return '(invalid url)';
   }

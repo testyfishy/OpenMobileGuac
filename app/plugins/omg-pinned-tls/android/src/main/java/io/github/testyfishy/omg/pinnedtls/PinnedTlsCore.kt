@@ -250,7 +250,9 @@ class PinnedSocket(
     override fun onMessage(webSocket: WebSocket, bytes: ByteString) = enqueue(bytes.utf8())
 
     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-        webSocket.close(code, null)
+        // Echo a code OkHttp accepts: the peer's may be reserved (1005 for an empty Close frame),
+        // and close() throws on those. onClosed still reports the peer's own code.
+        webSocket.close(1000, null)
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {

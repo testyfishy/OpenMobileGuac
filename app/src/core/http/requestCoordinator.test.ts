@@ -227,6 +227,56 @@ describe('RequestCoordinator', () => {
     // A late answer changes nothing.
     m.pending[0]?.resolve(ok());
   });
+
+  it('counts the time spent waiting for a slot against the deadline', async () => {
+    vi.useFakeTimers();
+    const m = manualClient();
+    const c = new RequestCoordinator(m.client, { maxPerOrigin: 1, deadlineGraceMs: 500 });
+    const slow = { method: 'GET', url: `${BASE}/api/slow`, timeoutMs: 10_000 } as const;
+    void c.request(slow).catch(() => undefined);
+    // Never gets a slot: times out without being sent.
+    const never = c.request({ method: 'POST', url: `${BASE}/api/tokens`, timeoutMs: 1000 });
+    const neverErr = never.catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(1499);
+    expect(m.pending).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await neverErr).toMatchObject({ kind: 'timeout' });
+    expect(m.pending).toHaveLength(1);
+    // Gets a slot after waiting 1 s: only the 1.5 s left of its deadline remain.
+    const late = c.request({ method: 'POST', url: `${BASE}/api/x`, timeoutMs: 2000 });
+    const lateErr = late.catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(1000);
+    m.pending[0]?.resolve(ok());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(m.pending[1]?.req.url).toBe(`${BASE}/api/x`);
+    await vi.advanceTimersByTimeAsync(1499);
+    expect(c.activeCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await lateErr).toMatchObject({ kind: 'timeout' });
+    expect(c.activeCount).toBe(0);
+  });
+
+  it('lets a queued background read wait, then gives it the full deadline', async () => {
+    vi.useFakeTimers();
+    const m = manualClient();
+    const c = new RequestCoordinator(m.client, { maxPerOrigin: 1, deadlineGraceMs: 500 });
+    void c.request({ method: 'GET', url: `${BASE}/api/slow`, timeoutMs: 10_000 });
+    const badge = c.request({
+      method: 'GET',
+      url: `${BASE}/api/badge`,
+      timeoutMs: 1000,
+      priority: 'background',
+    });
+    const badgeErr = badge.catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(5000);
+    m.pending[0]?.resolve(ok());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(m.pending[1]?.req.url).toBe(`${BASE}/api/badge`);
+    await vi.advanceTimersByTimeAsync(1499);
+    expect(c.activeCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await badgeErr).toMatchObject({ kind: 'timeout' });
+  });
 });
 
 function fakePlugin(impl: (o: NativeSystemRequest) => Promise<NativeTlsResponse>) {

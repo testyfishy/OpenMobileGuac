@@ -143,7 +143,14 @@ function parseOtpauthUri(text: string): TotpParams {
   if (!secretRaw) throw new TotpParseError('uri', 'The URI has no secret');
   const secret = decodeBase32(secretRaw);
   if (secret.length < 10) throw new TotpParseError('short', 'Secret is too short');
-  const label = decodeURIComponent(url.pathname.replace(/^\/+/, '').replace(/^totp\/?/i, ''));
+  const rawLabel = url.pathname.replace(/^\/+/, '').replace(/^totp\/?/i, '');
+  let label: string;
+  try {
+    label = decodeURIComponent(rawLabel);
+  } catch {
+    // A malformed `%` escape: keep the label as written rather than reject a usable key.
+    label = rawLabel;
+  }
   const [labelIssuer, labelAccount] = label.includes(':')
     ? [label.slice(0, label.indexOf(':')), label.slice(label.indexOf(':') + 1)]
     : [undefined, label];

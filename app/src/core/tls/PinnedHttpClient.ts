@@ -94,7 +94,19 @@ export class PinRoutingHttpClient implements HttpClient {
   }
 
   async request(req: HttpRequest): Promise<HttpResponse> {
-    const pins = await this.lookup.pinsFor(req.url).catch(() => []);
+    let pins: readonly string[];
+    try {
+      pins = await this.lookup.pinsFor(req.url);
+    } catch (err) {
+      // Fail closed: without knowing the pins, a pinned server must not get the request over
+      // system trust.
+      throw new HttpTransportError(
+        'unreachable',
+        req.url,
+        'Could not read the trusted certificates',
+        { cause: err },
+      );
+    }
     if (pins.length === 0) return this.system.request(req);
     return pinnedRequest(this.plugin, req, pins);
   }

@@ -112,6 +112,14 @@ describe('parseTotpInput', () => {
     expect(p.secret).toEqual(SEEDS.SHA1);
   });
 
+  it('keeps a label with a malformed % escape as written', () => {
+    const p = parseTotpInput(
+      'otpauth://totp/Acme:%E0%A4%A?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+    );
+    expect(p).toMatchObject({ issuer: 'Acme', account: '%E0%A4%A' });
+    expect(p.secret).toEqual(SEEDS.SHA1);
+  });
+
   it('round-trips through the stored form', () => {
     const p = parseTotpInput('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', { digits: 7 });
     const again = parseTotpInput(serializeTotp(p));

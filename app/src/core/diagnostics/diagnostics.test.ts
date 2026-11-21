@@ -96,6 +96,15 @@ describe('describeUrl', () => {
       'https://guac.example/guacamole/api/tokens',
     );
   });
+
+  it('hides the user or group name in the path', () => {
+    expect(
+      describeUrl('https://guac.example/guacamole/api/session/data/pg/users/someone/password'),
+    ).toBe('https://guac.example/guacamole/api/session/data/pg/users/<user>/password');
+    expect(describeUrl('https://guac.example/g/api/session/data/pg/userGroups/staff')).toBe(
+      'https://guac.example/g/api/session/data/pg/userGroups/<user>',
+    );
+  });
 });
 
 describe('device info', () => {
