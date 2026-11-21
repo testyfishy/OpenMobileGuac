@@ -47,6 +47,13 @@ import type { KeyEvent, KeyModel } from './KeyModel.ts';
 
 export const SENTINEL_CHAR = '​';
 export const DEFAULT_SENTINEL = SENTINEL_CHAR;
+/**
+ * Sentinel for a `keepContext` field: a line break. A zero-width space is not white space,
+ * so a keyboard app sees it as part of the first word (which it then does not recognise or
+ * correct) and not as the start of a sentence. After a line break the first word is a
+ * word of its own and a sentence start. Line breaks are never stripped from typed text.
+ */
+export const CONTEXT_SENTINEL = '\n';
 
 export interface TextInputOptions {
   /** Field content that represents "empty". Must be non-empty. */
@@ -138,7 +145,8 @@ export function diffTextInput(
   const sentinelChars = new Set(cps(sentinel));
   const text = b
     .slice(p)
-    .filter((c) => !sentinelChars.has(c))
+    // A line break is always real typing (Enter), even when the sentinel is one.
+    .filter((c) => c === '\n' || !sentinelChars.has(c))
     .join('');
 
   if (word && !opts.flush && backspaces === 0 && value.startsWith(sentinel)) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { KEYSYM, KeyModel } from './KeyModel.ts';
 import {
+  CONTEXT_SENTINEL,
   DEFAULT_SENTINEL,
   caretResync,
   diffTextInput,
@@ -373,5 +374,45 @@ describe('diffTextInput keepContext (autocorrect)', () => {
     const u = diffTextInput(sentence, sentence + 'w', false, opts);
     expect(u).toMatchObject({ text: '', backspaces: 0, baseline: sentence, reset: false });
     expect(diffTextInput(sentence, sentence + 'we ', false, opts).text).toBe('we ');
+  });
+});
+
+describe('diffTextInput with the line-break sentinel (autocorrect field)', () => {
+  const N = CONTEXT_SENTINEL;
+  const opts = { keepContext: true, sentinel: N } as const;
+
+  it('sends a correction of the first word', () => {
+    const { remote } = session(
+      [
+        [N + 'teh', false],
+        [N + 'the ', false],
+      ],
+      opts,
+    );
+    expect(remote).toBe('the ');
+  });
+
+  it('sends Enter and starts afresh', () => {
+    const u = diffTextInput(N + 'hello', N + 'hello\n', false, opts);
+    expect(u).toMatchObject({ backspaces: 0, text: '\n', reset: true, baseline: N });
+  });
+
+  it('sends Enter typed into the empty field', () => {
+    const u = diffTextInput(N, N + '\n', false, opts);
+    expect(u).toMatchObject({ backspaces: 0, text: '\n', reset: true, baseline: N });
+  });
+
+  it('Backspace in the empty field reaches the remote', () => {
+    const u = diffTextInput(N, '', false, opts);
+    expect(u).toMatchObject({ backspaces: 1, text: '', reset: true, baseline: N });
+  });
+
+  it('a field left over from the other sentinel is replaced without retyping', () => {
+    const u = diffTextInput(S + 'ab', S + 'abc', false, opts);
+    expect(u).toMatchObject({ backspaces: 0, text: 'c', reset: true, baseline: N });
+  });
+
+  it('the default sentinel still never types a zero-width space', () => {
+    expect(diffTextInput('', S + 'a', false).text).toBe('a');
   });
 });

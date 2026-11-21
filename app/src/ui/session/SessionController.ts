@@ -46,6 +46,8 @@ import {
   type ModifierState,
 } from '../../session/keys/KeyModel.ts';
 import {
+  CONTEXT_SENTINEL,
+  DEFAULT_SENTINEL,
   caretResync,
   diffTextInput,
   initialTextInput,
@@ -337,6 +339,8 @@ export class SessionController {
   private pointerLocked = false;
   private hardwareKeyboardSeen = false;
   private baseline = initialTextInput();
+  /** Counts for one diagnostics line per keyboard session (never what was typed). */
+  private typing = newTypingCounts();
   private composing = false;
   /** A flush was asked for during a composition: it runs when the composition ends. */
   private flushAfterComposition = false;
@@ -1864,7 +1868,7 @@ export class SessionController {
       if (newBits) {
         // Text held by commit-on-word goes first; lazy hardware Ctrl/Alt apply to the
         // click / drag / wheel (Ctrl+click, Ctrl+wheel, Alt+drag).
-        this.flushText();
+        this.flushText(false, 'tap');
         const mods = this.hwOut(this.hw.flush());
         if (mods.length > 0) this.sendKeyEvents(mods);
       }
@@ -2077,7 +2081,7 @@ export class SessionController {
 
   /** Before a click: send text held by commit-on-word and press lazy hardware modifiers. */
   private flushBeforeClick(): void {
-    this.flushText();
+    this.flushText(false, 'tap');
     const mods = this.hwOut(this.hw.flush());
     if (mods.length > 0) this.sendKeyEvents(mods);
   }
@@ -2142,11 +2146,21 @@ export class SessionController {
     return (this.els?.chromeRoot.querySelector('[role="dialog"]') ?? null) !== null;
   }
 
-  private resetField(): void {
+  /**
+   * What the empty field holds: with a kept sentence, a line break, so the keyboard app
+   * treats the first word as a word and a sentence start (see `CONTEXT_SENTINEL`).
+   */
+  private sentinel(): string {
+    return this.keepsTypingContext() ? CONTEXT_SENTINEL : DEFAULT_SENTINEL;
+  }
+
+  private resetField(cause?: TypingRestart): void {
     const field = this.els?.field;
     if (!field) return;
     this.flushAfterComposition = false;
-    this.baseline = initialTextInput();
+    const sentinel = this.sentinel();
+    if (cause && field.value !== sentinel) this.typing.restarts[cause]++;
+    this.baseline = initialTextInput({ sentinel });
     field.value = this.baseline;
     caretToEnd(field);
   }
@@ -2155,11 +2169,18 @@ export class SessionController {
     const field = this.els?.field;
     if (!field) return;
     const keepContext = this.keepsTypingContext();
+    const sentinel = this.sentinel();
     const update = diffTextInput(this.baseline, field.value, composing, {
+      sentinel,
       commit: this.settings.textInputMode,
       flush,
       keepContext,
     });
+    // The keyboard rewrote text already sent (a correction, a double-space full stop).
+    if (update.backspaces > 0 && update.text !== '') this.typing.rewrites++;
+    if (update.reset && keepContext) {
+      this.typing.restarts[update.baseline === sentinel ? 'line' : 'trim']++;
+    }
     // A sticky modifier turns the text into a shortcut (Ctrl+A): what the field holds no
     // longer mirrors the remote.
     const chord =
@@ -2171,7 +2192,25 @@ export class SessionController {
     if (update.reset) field.value = update.baseline;
     if (update.reset || !composing) caretToEnd(field);
     this.sendKeyEvents(events);
-    if (chord && !composing) this.resetField();
+    if (chord && !composing) this.resetField('key');
+  }
+
+  /** One diagnostics line per keyboard session: counts only, never what was typed. */
+  private logTyping(): void {
+    const c = this.typing;
+    this.typing = newTypingCounts();
+    if (c.inputs === 0) return;
+    const s = this.settings;
+    const restarts = Object.entries(c.restarts)
+      .filter(([, n]) => n > 0)
+      .map(([cause, n]) => `${n} ${cause}`)
+      .join(', ');
+    this.log(
+      'info',
+      `Typing (autocorrect ${s.keyboardAutocorrect ? 'on' : 'off'}, capitals ${s.keyboardCapitals ? 'on' : 'off'}, ${s.textInputMode}): ` +
+        `${c.inputs} inputs, ${c.corrections} corrections by the keyboard (${c.firstWord} in a first word), ` +
+        `${c.rewrites} rewrites sent; fresh starts: ${restarts || 'none'}`,
+    );
   }
 
   /** Autocorrect / sentence capitals: the field keeps the sentence, not just the word. */
@@ -2186,7 +2225,7 @@ export class SessionController {
    * modifier key alone moves nothing on the remote).
    * During a composition the field must not be touched: the flush runs when it ends.
    */
-  private flushText(keepContext = false): void {
+  private flushText(keepContext = false, cause: TypingRestart = 'key'): void {
     if (this.composing) {
       this.flushAfterComposition = true;
       return;
@@ -2196,8 +2235,8 @@ export class SessionController {
     if (this.settings.textInputMode === 'word' && field.value !== this.baseline) {
       this.processField(false, true);
     }
-    if (!keepContext && this.keepsTypingContext() && field.value !== initialTextInput()) {
-      this.resetField();
+    if (!keepContext && this.keepsTypingContext() && field.value !== this.sentinel()) {
+      this.resetField(cause);
     }
   }
 
@@ -2214,19 +2253,20 @@ export class SessionController {
     this.caretTimer = setTimeout(() => {
       this.caretTimer = null;
       if (document.activeElement !== field || this.composing || field.value !== value) return;
-      if (field.value !== this.baseline) this.flushText();
+      if (field.value !== this.baseline) this.flushText(false, 'caret');
       const r = caretResync(
         field.value,
         field.selectionStart ?? field.value.length,
         field.selectionEnd ?? field.value.length,
         this.composing,
+        this.sentinel(),
       );
       if (r.arrows < 0 && !this.dialogOpen()) {
         const events: KeyEvent[] = [];
         for (let i = 0; i < -r.arrows; i++) events.push(...this.keys.pressKey('Left'));
         this.sendKeyEvents(events);
       }
-      if (r.reset) this.resetField();
+      if (r.reset) this.resetField('caret');
       else if (r.restoreCaret) caretToEnd(field);
     }, CARET_SETTLE_MS);
   }
@@ -2388,8 +2428,13 @@ export class SessionController {
       // A menu (dialog) is open over the desktop: the soft keyboard may still be up, but
       // what it types must not reach the remote. Never touch the field mid-composition.
       if (this.dialogOpen()) {
-        if (!composing) this.resetField();
+        if (!composing) this.resetField('menu');
         return;
+      }
+      this.typing.inputs++;
+      if ((e as InputEvent).inputType === 'insertReplacementText') {
+        this.typing.corrections++;
+        if (inFirstWord(this.baseline, field.value)) this.typing.firstWord++;
       }
       this.processField(composing);
     });
@@ -2399,7 +2444,8 @@ export class SessionController {
       this.publish();
     });
     this.on(field, 'blur', () => {
-      this.flushText();
+      this.flushText(false, 'blur');
+      this.logTyping();
       this.composing = false;
       this.keys.clearOneShot();
       this.measure();
@@ -2530,7 +2576,7 @@ export class SessionController {
     }
     if (r.events.length === 0) return;
     // A modifier alone (Shift for a capital) keeps the sentence the keyboard works with.
-    if (type === 'down' && !r.toField) this.flushText(isModifierKey(e.key));
+    if (type === 'down' && !r.toField) this.flushText(isModifierKey(e.key), 'hardware');
     this.sendKeyEvents(this.hwOut(r.events));
   }
 
@@ -2706,6 +2752,34 @@ function pickKey(e: KeyboardEvent) {
     shiftKey: e.shiftKey,
     isComposing: e.isComposing,
   };
+}
+
+/** Why the kept sentence was dropped and the keyboard app started afresh. */
+type TypingRestart = 'tap' | 'key' | 'hardware' | 'caret' | 'menu' | 'blur' | 'line' | 'trim';
+
+interface TypingCounts {
+  inputs: number;
+  corrections: number;
+  firstWord: number;
+  rewrites: number;
+  restarts: Record<TypingRestart, number>;
+}
+
+function newTypingCounts(): TypingCounts {
+  return {
+    inputs: 0,
+    corrections: 0,
+    firstWord: 0,
+    rewrites: 0,
+    restarts: { tap: 0, key: 0, hardware: 0, caret: 0, menu: 0, blur: 0, line: 0, trim: 0 },
+  };
+}
+
+/** The change from `before` to `after` starts in the first word of the field. */
+function inFirstWord(before: string, after: string): boolean {
+  let p = 0;
+  while (p < before.length && p < after.length && before[p] === after[p]) p++;
+  return !/\s/u.test(before.slice(1, p));
 }
 
 function caretToEnd(field: HTMLTextAreaElement): void {

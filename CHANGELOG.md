@@ -11,6 +11,17 @@ not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](doc
 
 ## [Unreleased]
 
+### Fixed
+
+- Autocorrect / Capitalise sentences: the hidden field now starts with a line break instead
+  of a zero-width space, so the keyboard app treats the first word after a tap, Enter or a
+  key bar key as a word of its own and as a sentence start. Not confirmed on a device yet.
+
+### Changed
+
+- Diagnostics: one "Typing" line each time the keyboard closes, with counts only (inputs,
+  corrections by the keyboard, and why the kept sentence was dropped), never what was typed.
+
 ## [1.1.0] - 2026-11-21
 
 ### Added
