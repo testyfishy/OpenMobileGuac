@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   stepsFromText,
   stepsToText,
+  type ComboDraft,
   type ComboStep,
   type SavedCombo,
 } from '../../session/keys/ComboLibrary.ts';
@@ -13,6 +14,9 @@ import { comboPreview } from './keySetNames.ts';
 import { IconArrow, IconTrash } from './icons.tsx';
 import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
+
+/** `kept` key of a draft for a combo not saved yet. */
+const NEW_COMBO = '';
 
 export interface ComboMenuProps {
   /** Saved combos (the app's key library). */
@@ -44,6 +48,7 @@ export function ComboMenu({
   onClose,
 }: ComboMenuProps) {
   const [mode, setMode] = useState<Mode>(onRun ? { kind: 'run' } : { kind: 'edit' });
+  const [kept, setKept] = useState<{ key: string; draft: ComboDraft } | null>(null);
   const t = sessionStrings.combos;
   const savedTexts = new Set(combos.map((c) => stepsToText(c.steps)));
   const legacyLeft = legacy
@@ -57,26 +62,39 @@ export function ComboMenu({
 
   if (mode.kind === 'build') {
     const editing = mode.combo;
+    const key = editing?.id ?? NEW_COMBO;
+    const toList = () => setMode({ kind: 'edit' });
+    const done = () => {
+      setKept(null);
+      toList();
+    };
     return (
       <ComboBuilder
         initial={editing}
         id={editing?.id ?? newId()}
+        initialDraft={kept?.key === key ? kept.draft : undefined}
         onSave={(combo) => {
           onLibrary({ type: 'save-combo', combo });
-          setMode({ kind: 'edit' });
+          done();
         }}
         {...(editing
           ? {
               onDelete: () => {
                 onLibrary({ type: 'delete-combo', id: editing.id });
-                setMode({ kind: 'edit' });
+                done();
               },
             }
           : {})}
         {...(onRun
           ? { onTry: (steps: readonly ComboStep[]) => onRun(steps, comboPreview(steps)) }
           : {})}
-        onClose={() => setMode({ kind: 'edit' })}
+        // Back returns one level, to the combo list (not to the sheet that opened this
+        // menu), and keeps the unsaved work for when this combo is opened again.
+        onBack={(draft) => {
+          setKept({ key, draft });
+          toList();
+        }}
+        onClose={toList}
       />
     );
   }

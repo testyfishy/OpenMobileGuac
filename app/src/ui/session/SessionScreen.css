@@ -13,6 +13,8 @@
   --_accent-text: var(--omg-accent-text, #ffffff);
   --_border: var(--omg-border, rgba(255, 255, 255, 0.14));
   --_danger: var(--omg-danger, #ff5d5d);
+  /* Fill behind white text ("Tap again"): the dark theme's light red is too pale for it. */
+  --_danger-fill: var(--omg-danger-strong, #b3261e);
   --_radius: var(--omg-radius, 12px);
   --_kb: var(--omg-kb-cover, 0px);
   --_dur: 160ms;
@@ -314,7 +316,7 @@
 }
 
 .omg-tool--confirm {
-  background: var(--_danger);
+  background: var(--_danger-fill);
   color: #fff;
 }
 
@@ -984,7 +986,7 @@
 .omg-kbe-row__select {
   flex: 1;
   justify-content: flex-start;
-  min-height: 36px;
+  min-height: 44px;
 }
 
 .omg-kbe-keys {
@@ -1090,8 +1092,8 @@
 }
 
 .omg-tile--danger.omg-tile--on {
-  background: var(--_danger);
-  border-color: var(--_danger);
+  background: var(--_danger-fill);
+  border-color: var(--_danger-fill);
   color: #fff;
 }
 
@@ -1168,7 +1170,7 @@
 }
 
 .omg-crumb {
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 8px;
   background: transparent;
   font-size: 14px;
@@ -1243,8 +1245,9 @@
   }
 }
 
+/* Small text and padding; the target stays 44 px tall. */
 .omg-btn--small {
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 10px;
   font-size: 13px;
 }
@@ -1549,10 +1552,29 @@
   overflow-y: auto;
 }
 
+/* A fixed width: a label that changes (pointer mode, sound, "tap again") never widens the
+   column, which would refit the desktop. Icons only, this is the width it always had. */
 .omg-toolbar--dock-left .omg-tool,
 .omg-toolbar--dock-right .omg-tool {
   flex: none;
+  width: 48px;
   min-width: 48px;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.omg-toolbar--dock-left .omg-tool__label,
+.omg-toolbar--dock-right .omg-tool__label {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* The camera cutout is on the other side: this side's safe area only clears the rounded
@@ -1730,7 +1752,7 @@
 }
 
 .omg-row--danger.omg-row--confirm {
-  background: var(--_danger);
+  background: var(--_danger-fill);
   color: #fff;
 }
 
@@ -1746,6 +1768,15 @@
 
 .omg-setting + .omg-setting {
   border-top: 1px solid color-mix(in srgb, var(--_border) 50%, transparent);
+}
+
+/* A setting with no effect right now (see `settingEnabled`): dimmed, not editable. */
+.omg-setting-inactive {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0.55;
 }
 
 .omg-override {

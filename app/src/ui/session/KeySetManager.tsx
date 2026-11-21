@@ -21,6 +21,7 @@ import { KeyBarEditor } from './KeyBarEditor.tsx';
 import { keySetName, keySetNameIn, keysFileName } from './keySetNames.ts';
 import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
+import { SheetBackContext } from './sheetBack.ts';
 
 function keyCount(set: KeySet): number {
   return set.rows.reduce((n, r) => n + r.length, 0);
@@ -104,14 +105,18 @@ export function KeySetManager(p: KeySetManagerProps) {
   if (view.kind === 'edit') {
     const set = lib.sets.find((s) => s.id === view.id);
     if (set) {
+      const toList = () => setView({ kind: 'list' });
+      // Back returns one level, to the key set list (edits are already saved).
       return (
-        <KeyBarEditor
-          title={k.editTitle(set.name)}
-          rows={set.rows}
-          combos={lib.combos}
-          onChange={(rows) => act({ type: 'set-rows', id: set.id, rows })}
-          onClose={() => setView({ kind: 'list' })}
-        />
+        <SheetBackContext.Provider value={toList}>
+          <KeyBarEditor
+            title={k.editTitle(set.name)}
+            rows={set.rows}
+            combos={lib.combos}
+            onChange={(rows) => act({ type: 'set-rows', id: set.id, rows })}
+            onClose={toList}
+          />
+        </SheetBackContext.Provider>
       );
     }
   }

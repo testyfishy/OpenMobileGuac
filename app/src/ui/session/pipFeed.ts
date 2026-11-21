@@ -101,6 +101,24 @@ export function pipWindowAfter(active: boolean, event: string | undefined): bool
   return active;
 }
 
+/**
+ * Whether the native side refused to open the window, from what `start()` returned. It
+ * returns right after asking, before the window is up, so `active: false` alone is not a
+ * refusal; `error` is not either (it keeps the last problem, maybe an old one). Pure.
+ */
+export function pipOpenRefused(status: PipStatus): boolean {
+  if (status.supported === false || status.prepared === false) return true;
+  return status.active !== true && status.possible === false;
+}
+
+/** How long after an open a `failed` event is taken as that open failing. */
+export const PIP_OPEN_FAIL_MS = 5000;
+
+/** Whether a plugin `state` event says the window asked for at `openedAt` did not start. Pure. */
+export function pipOpenFailed(event: string | undefined, now: number, openedAt: number): boolean {
+  return event === 'failed' && openedAt > 0 && now - openedAt <= PIP_OPEN_FAIL_MS;
+}
+
 let plugin: OmgPipPlugin | null = null;
 function pip(): OmgPipPlugin {
   plugin ??= registerPlugin<OmgPipPlugin>('OmgPip');
@@ -160,21 +178,38 @@ export class PipFeed {
   private sentHidden = 0;
   private dirty = true;
   private lastSentAt = 0;
+  /** When the user last asked to open the window (0: no open pending). */
+  private openedAt = 0;
 
   /** The current picture of the remote display, or null when there is none. */
   private readonly source: () => HTMLCanvasElement | null;
   private readonly log: (message: string) => void;
   /** The source makes a new canvas per call (`Display.flatten`): release it after use. */
   private readonly disposableSource: boolean;
+  /** The feed is running (`ready()` turned true). */
+  private readonly onReady: (() => void) | undefined;
+  /** A window the user asked for did not start (a `failed` event soon after `open`). */
+  private readonly onOpenFailed: (() => void) | undefined;
 
   constructor(
     source: () => HTMLCanvasElement | null,
     log: (message: string) => void,
-    options: { readonly disposableSource?: boolean } = {},
+    options: {
+      readonly disposableSource?: boolean;
+      readonly onReady?: () => void;
+      readonly onOpenFailed?: () => void;
+    } = {},
   ) {
     this.source = source;
     this.log = log;
     this.disposableSource = options.disposableSource ?? false;
+    this.onReady = options.onReady;
+    this.onOpenFailed = options.onOpenFailed;
+  }
+
+  /** Prepared on a device that supports the window, and running: `open()` can work. */
+  ready(): boolean {
+    return !this.stopped && this.timer !== null;
   }
 
   async start(): Promise<void> {
@@ -188,6 +223,11 @@ export class PipFeed {
         // Another session's feed may still be listening: only the owner tracks the window.
         if (owner === this.id) setWindowActive(pipWindowAfter(windowActive, s.event));
         this.log(`PiP ${s.event ?? 'state'}: ${describe(s)}`);
+        if (s.event === 'started') this.openedAt = 0;
+        if (pipOpenFailed(s.event, Date.now(), this.openedAt)) {
+          this.openedAt = 0;
+          this.onOpenFailed?.();
+        }
       });
       if (this.stopped) {
         void this.listener.remove();
@@ -199,6 +239,7 @@ export class PipFeed {
         if (document.visibilityState === 'hidden') this.ticksHidden++;
         void this.pump();
       }, 1000 / PIP_FOREGROUND_FPS);
+      this.onReady?.();
     } catch (e) {
       this.log(`PiP could not start: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -220,12 +261,24 @@ export class PipFeed {
       .catch(() => undefined);
   }
 
-  /** Open the window now. Only from a tap. */
-  async open(): Promise<void> {
+  /**
+   * Open the window now. Only from a tap. False: it cannot open (not ready, or the native
+   * side refused); a later failure is reported through `onOpenFailed`.
+   */
+  async open(): Promise<boolean> {
+    if (!this.ready()) {
+      this.log('PiP open asked before the feed was ready');
+      return false;
+    }
     try {
-      this.log(`PiP open asked: ${describe(await pip().start())}`);
+      const status = await pip().start();
+      this.log(`PiP open asked: ${describe(status)}`);
+      if (pipOpenRefused(status)) return false;
+      this.openedAt = Date.now();
+      return true;
     } catch (e) {
       this.log(`PiP could not open: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
     }
   }
 

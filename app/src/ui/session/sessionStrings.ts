@@ -51,6 +51,7 @@ export const sessionStringsEn = {
     viewOnlyOff: 'View only off',
     remoteClipboardCopied: 'Remote clipboard copied to this device',
     deviceClipboardSent: 'Device clipboard sent to the remote',
+    pipFailed: 'Picture in picture could not open. Try again in a moment.',
     pointerMode: (mode: string, hint: string) => `${mode}: ${hint}`,
     clipboardEmpty: 'The device clipboard is empty',
     clipboardSent: (n: number) =>

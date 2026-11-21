@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { ChromeButton } from './ChromeButton.tsx';
 import { IconBack, IconClose } from './icons.tsx';
-import { SheetBackContext, SheetSwipeContext } from './sheetBack.ts';
+import { SheetBackContext, SheetSwipeContext, isTopmostLayer } from './sheetBack.ts';
 import { sessionStrings } from './sessionStrings.ts';
 
 /** Downward drag (px) on the header that closes the sheet. */
@@ -36,12 +36,16 @@ export function Sheet({
   const onBack = useContext(SheetBackContext);
   const swipeSetting = useContext(SheetSwipeContext);
   const swipeClose = dismissible && swipeSetting;
+  const layerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
+      if (e.key !== 'Escape') return;
+      // Every open sheet listens on the document: only the one on top answers, so Escape
+      // on a menu does not also cancel a sign-in prompt or decline a file below it.
+      const layers = document.querySelectorAll('.omg-sheet-layer');
+      if (!isTopmostLayer(layerRef.current, layers)) return;
+      e.stopPropagation();
+      onClose();
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
@@ -103,7 +107,10 @@ export function Sheet({
   };
 
   return (
-    <div className={layerClassName ? `omg-sheet-layer ${layerClassName}` : 'omg-sheet-layer'}>
+    <div
+      ref={layerRef}
+      className={layerClassName ? `omg-sheet-layer ${layerClassName}` : 'omg-sheet-layer'}
+    >
       <div
         className="omg-sheet-backdrop"
         onPointerDown={dismissible ? onClose : undefined}

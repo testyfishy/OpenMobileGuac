@@ -88,6 +88,44 @@ export function classifyWindow(input: ClassifyInput): WindowShape {
   };
 }
 
+export interface WindowReading {
+  /** The window size now (innerWidth × innerHeight). */
+  readonly size: Size;
+  readonly prev: WindowShape | null;
+  /** The session's hidden field has focus (its soft keyboard). */
+  readonly fieldKeyboard: boolean;
+  /**
+   * The native layer reports a soft keyboard open, whichever field raised it (text input bar,
+   * sign-in prompt, a name in a sheet).
+   */
+  readonly nativeKeyboard: boolean;
+  /** Sizes seen per (rounded) width while no keyboard was up. */
+  readonly seen: ReadonlyMap<number, Size>;
+  readonly orientation?: 'landscape' | 'portrait' | undefined;
+  readonly screenShortSide?: number | undefined;
+}
+
+/**
+ * One reading of the window for the session screen: the shape, and whether this size may be
+ * remembered as a keyboard-closed size for its width. Any soft keyboard counts, not only the
+ * hidden field's: on a near-square cover screen (iPhone Duo outside, about 466×678) a
+ * keyboard raised by another field would otherwise read as landscape. Pure.
+ */
+export function readWindowShape(r: WindowReading): { shape: WindowShape; remember: boolean } {
+  const keyboardUp = r.fieldKeyboard || r.nativeKeyboard;
+  const key = Math.round(r.size.width);
+  const remember = !keyboardUp && r.size.width > 0 && r.size.height > 0;
+  const shape = classifyWindow({
+    size: r.size,
+    prev: r.prev,
+    keyboardUp,
+    remembered: keyboardUp ? r.seen.get(key) : undefined,
+    orientation: r.orientation,
+    screenShortSide: r.screenShortSide,
+  });
+  return { shape, remember };
+}
+
 export function sameShape(a: WindowShape, b: WindowShape): boolean {
   return a.landscape === b.landscape && a.compact === b.compact && a.width === b.width;
 }
@@ -195,6 +233,16 @@ export function foldFromSignals(s: FoldSignals): FoldInfo {
   if (angle !== 90 && angle !== 270 && angle !== -90) return NO_FOLD;
   const half = Math.round(h / 2);
   return { horizontalFold: true, foldTop: half, foldBottom: half };
+}
+
+/**
+ * The `splitLayout` value for the More sheet's switch: `auto` while the wanted state is what
+ * `auto` gives on this device now (split exactly when folded at a horizontal hinge), so a
+ * switch turned off and on again keeps following the fold. Pure.
+ */
+export function splitLayoutFor(on: boolean, horizontalFold: boolean): 'auto' | 'on' | 'off' {
+  if (on === horizontalFold) return 'auto';
+  return on ? 'on' : 'off';
 }
 
 export function sameFold(a: FoldInfo, b: FoldInfo): boolean {

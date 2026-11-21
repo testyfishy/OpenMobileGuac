@@ -92,11 +92,12 @@ import {
 } from './toolbarItems.ts';
 import { ViewMenu } from './ViewMenu.tsx';
 import {
-  classifyWindow,
   cutoutFrom,
+  readWindowShape,
   sameFold,
   sameShape,
   shapeOf,
+  splitLayoutFor,
   type WindowShape,
 } from './deviceShape.ts';
 import './SessionScreen.css';
@@ -312,6 +313,8 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     },
     [hostUseDefault],
   );
+  // Not a hook (only named like one): an alias to call it from handlers.
+  const followDefaults = useDefault;
   const overridden = useMemo(
     () => new Set<string>([...(props.overriddenKeys ?? [])]),
     [props.overriddenKeys],
@@ -348,6 +351,8 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const keyColRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  /** A soft keyboard is open by the native events (any field's, not only the hidden one). */
+  const nativeKeyboardRef = useRef(false);
 
   // ---- Controller lifecycle. Options first (effects run in order), then attach.
   useEffect(() => {
@@ -424,7 +429,10 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       safeAreaProbe,
       chromeRoot,
     });
-    const kb = onNativeKeyboard((open, height) => controller.setNativeKeyboard(open, height));
+    const kb = onNativeKeyboard((open, height) => {
+      nativeKeyboardRef.current = open;
+      controller.setNativeKeyboard(open, height);
+    });
     return () => {
       kb.dispose();
       controller.detach();
@@ -511,32 +519,41 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const shapeRef = useRef<WindowShape>(shape);
   const seenSizes = useRef(new Map<number, { width: number; height: number }>());
   const [cutout, setCutout] = useState<CutoutSide>(() => readCutout(null));
+  // Read through refs: the listeners are added once, so a keyboard opening or closing does
+  // not re-read the window halfway through its slide; the resize that follows does.
+  const fieldKeyboardRef = useRef(keyboardActive);
+  useEffect(() => {
+    fieldKeyboardRef.current = keyboardActive;
+  }, [keyboardActive]);
   useEffect(() => {
     const read = () => {
       const size = readWindowSize();
-      const key = Math.round(size.width);
-      if (!keyboardActive && size.width > 0 && size.height > 0) {
-        seenSizes.current.set(key, size);
-      }
-      const next = classifyWindow({
+      const { shape: next, remember } = readWindowShape({
         size,
         prev: shapeRef.current,
-        keyboardUp: keyboardActive,
-        remembered: keyboardActive ? seenSizes.current.get(key) : undefined,
+        fieldKeyboard: fieldKeyboardRef.current,
+        nativeKeyboard: nativeKeyboardRef.current,
+        seen: seenSizes.current,
         orientation: readOrientation(),
         screenShortSide:
           typeof screen !== 'undefined' ? Math.min(screen.width, screen.height) : undefined,
       });
+      if (remember) seenSizes.current.set(Math.round(size.width), size);
       if (!sameShape(next, shapeRef.current)) {
         shapeRef.current = next;
         setShape(next);
       }
       setCutout(readCutout(probeRef.current));
     };
+    let later: ReturnType<typeof setTimeout> | null = null;
     const rotated = () => {
       read();
       // Some WebViews report the new size a little after the event.
-      setTimeout(read, 250);
+      if (later !== null) clearTimeout(later);
+      later = setTimeout(() => {
+        later = null;
+        read();
+      }, 250);
     };
     read();
     window.addEventListener('resize', read);
@@ -544,11 +561,12 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     const so = typeof screen !== 'undefined' ? screen.orientation : undefined;
     so?.addEventListener?.('change', rotated);
     return () => {
+      if (later !== null) clearTimeout(later);
       window.removeEventListener('resize', read);
       window.removeEventListener('orientationchange', rotated);
       so?.removeEventListener?.('change', rotated);
     };
-  }, [keyboardActive]);
+  }, []);
   const landscape = shape.landscape;
   const phone = shape.compact;
   const toolbarStyle = effectiveToolbarStyle(
@@ -697,10 +715,16 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   // ---- Clipboard auto-send on foreground (CLP-1, opt-in; CLP-4: never read otherwise)
   useEffect(() => {
     if (!settings.clipboardAutoSendOnFocus || !active) return;
+    let mounted = true;
     const sub = onForeground(() => {
-      if (!controller.isConnected()) return;
-      void readDeviceClipboard().then((r) => {
-        if (!r.ok || r.text === '' || r.text === lastAutoSent.current) return;
+      // Back from the background the tunnel may be dead (guacd dropped the paused user)
+      // while the phase still says connected: send only once it has proved alive, after
+      // the quiet reconnect if one was needed. A text sent into a dead tunnel is lost and,
+      // being `lastAutoSent`, would never be sent again.
+      void controller.whenTunnelAlive().then(async (alive) => {
+        if (!alive || !mounted) return;
+        const r = await readDeviceClipboard();
+        if (!mounted || !r.ok || r.text === '' || r.text === lastAutoSent.current) return;
         if (controller.sendClipboard(r.text)) {
           lastAutoSent.current = r.text;
           clipDispatch({ type: 'add', text: r.text, direction: 'to-remote', at: Date.now() });
@@ -708,7 +732,10 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
         }
       });
     });
-    return () => sub.dispose();
+    return () => {
+      mounted = false;
+      sub.dispose();
+    };
   }, [controller, settings.clipboardAutoSendOnFocus, active]);
 
   // ---- Commands
@@ -1135,8 +1162,9 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                       immersive: settings.immersive,
                     }}
                     onToggle={(key, on) => {
-                      if (key === 'split') onSettingsChange({ splitLayout: on ? 'on' : 'off' });
-                      else onSettingsChange({ [key]: on });
+                      if (key === 'split') {
+                        onSettingsChange({ splitLayout: splitLayoutFor(on, fold.horizontalFold) });
+                      } else onSettingsChange({ [key]: on });
                     }}
                     onEditToolbar={() => setMenu('toolbar')}
                     quality={settings.quality}
@@ -1158,7 +1186,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                         : null
                     }
                     {...(props.sharing ? { onShare: () => setMenu('share') } : {})}
-                    {...(settings.pictureInPicture && pipAvailable()
+                    {...(settings.pictureInPicture && pipAvailable() && snap.pictureInPictureReady
                       ? {
                           onPictureInPicture: () => {
                             closeMenu();
@@ -1183,7 +1211,12 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                     style={settings.toolbarStyle}
                     labels={settings.toolbarLabels}
                     context={actionContext}
-                    onItems={(items) => onSettingsChange({ toolbarItems: items })}
+                    onItems={(items) => {
+                      // "Reset to default": follow the defaults again rather than storing
+                      // the built-in row as this connection's own choice.
+                      if (items === null && props.onUseDefault) followDefaults(['toolbarItems']);
+                      else onSettingsChange({ toolbarItems: items });
+                    }}
                     onStyle={(s) => onSettingsChange({ toolbarStyle: s })}
                     onLabels={(l) => onSettingsChange({ toolbarLabels: l })}
                     onClose={closeMenu}

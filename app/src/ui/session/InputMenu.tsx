@@ -7,6 +7,7 @@ import {
   descriptorOf,
   descriptorsIn,
   rangeOf,
+  settingEnabled,
   settingPatch,
   DEFAULT_SUMMARY_CONTEXT,
   type ListEditor,
@@ -218,16 +219,26 @@ function Override({ d, b }: { d: SettingDescriptor; b: BlockProps }) {
 }
 
 function SettingBlock({ d, b }: { d: SettingDescriptor; b: BlockProps }) {
+  const control = (
+    <Control
+      d={d}
+      s={b.s}
+      touchSupport={b.touchSupport}
+      onChange={b.onChange}
+      onEditList={b.onEditList}
+      ctx={b.ctx}
+    />
+  );
   return (
     <div className="omg-setting" data-setting-key={d.key}>
-      <Control
-        d={d}
-        s={b.s}
-        touchSupport={b.touchSupport}
-        onChange={b.onChange}
-        onEditList={b.onEditList}
-        ctx={b.ctx}
-      />
+      {/* No effect with the current values (or on this platform): shown, but not editable. */}
+      {settingEnabled(d, b.s) ? (
+        control
+      ) : (
+        <fieldset className="omg-setting-inactive" disabled data-inactive="1">
+          {control}
+        </fieldset>
+      )}
       <Override d={d} b={b} />
     </div>
   );

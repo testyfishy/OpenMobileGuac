@@ -1,4 +1,10 @@
-import { Fragment, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import type { SavedCombo } from '../../session/keys/ComboLibrary.ts';
 import type { Modifier, ModifierState } from '../../session/keys/KeyModel.ts';
 import { ChromeButton } from './ChromeButton.tsx';
@@ -172,6 +178,14 @@ export function KeyBar({
     if (lp.timer) clearTimeout(lp.timer);
     lp.timer = null;
   };
+  // The bar can go away mid-press (swipe down): the long press must not fire after that.
+  useEffect(() => {
+    const lp = longPress.current;
+    return () => {
+      if (lp.timer) clearTimeout(lp.timer);
+      lp.timer = null;
+    };
+  }, []);
 
   const switcher =
     onNextSet && setName !== undefined ? (

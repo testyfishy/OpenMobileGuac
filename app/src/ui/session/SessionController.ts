@@ -104,7 +104,7 @@ import { createFileReceiver, type StreamRequest } from './fileSave.ts';
 import { isOnline, onAppResume, onNetworkChange } from './platform.ts';
 import { sessionStrings } from './sessionStrings.ts';
 import { TransferManager } from './transfers.ts';
-import { computeLayout, cursorDrawScale, visualViewportInset } from './layout.ts';
+import { computeLayout, cursorDrawScale, splitKeyboard, visualViewportInset } from './layout.ts';
 import {
   gestureConfigFromSettings,
   normalizeSessionSettings,
@@ -175,6 +175,8 @@ export interface SessionSnapshot {
   readonly viewers: readonly string[];
   /** AUD-2: the microphone stream (`live` = audio is being sent). */
   readonly microphone: MicState;
+  /** Picture in Picture can be opened now (the feed is prepared and running). */
+  readonly pictureInPictureReady: boolean;
 }
 
 export type SessionLogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -423,6 +425,8 @@ export class SessionController {
 
   // Layout
   private stable: Size | null = null;
+  /** Stable size of the whole session (the chrome root), for the split layout's keyboard. */
+  private rootStable: Size | null = null;
   private nativeKeyboardOpen = false;
   private nativeKeyboardHeight = 0;
   private webKeyboardSeen = false;
@@ -522,6 +526,7 @@ export class SessionController {
       viewOnly: this.settings.viewOnly,
       viewers: this.viewerNames,
       microphone: this.mic.getState(),
+      pictureInPictureReady: this.pip?.ready() ?? false,
     };
   }
 
@@ -546,6 +551,7 @@ export class SessionController {
       prev.viewOnly === next.viewOnly &&
       prev.viewers === next.viewers &&
       prev.microphone === next.microphone &&
+      prev.pictureInPictureReady === next.pictureInPictureReady &&
       prev.mutableArguments === next.mutableArguments &&
       (Object.keys(next.modifiers) as Modifier[]).every(
         (m) => prev.modifiers[m] === next.modifiers[m],
@@ -569,6 +575,7 @@ export class SessionController {
     this.machine = INITIAL_SESSION_MACHINE;
     if (!isOnline()) this.machine = reduceSession(this.machine, { type: 'network', online: false });
     this.stable = null;
+    this.rootStable = null;
     els.field.value = this.baseline;
     this.listen();
     this.audio.listen();
@@ -617,6 +624,7 @@ export class SessionController {
     this.log('debug', active ? 'Session shown' : 'Session hidden');
     if (active) {
       this.stable = null;
+      this.rootStable = null;
       this.measure();
       // Some WebViews settle the size of a re-shown element a frame later.
       requestAnimationFrame(() => this.measure());
@@ -1372,9 +1380,12 @@ export class SessionController {
     this.publish();
   }
 
-  /** More sheet: open the Picture in Picture window now (a tap). */
+  /** More sheet: open the Picture in Picture window now (a tap). Says so when it cannot. */
   openPictureInPicture(): void {
-    void this.pip?.open();
+    const opening = this.pip ? this.pip.open() : Promise.resolve(false);
+    void opening.then((ok) => {
+      if (!ok) this.opts?.notify?.(sessionStrings.toasts.pipFailed);
+    });
   }
 
   /**
@@ -1400,12 +1411,18 @@ export class SessionController {
           return display.flatten();
         },
         (message) => this.log('info', message),
-        { disposableSource: true },
+        {
+          disposableSource: true,
+          // The More sheet offers "Open picture in picture" only from here on.
+          onReady: () => this.publish(),
+          onOpenFailed: () => this.opts?.notify?.(sessionStrings.toasts.pipFailed),
+        },
       );
       void this.pip.start();
     } else if (!want && this.pip) {
       this.pip.stop();
       this.pip = null;
+      this.publish();
     }
   }
 
@@ -1531,9 +1548,15 @@ export class SessionController {
     if (!els || this.disposed || !this.active) return;
     const rect = els.stage.getBoundingClientRect();
     this.measured = { width: rect.width, height: rect.height };
+    // Split layout: the stage is only the upper part of the session; the keyboard is
+    // measured against the whole session (the chrome root covers it).
+    const split = this.surface !== null;
+    const rootRect = els.chromeRoot.getBoundingClientRect();
     const vv = window.visualViewport;
     const fieldFocused = document.activeElement === els.field;
-    const vvInset = vv ? visualViewportInset(rect.bottom, vv.offsetTop, vv.height) : 0;
+    const stageVv = vv ? visualViewportInset(rect.bottom, vv.offsetTop, vv.height) : 0;
+    const rootVv = vv ? visualViewportInset(rootRect.bottom, vv.offsetTop, vv.height) : 0;
+    const vvInset = split ? rootVv : stageVv;
     const keyboardOpen = this.nativeKeyboardOpen || (fieldFocused && vvInset > 40);
     // Mobile web: the user dismissed the keyboard with a system control but the field kept
     // focus. Blur it so the keyboard button reflects that and raises it again on one tap.
@@ -1548,17 +1571,41 @@ export class SessionController {
       stable: this.stable,
       keyboardOpen,
       nativeKeyboardHeight: this.nativeKeyboardHeight,
-      visualViewportInset: vvInset,
+      visualViewportInset: stageVv,
     });
     this.stable = out.stable;
+    // The session's own stable size, kept also outside the split layout so turning it on
+    // with the keyboard up still knows the keyboard-closed height.
+    const rootOut = computeLayout({
+      measured: { width: rootRect.width, height: rootRect.height },
+      stable: this.rootStable,
+      keyboardOpen,
+      nativeKeyboardHeight: this.nativeKeyboardHeight,
+      visualViewportInset: rootVv,
+    });
+    this.rootStable = rootOut.stable;
     const wasKeyboardUp = this.keyboardUp;
     this.keyboardUp = keyboardOpen;
-    const shrink = out.screen.height - this.measured.height;
-    this.keyboardCover = Math.max(0, out.keyboardInset - shrink);
+    let stageKeyboardInset = out.keyboardInset;
+    if (split) {
+      const s = splitKeyboard({
+        stageTop: rect.top,
+        stageHeight: rect.height,
+        stage: out,
+        rootTop: rootRect.top,
+        rootHeight: rootRect.height,
+        root: rootOut,
+      });
+      this.keyboardCover = s.keyboardCover;
+      stageKeyboardInset = s.keyboardInset;
+    } else {
+      const shrink = out.screen.height - this.measured.height;
+      this.keyboardCover = Math.max(0, out.keyboardInset - shrink);
+    }
     const insets = this.readInsets();
     // The key bar slot sits right above the keyboard; when the keyboard is hidden its
     // measured height already includes the bottom safe-area padding (see the CSS).
-    const keyboardInset = out.keyboardInset + this.keyBarHeight;
+    const keyboardInset = stageKeyboardInset + this.keyBarHeight;
     const prev = this.viewport;
     const screenChanged =
       Math.abs(prev.screen.width - out.screen.width) >= 0.5 ||
@@ -2080,6 +2127,11 @@ export class SessionController {
     this.publish();
   }
 
+  /** A session menu or prompt (`role="dialog"`) is open in the chrome. */
+  private dialogOpen(): boolean {
+    return (this.els?.chromeRoot.querySelector('[role="dialog"]') ?? null) !== null;
+  }
+
   private resetField(): void {
     const field = this.els?.field;
     if (!field) return;
@@ -2159,7 +2211,7 @@ export class SessionController {
         field.selectionEnd ?? field.value.length,
         this.composing,
       );
-      if (r.arrows < 0) {
+      if (r.arrows < 0 && !this.dialogOpen()) {
         const events: KeyEvent[] = [];
         for (let i = 0; i < -r.arrows; i++) events.push(...this.keys.pressKey('Left'));
         this.sendKeyEvents(events);
@@ -2309,6 +2361,11 @@ export class SessionController {
     });
     this.on(field, 'compositionend', () => {
       this.composing = false;
+      // Typed while a menu covers the desktop: drop it (the field is safe to reset now).
+      if (this.dialogOpen()) {
+        this.resetField();
+        return;
+      }
       this.processField(false);
       // A click or key bar key came during the composition: send and reset what it skipped.
       if (this.flushAfterComposition) {
@@ -2318,6 +2375,12 @@ export class SessionController {
     });
     this.on(field, 'input', (e) => {
       const composing = (e as InputEvent).isComposing || this.composing;
+      // A menu (dialog) is open over the desktop: the soft keyboard may still be up, but
+      // what it types must not reach the remote. Never touch the field mid-composition.
+      if (this.dialogOpen()) {
+        if (!composing) this.resetField();
+        return;
+      }
       this.processField(composing);
     });
     this.on(field, 'focus', () => {

@@ -69,6 +69,40 @@ export function computeLayout(input: LayoutInput): LayoutOutput {
   };
 }
 
+export interface SplitKeyboardInput {
+  /** The stage's top and measured height (CSS px, viewport coordinates). */
+  readonly stageTop: number;
+  readonly stageHeight: number;
+  /** `computeLayout` for the stage. */
+  readonly stage: LayoutOutput;
+  /** The session container's top and measured height: the box the keyboard shrinks. */
+  readonly rootTop: number;
+  readonly rootHeight: number;
+  /** `computeLayout` for the container. */
+  readonly root: LayoutOutput;
+}
+
+/**
+ * Split layout: the stage is only the upper part of the session, so the keyboard is measured
+ * against the whole container and only the part that hides the stage is the viewport's inset.
+ * `keyboardCover`: how much of the container's bottom the keyboard covers (what the dock and
+ * sheets sit above). `keyboardInset`: the stage's stable height minus what is still visible
+ * of it (the stage may itself have shrunk, or end above the keyboard). With the stage equal
+ * to the container this gives the same answer as the full-screen layout. Pure.
+ */
+export function splitKeyboard(i: SplitKeyboardInput): {
+  keyboardCover: number;
+  keyboardInset: number;
+} {
+  const rootShrink = i.root.screen.height - nn(i.rootHeight);
+  const keyboardCover = Math.max(0, i.root.keyboardInset - rootShrink);
+  const keyboardTop = i.rootTop + nn(i.rootHeight) - keyboardCover;
+  const visibleBottom = Math.min(i.stageTop + nn(i.stageHeight), keyboardTop);
+  const stable = i.stage.screen.height;
+  const keyboardInset = Math.min(stable, Math.max(0, i.stageTop + stable - visibleBottom));
+  return { keyboardCover, keyboardInset };
+}
+
 /**
  * CSS scale for the cursor overlay. The remote cursor image is in remote pixels; at
  * fit-screen on a phone the viewport scale is ~0.2-0.4, which would make it unusably

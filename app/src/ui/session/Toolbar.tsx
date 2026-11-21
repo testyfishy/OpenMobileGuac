@@ -141,7 +141,8 @@ function ToolButton({ action: a }: { action: SessionAction }) {
     .join(' ');
   const label = confirm ? t.tapAgain : a.label;
   const name = confirm ? t.disconnectConfirm : a.name;
-  const pressable = a.id === 'keyboard' || a.id === 'extra-keys' || a.id === 'sound';
+  // Every on/off action says its state; Pointer cycles modes and names the current one.
+  const pressable = a.pressed !== undefined && a.id !== 'pointer';
   return (
     <ChromeButton
       className={cls}

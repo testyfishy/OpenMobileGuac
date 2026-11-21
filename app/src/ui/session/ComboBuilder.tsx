@@ -8,6 +8,7 @@ import {
   reduceComboDraft,
   stepsFromText,
   stepsToText,
+  type ComboDraft,
   type ComboStep,
   type KeyGroup,
   type SavedCombo,
@@ -19,6 +20,7 @@ import { keyCapLabel } from './keyBarLayout.ts';
 import { comboPreview } from './keySetNames.ts';
 import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
+import { SheetBackContext } from './sheetBack.ts';
 
 export interface ComboBuilderProps {
   /** The combo to edit, or null for a new one. */
@@ -30,6 +32,10 @@ export interface ComboBuilderProps {
   /** Run the draft now (in a session). */
   readonly onTry?: (steps: readonly ComboStep[]) => void;
   readonly onClose: () => void;
+  /** Unsaved work to start from (kept by the host after a Back). */
+  readonly initialDraft?: ComboDraft | undefined;
+  /** Back (one level, to the combo list), handing over the unsaved draft to keep. */
+  readonly onBack?: (draft: ComboDraft) => void;
 }
 
 /**
@@ -37,9 +43,22 @@ export interface ComboBuilderProps {
  * editor over the same steps. Toggle modifiers, tap a key to append a step; reorder or
  * delete steps, set a pause after a step, name the combo.
  */
-export function ComboBuilder({ initial, id, onSave, onDelete, onTry, onClose }: ComboBuilderProps) {
+export function ComboBuilder({
+  initial,
+  id,
+  onSave,
+  onDelete,
+  onTry,
+  onClose,
+  initialDraft,
+  onBack,
+}: ComboBuilderProps) {
   const c = sessionStrings.combos;
-  const [draft, dispatch] = useReducer(reduceComboDraft, initial, draftFrom);
+  const [draft, dispatch] = useReducer(
+    reduceComboDraft,
+    initial,
+    (i: SavedCombo | null) => initialDraft ?? draftFrom(i),
+  );
   const [group, setGroup] = useState<KeyGroup>('letters');
   const [text, setText] = useState(() => stepsToText(draft.steps));
   const [textError, setTextError] = useState<string | null>(null);
@@ -67,7 +86,7 @@ export function ComboBuilder({ initial, id, onSave, onDelete, onTry, onClose }: 
     }
   };
 
-  return (
+  const sheet = (
     <Sheet
       title={initial ? c.builderEditTitle : c.builderTitle}
       onClose={onClose}
@@ -273,5 +292,10 @@ export function ComboBuilder({ initial, id, onSave, onDelete, onTry, onClose }: 
         </ChromeButton>
       </div>
     </Sheet>
+  );
+  return onBack ? (
+    <SheetBackContext.Provider value={() => onBack(draft)}>{sheet}</SheetBackContext.Provider>
+  ) : (
+    sheet
   );
 }
