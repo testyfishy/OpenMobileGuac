@@ -16,7 +16,7 @@ on:
         description: macOS runner label (switch to Intel if arm64 runners are out of capacity)
         type: choice
         default: macos-26
-        options: [macos-26, macos-26-intel]
+        options: [macos-26, macos-26-intel, xcode-27]
 
 permissions:
   contents: read
