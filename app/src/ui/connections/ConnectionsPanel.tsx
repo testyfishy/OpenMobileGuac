@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Connection, ConnectionGroup, ConnectionTree } from '../../core/models/Connection.ts';
 import type { ConnectionRef, RecentEntry } from '../../core/storage/ProfileStore.ts';
 import { useToast } from '../components/toastContext.ts';
-import { useConsumePendingLaunch, useLaunch } from '../launch/LaunchContext.ts';
+import { useConsumePendingLaunch, useLaunch, type PendingLaunch } from '../launch/LaunchContext.ts';
 import type { SessionTarget } from '../nav/navigation.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
 import { haptic } from '../services/native.ts';
+import { liveInAppCounts } from '../sessions/inUse.ts';
 import { openTargetKeys } from '../sessions/sessionModel.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import type { ConnectionSort } from '../settings/settingsModel.ts';
@@ -84,9 +85,13 @@ export function ConnectionsPanel({
     () => openTargetKeys(sessions.state, serverId),
     [sessions.state, serverId],
   );
+  const liveCounts = useMemo(
+    () => liveInAppCounts(sessions.state, serverId),
+    [sessions.state, serverId],
+  );
 
   const openTarget = useCallback(
-    (t: SessionTarget) => {
+    (t: SessionTarget, launched?: PendingLaunch) => {
       void profiles
         .recordRecent(
           serverId,
@@ -98,7 +103,7 @@ export function ConnectionsPanel({
           },
         )
         .then(() => setLocalVersion((v) => v + 1));
-      sessions.open(serverId, serverName, t);
+      sessions.open(serverId, serverName, t, { confirmed: launched?.confirmed === true });
     },
     [profiles, serverId, serverName, sessions],
   );
@@ -137,6 +142,7 @@ export function ConnectionsPanel({
         sort={sort}
         lastUsed={lastUsed}
         openKeys={openKeys}
+        liveCounts={liveCounts}
         thumbnails={thumbs}
         flat={flat}
       />

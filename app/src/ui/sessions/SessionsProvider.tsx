@@ -7,9 +7,12 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { GuacAdminApi } from '../../core/api/GuacAdminApi.ts';
+import type { AuthSession } from '../../core/models/AuthSession.ts';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import type { RevalidateResult } from '../services/AuthService.ts';
 import { DEMO_PROFILE_ID } from '../integration/demoProfile.ts';
+import { adminStrings } from '../admin/adminStrings.ts';
 import { AppAwayTracker } from '../lock/appAwayTracker.ts';
 import type { SessionTarget } from '../nav/navigation.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
@@ -39,12 +42,15 @@ import {
   type OpenSession,
 } from './sessionModel.ts';
 import { SessionsContext, type SessionsApi } from './SessionsContext.ts';
+import { askInUseToStore, decideTap, liveInAppCount, planInUse, type InUsePlan } from './inUse.ts';
+import { IN_USE_CHECK_TIMEOUT_MS, checkServerUse } from './inUseCheck.ts';
 
 interface Pending {
   readonly serverId: string;
   readonly serverName: string;
   readonly target: SessionTarget;
   readonly suggest: OpenSession;
+  readonly resumed: boolean;
 }
 
 /** "<name> is already open": waiting for Go to the open session / Open another. */
@@ -52,6 +58,35 @@ interface AskPending {
   readonly serverId: string;
   readonly serverName: string;
   readonly target: SessionTarget;
+}
+
+/** MUL-5 "<name> is already in use" (server-reported sessions), or the plain confirm. */
+interface InUsePending {
+  readonly serverId: string;
+  readonly serverName: string;
+  readonly target: SessionTarget;
+  readonly session: AuthSession;
+  readonly plan: Extract<InUsePlan, { kind: 'prompt' }>;
+  /** When the server answered ("since 14:02" is relative to it). */
+  readonly askedAt: number;
+  readonly busy: boolean;
+  readonly error: string | undefined;
+}
+
+interface ConfirmPending {
+  readonly serverId: string;
+  readonly serverName: string;
+  readonly target: SessionTarget;
+  readonly checked: boolean;
+}
+
+interface OpenOptions {
+  /** "Open another": skip the open session (still respects the cap). */
+  readonly forceNew?: boolean;
+  /** The user already answered a question for this tap: never ask "in use" / "connect?". */
+  readonly skipInUse?: boolean;
+  /** Joining the user's own running session ("Open the existing one"). */
+  readonly resumed?: boolean;
 }
 
 /**
@@ -65,7 +100,16 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(sessionsReducer, INITIAL_SESSIONS);
   const [pending, setPending] = useState<Pending | null>(null);
   const [ask, setAsk] = useState<AskPending | null>(null);
+  const [inUse, setInUse] = useState<InUsePending | null>(null);
+  const [confirmAsk, setConfirmAsk] = useState<ConfirmPending | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // MUL-5: a short-timeout client for the check before connecting (never blocks for long).
+  const checkApi = useMemo(
+    () => new GuacAdminApi(services.http, { timeoutMs: IN_USE_CHECK_TIMEOUT_MS }),
+    [services.http],
+  );
+  /** Targets whose in-use check is running: a second tap meanwhile does nothing. */
+  const checking = useRef(new Set<string>());
   const stateRef = useRef(state);
   const settingsRef = useRef(settings);
   useEffect(() => {
@@ -74,7 +118,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   });
 
   const openNow = useCallback(
-    (serverId: string, serverName: string, target: SessionTarget) => {
+    (serverId: string, serverName: string, target: SessionTarget, resumed = false) => {
       const now = Date.now();
       dispatch({
         type: 'open',
@@ -87,6 +131,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           lastShownAt: now,
           state: 'live',
           epoch: 0,
+          ...(resumed ? { resumed: true as const } : {}),
         },
       });
       services.log.info('session', `opened ${target.protocol || 'connection'} session`);
@@ -226,37 +271,106 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   );
 
   const openWith = useCallback(
-    (serverId: string, serverName: string, target: SessionTarget, forceNew: boolean) => {
-      const policy = openAgainFor(settingsRef.current.openAgain, target, isShareServerId(serverId));
-      const d = decideOpen(
-        stateRef.current,
+    (serverId: string, serverName: string, target: SessionTarget, opts: OpenOptions = {}) => {
+      const forceNew = opts.forceNew === true;
+      const resumed = opts.resumed === true;
+      const setting = settingsRef.current.askInUse;
+      const session = services.auth.current(serverId);
+      // One question per tap (decideTap): open in the app + "Go to" → silently; + Ask → only
+      // the MUL-4 question; at the cap → only the cap question; then maybe the server's.
+      const d = decideTap({
+        state: stateRef.current,
         serverId,
         target,
-        settingsRef.current.maxSessions,
-        policy,
+        maxSessions: settingsRef.current.maxSessions,
+        openAgain: settingsRef.current.openAgain,
+        askInUse: setting,
         forceNew,
-      );
-      if (d.kind === 'existing') {
-        goTo(d.id);
-        return;
+        skipInUse: opts.skipInUse === true,
+        demo: serverId === DEMO_PROFILE_ID,
+        shareLink: isShareServerId(serverId),
+        signedIn: session !== undefined,
+      });
+      switch (d.kind) {
+        case 'existing':
+          goTo(d.id);
+          return;
+        case 'ask':
+          setAsk({ serverId, serverName, target });
+          return;
+        case 'limit':
+          setPending({ serverId, serverName, target, suggest: d.suggest, resumed });
+          haptic('warning');
+          return;
+        case 'open':
+          openNow(serverId, serverName, target, resumed);
+          return;
+        case 'confirm':
+          setConfirmAsk({ serverId, serverName, target, checked: false });
+          return;
+        case 'check':
+          break;
       }
-      if (d.kind === 'ask') {
-        setAsk({ serverId, serverName, target });
-        return;
-      }
-      if (d.kind === 'limit') {
-        setPending({ serverId, serverName, target, suggest: d.suggest });
-        haptic('warning');
-        return;
-      }
-      openNow(serverId, serverName, target);
+      if (!session) return;
+      const key = `${serverId}|${target.type}:${target.dataSource}:${target.identifier}`;
+      if (checking.current.has(key)) return;
+      checking.current.add(key);
+      void checkServerUse(checkApi, session, target)
+        .then((use) => {
+          const state = stateRef.current;
+          const plan = planInUse({
+            setting,
+            use,
+            username: session.username,
+            liveInApp: liveInAppCount(state, serverId, target),
+            inAppId: findOpenSession(state, serverId, target)?.id,
+          });
+          services.log.info(
+            'session',
+            `in-use check: ${use ? `${use.count} active` : 'no answer'} -> ${plan.kind}`,
+          );
+          if (plan.kind === 'connect') {
+            // Re-decided: sessions may have opened or closed while the server answered.
+            const again = decideOpen(
+              state,
+              serverId,
+              target,
+              settingsRef.current.maxSessions,
+              openAgainFor(settingsRef.current.openAgain, target, false),
+              forceNew,
+            );
+            if (again.kind === 'limit')
+              setPending({ serverId, serverName, target, suggest: again.suggest, resumed });
+            else if (again.kind === 'existing') goTo(again.id);
+            else openNow(serverId, serverName, target, resumed);
+          } else if (plan.kind === 'confirm') {
+            setConfirmAsk({ serverId, serverName, target, checked: plan.checked });
+          } else {
+            haptic('warning');
+            setInUse({
+              serverId,
+              serverName,
+              target,
+              session,
+              plan,
+              askedAt: Date.now(),
+              busy: false,
+              error: undefined,
+            });
+          }
+        })
+        .finally(() => checking.current.delete(key));
     },
-    [goTo, openNow],
+    [checkApi, goTo, openNow, services.auth, services.log],
   );
 
   const open = useCallback(
-    (serverId: string, serverName: string, target: SessionTarget) =>
-      openWith(serverId, serverName, target, false),
+    (
+      serverId: string,
+      serverName: string,
+      target: SessionTarget,
+      options?: { readonly confirmed?: boolean },
+    ) => openWith(serverId, serverName, target, { skipInUse: options?.confirmed === true }),
     [openWith],
   );
 
@@ -422,7 +536,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
             confirm: () => {
               setPending(null);
               close(pending.suggest.id);
-              openNow(pending.serverId, pending.serverName, pending.target);
+              openNow(pending.serverId, pending.serverName, pending.target, pending.resumed);
             },
             cancel: () => setPending(null),
           }
@@ -439,7 +553,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       // Re-resolved now: the session may have closed while the question was showing.
       const existing = findOpenSession(stateRef.current, ask.serverId, ask.target);
       if (choice === 'switch' && existing) goTo(existing.id);
-      else openWith(ask.serverId, ask.serverName, ask.target, true);
+      // Already asked once for this tap: no server "in use" question after it.
+      else openWith(ask.serverId, ask.serverName, ask.target, { forceNew: true, skipInUse: true });
     };
     return {
       name: ask.target.name,
@@ -449,11 +564,113 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     };
   }, [ask, goTo, openWith, updateSettings]);
 
+  const storeAskInUse = useCallback(
+    (answer: Parameters<typeof askInUseToStore>[0], dontAskAgain: boolean) => {
+      const store = askInUseToStore(answer, dontAskAgain);
+      if (store !== null) updateSettings({ ...settingsRef.current, askInUse: store });
+    },
+    [updateSettings],
+  );
+
+  const inUseApi = useMemo(() => {
+    if (!inUse) return null;
+    const { serverId, serverName, target, plan } = inUse;
+    const fresh = () => openWith(serverId, serverName, target, { forceNew: true, skipInUse: true });
+    return {
+      name: target.name,
+      plan,
+      askedAt: inUse.askedAt,
+      busy: inUse.busy,
+      error: inUse.error,
+      openExisting: (dontAskAgain: boolean) => {
+        const existing = plan.existing;
+        if (!existing) return;
+        setInUse(null);
+        storeAskInUse('existing', dontAskAgain);
+        if (existing.kind === 'switch') {
+          // Re-resolved: it may have closed while the question was showing.
+          const s = findOpenSession(stateRef.current, serverId, target);
+          if (s) goTo(s.id);
+          else fresh();
+          return;
+        }
+        services.log.info(
+          'session',
+          `in use: joining ${existing.own ? 'the own' : 'another user’s'} running session`,
+        );
+        // The user's own session then stands for the connection ("resumed"); someone else's
+        // is a join like the administrator's Join, named after that user.
+        openWith(
+          serverId,
+          serverName,
+          {
+            ...target,
+            join: existing.activeId,
+            ...(existing.own
+              ? {}
+              : {
+                  name: adminStrings.sessions.joinedName(
+                    target.name,
+                    existing.username || adminStrings.sessions.anonymous,
+                  ),
+                }),
+          },
+          { skipInUse: true, resumed: existing.own },
+        );
+      },
+      endAndStart: (dontAskAgain: boolean) => {
+        if (plan.end.length === 0) return;
+        setInUse({ ...inUse, busy: true, error: undefined });
+        // Only the active connections listed in the plan: the user's own ones on this
+        // connection (or, for an administrator, the ones shown), never anything else.
+        void services.admin.killActiveConnections(inUse.session, target.dataSource, plan.end).then(
+          () => {
+            services.log.info('session', `in use: ended ${plan.end.length} session(s)`);
+            setInUse(null);
+            storeAskInUse('end', dontAskAgain);
+            fresh();
+          },
+          () => {
+            haptic('error');
+            setInUse((cur) =>
+              cur ? { ...cur, busy: false, error: strings.session.inUseEndFailed } : cur,
+            );
+          },
+        );
+      },
+      openAnother: (dontAskAgain: boolean) => {
+        setInUse(null);
+        storeAskInUse('another', dontAskAgain);
+        fresh();
+      },
+      cancel: () => {
+        if (!inUse.busy) setInUse(null);
+      },
+    };
+  }, [inUse, goTo, openWith, services.admin, services.log, storeAskInUse]);
+
+  const connectConfirm = useMemo(() => {
+    if (!confirmAsk) return null;
+    const { serverId, serverName, target } = confirmAsk;
+    return {
+      name: target.name,
+      checked: confirmAsk.checked,
+      connect: (dontAskAgain: boolean) => {
+        setConfirmAsk(null);
+        storeAskInUse('connect', dontAskAgain);
+        openWith(serverId, serverName, target, { skipInUse: true });
+      },
+      cancel: () => setConfirmAsk(null),
+    };
+  }, [confirmAsk, openWith, storeAskInUse]);
+
   const api = useMemo<SessionsApi>(
     () => ({
       state,
       limit,
       alreadyOpen,
+      inUse: inUseApi,
+      connectConfirm,
       open,
       show,
       hide,
@@ -469,6 +686,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       state,
       limit,
       alreadyOpen,
+      inUseApi,
+      connectConfirm,
       open,
       show,
       hide,

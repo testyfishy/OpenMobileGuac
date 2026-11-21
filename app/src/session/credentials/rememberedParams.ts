@@ -23,11 +23,12 @@ export const REMEMBER_POLICIES: readonly RememberPolicy[] = [
 ];
 
 /**
- * Default: until the app is closed. It ends the repeated prompt on every reconnect (iOS
- * drops the tunnel soon after the app goes to the background) without writing a secret to
- * the device.
+ * Default: saved on this device (Keychain / Keystore), released by the device check where
+ * one is set up. It ends the repeated prompt on every reconnect and survives restarts and
+ * updates; the owner chose it over "until closed" (2026-11-21). The prompt's Remember box
+ * still lets the user decline for one connection.
  */
-export const DEFAULT_REMEMBER_POLICY: RememberPolicy = 'app';
+export const DEFAULT_REMEMBER_POLICY: RememberPolicy = 'device';
 
 export function parseRememberPolicy(raw: unknown): RememberPolicy {
   return REMEMBER_POLICIES.includes(raw as RememberPolicy)

@@ -94,6 +94,38 @@ describe('parseConnectionGroup', () => {
     expect(shared.childConnections[0]?.attributes).toEqual({});
   });
 
+  it('keeps activeConnections per connection and group (MUL-5 "In use"), absent = 0', () => {
+    const counts = (g: ReturnType<typeof parseConnectionGroup>): unknown => ({
+      group: g.activeConnections,
+      connections: g.childConnections.map((c) => c.activeConnections),
+      groups: g.childConnectionGroups.map(counts),
+    });
+    const tree = parseConnectionGroup(
+      {
+        identifier: 'ROOT',
+        activeConnections: 0,
+        childConnections: [
+          { identifier: '1', name: 'busy', protocol: 'rdp', activeConnections: 3 },
+          { identifier: '2', name: 'idle', protocol: 'ssh' },
+        ],
+        childConnectionGroups: [
+          {
+            identifier: 'g',
+            type: 'BALANCING',
+            activeConnections: 2,
+            childConnections: [{ identifier: '3', name: 'm', activeConnections: 2 }],
+          },
+        ],
+      },
+      'ds',
+    );
+    expect(counts(tree)).toEqual({
+      group: 0,
+      connections: [3, 0],
+      groups: [{ group: 2, connections: [2], groups: [] }],
+    });
+  });
+
   it('accepts lastActive as an ISO string', () => {
     const c = parseConnection(
       { identifier: '1', name: 'x', protocol: 'rdp', lastActive: '2025-11-18T08:00:00Z' },

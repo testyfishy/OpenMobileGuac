@@ -321,7 +321,7 @@ only fakes the server side.
 
 #### Remembered answers ("Remember connection passwords", SRV-11)
 
-- [ ] Default (Until closed): the prompt shows "Remember for this connection", ticked, with
+- [ ] Default (On this device): the prompt shows "Remember for this connection", ticked, with
       "Until the app is closed, in memory only". Continue connects. Disconnect and open the
       connection again: no prompt. Send the app to the background for 30 s+ (iPhone: the
       tunnel drops) and come back: it reconnects without a prompt.

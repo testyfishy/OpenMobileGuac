@@ -1,8 +1,9 @@
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { loadEnv, type ProxyOptions } from 'vite';
+import { loadEnv, type Plugin, type ProxyOptions } from 'vite';
 import { defineConfig } from 'vitest/config';
+import { injectCspMeta } from './src/core/security/csp.ts';
 
 /** Local path the dev proxy serves the Guacamole server under (see `src/ui/services/devServer.ts`). */
 const DEV_PROXY_PATH = '/dev-guac';
@@ -44,7 +45,7 @@ export default defineConfig(({ command, mode }) => {
       : null;
 
   return {
-    plugins: [react()],
+    plugins: [react(), releaseCsp(command === 'build' && process.env['OMG_CSP'] !== 'off')],
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
       // `null` in every build; only the dev server gets the pre-filled entry.
@@ -57,6 +58,23 @@ export default defineConfig(({ command, mode }) => {
     },
   };
 });
+
+/**
+ * Adds the Content-Security-Policy meta (src/core/security/csp.ts) to the production
+ * index.html. The dev server gets none: Vite's HMR client needs inline scripts and eval.
+ * `OMG_CSP=off npm run build` leaves it out, for diagnosing a broken device build only
+ * (docs/BUILDING.md).
+ */
+function releaseCsp(enabled: boolean): Plugin {
+  return {
+    name: 'omg-release-csp',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler: (html) => (enabled ? injectCspMeta(html) : html),
+    },
+  };
+}
 
 function parseTarget(raw: string | undefined): { origin: string; basePath: string } | undefined {
   if (!raw || raw.trim().length === 0) return undefined;

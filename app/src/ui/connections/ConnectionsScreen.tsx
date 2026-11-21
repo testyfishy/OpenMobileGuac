@@ -429,6 +429,41 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
 
   const refresh = () => setTreeNonce((n) => n + 1);
 
+  // MUL-5: back from a session (or one closed): reload the tree quietly, so the "In use"
+  // badges follow what the server now reports. Shortly after, so a just-closed tunnel is
+  // gone on the server. No spinner, and a failure keeps the list as it was.
+  const shownId = sessions.state.activeId;
+  const openCount = sessions.state.sessions.length;
+  const [quietNonce, setQuietNonce] = useState(0);
+  const firstSessionsChange = useRef(true);
+  useEffect(() => {
+    if (firstSessionsChange.current) {
+      firstSessionsChange.current = false;
+      return undefined;
+    }
+    if (shownId !== null) return undefined;
+    const timer = setTimeout(() => setQuietNonce((n) => n + 1), 1500);
+    return () => clearTimeout(timer);
+  }, [shownId, openCount]);
+  useEffect(() => {
+    if (quietNonce === 0 || !authenticated) return undefined;
+    const session = auth.current(profile.id);
+    if (!session) return undefined;
+    let live = true;
+    const nonce = treeNonce;
+    services.api.getConnectionTree(session).then(
+      (result) => {
+        if (live) setTree((t) => (t.nonce === nonce && t.tree ? { ...t, tree: result } : t));
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+    // Only on `quietNonce`: a loud refresh (`treeNonce`) loads the tree itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quietNonce]);
+
   const onLogout = async () => {
     sessions.closeServer(profile.id);
     await auth.logout(profile.id);

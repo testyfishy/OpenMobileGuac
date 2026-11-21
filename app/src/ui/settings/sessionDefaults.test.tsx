@@ -256,6 +256,37 @@ describe('Demo server visibility', () => {
     expect(parseAppSettings({ openAgain: 1 }).openAgain).toBe('switch');
   });
 
+  it('"Ask before connecting" (MUL-5): defaults to when in use, keeps valid choices', () => {
+    expect(DEFAULT_APP_SETTINGS.askInUse).toBe('in-use');
+    expect(parseAppSettings({}).askInUse).toBe('in-use');
+    expect(parseAppSettings({ askInUse: 'always' }).askInUse).toBe('always');
+    expect(parseAppSettings({ askInUse: 'never' }).askInUse).toBe('never');
+    expect(parseAppSettings({ askInUse: 'bogus' }).askInUse).toBe('in-use');
+    expect(parseAppSettings({ askInUse: true }).askInUse).toBe('in-use');
+    // Restored from a backup like the other session choices.
+    expect(settingsFromBackup(DEFAULT_APP_SETTINGS, { askInUse: 'never' }).askInUse).toBe('never');
+  });
+
+  it('"Ask before connecting" sits next to "When a connection is already open"', () => {
+    const sessions = SETTINGS_CATEGORIES.find((c) => c.id === 'sessions');
+    const open = sessions?.groups.find((g) => g.id === 'open');
+    expect(open?.items).toEqual(['app:maxSessions', 'app:openAgain', 'app:askInUse']);
+  });
+
+  it.each(['en', 'es'] as const)('"Ask before connecting" is found by its wording (%s)', (l) => {
+    try {
+      setActiveLocale(l);
+      const query = l === 'en' ? 'in use' : 'en uso';
+      expect(searchSettings(query, CTX).map((r) => r.ref)).toContain('app:askInUse');
+      const { label, text } = appItemText('askInUse', CTX);
+      expect(searchSettings(label, CTX)[0]?.where).toContain(l === 'en' ? 'Sessions' : 'Sesiones');
+      // The hint says how it differs from the in-app setting, by that setting's own label.
+      expect(text.join(' ')).toContain(appItemText('openAgain', CTX).label);
+    } finally {
+      setActiveLocale('en');
+    }
+  });
+
   it('defaults to auto and survives parsing', () => {
     expect(DEFAULT_APP_SETTINGS.showDemo).toBe('auto');
     expect(parseAppSettings({}).showDemo).toBe('auto');

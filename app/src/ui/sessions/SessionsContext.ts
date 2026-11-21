@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { SessionTarget } from '../nav/navigation.ts';
+import type { InUsePlan } from './inUse.ts';
 import type { SessionsState } from './sessionModel.ts';
 
 export interface SessionsApi {
@@ -22,11 +23,40 @@ export interface SessionsApi {
     readonly cancel: () => void;
   } | null;
   /**
-   * Opens a session, or goes to the one already open for that connection, as the setting
-   * "When a connection is already open" says (may ask). May ask the user to close one first
-   * (MUL-1 cap).
+   * Set while the user must answer "<name> is already in use" (MUL-5: the server reports
+   * active sessions on the connection; setting "Ask before connecting").
    */
-  readonly open: (serverId: string, serverName: string, target: SessionTarget) => void;
+  readonly inUse: {
+    readonly name: string;
+    readonly plan: Extract<InUsePlan, { kind: 'prompt' }>;
+    readonly askedAt: number;
+    readonly busy: boolean;
+    readonly error: string | undefined;
+    readonly openExisting: (dontAskAgain: boolean) => void;
+    readonly endAndStart: (dontAskAgain: boolean) => void;
+    readonly openAnother: (dontAskAgain: boolean) => void;
+    readonly cancel: () => void;
+  } | null;
+  /** Set while "Connect to <name>?" is showing ("Ask before connecting" = Always). */
+  readonly connectConfirm: {
+    readonly name: string;
+    readonly checked: boolean;
+    readonly connect: (dontAskAgain: boolean) => void;
+    readonly cancel: () => void;
+  } | null;
+  /**
+   * Opens a session, or goes to the one already open for that connection, as the setting
+   * "When a connection is already open" says (may ask). Before a new session it may ask
+   * whether to use one the server reports as running ("Ask before connecting", MUL-5),
+   * unless `confirmed` (the user already confirmed this tap, e.g. an app link). May ask the
+   * user to close one first (MUL-1 cap).
+   */
+  readonly open: (
+    serverId: string,
+    serverName: string,
+    target: SessionTarget,
+    options?: { readonly confirmed?: boolean },
+  ) => void;
   /** Shows a session (the switcher). */
   readonly show: (id: string) => void;
   /** Back to the app chrome; the session stays connected in the background. */

@@ -1707,7 +1707,9 @@ export class SessionController {
     els.cursor.style.transform = `translate3d(${s.x - hx * k}px, ${s.y - hy * k}px, 0) scale(${k})`;
     els.cursor.dataset.mode = trackpadLike ? 'trackpad' : mode;
     els.cursor.dataset.large = this.settings.largeCursor ? 'true' : 'false';
-    els.cursor.style.visibility = connected && mode !== 'touch' ? 'visible' : 'hidden';
+    // `inherit`, not `visible`: a session hidden behind the app's other screens is
+    // `visibility: hidden` on an ancestor, and an explicit `visible` would show through it.
+    els.cursor.style.visibility = connected && mode !== 'touch' ? 'inherit' : 'hidden';
   }
 
   // =====================================================================================

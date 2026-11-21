@@ -15,8 +15,8 @@ on:
       runner:
         description: macOS runner label (switch to Intel if arm64 runners are out of capacity)
         type: choice
-        default: macos-26
-        options: [macos-26, macos-26-intel, xcode-27]
+        default: xcode-27
+        options: [xcode-27, macos-26, macos-26-intel]
 
 permissions:
   contents: read
@@ -28,11 +28,12 @@ concurrency:
 jobs:
   build:
     name: Simulator build (+ TestFlight when signing is configured)
-    # Capacitor 8 requires Xcode 26+. The macos-26 image's default Xcode is 26.x;
+    # Built with Xcode 27.1 (the xcode-27 image): Apple requires it for apps to fill the
+    # iPhone Duo's screens. Capacitor 8 itself requires Xcode 26+; macos-26 has 26.x;
     # macos-15's default is still 16.4, so don't use that label.
     # macos-26-intel (x64) has the same Xcode 26.x set; use it via "Run workflow" or the
     # IOS_RUNNER repository variable when arm64 runners are out of capacity.
-    runs-on: ${{ inputs.runner || vars.IOS_RUNNER || 'macos-26' }}
+    runs-on: ${{ inputs.runner || vars.IOS_RUNNER || 'xcode-27' }}
     timeout-minutes: 45
     env:
       # Secrets can't be used directly in `if:`; expose a flag instead. Never on pull

@@ -103,6 +103,13 @@ with the environment variable set: `OMG_DEBUG_WEBVIEW=1 npx cap sync` (PowerShel
 time and baked into the native project, so sync again without it before building anything
 you give to someone else. The same applies to iOS.
 
+**Content-Security-Policy.** `npm run build` adds a strict CSP `<meta>` to `dist/index.html`
+(`app/src/core/security/csp.ts`); `npm run dev` has none, because Vite's hot reload needs
+inline scripts. Anything the policy blocks shows up as a `[csp]` warning in Settings ›
+General & about › Diagnostics. To check whether a broken device build is caused by the
+policy, build once without it: `OMG_CSP=off npm run build` (PowerShell:
+`$env:OMG_CSP='off'; npm run build`), then `npx cap sync`. Do not ship such a build.
+
 ### 3.2 Android Studio
 
 ```sh

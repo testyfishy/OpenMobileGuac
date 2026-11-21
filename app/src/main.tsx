@@ -2,11 +2,15 @@ import { StrictMode, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
+import { recordCspViolations } from './core/diagnostics/cspViolations.ts';
 import { detectImageMimetypes } from './ui/launch/imageSupport.ts';
 import { createAppServices, type AppServiceOverrides } from './ui/services/AppServices.ts';
 // By file path, not through ui/session/index.ts, so the session screen stays code-split.
 import { sweepDownloadCache } from './ui/session/downloadCache.ts';
 import { applyTheme } from './ui/theme/applyTheme.ts';
+
+// Listen before anything renders; entries reach the diagnostics log once it exists.
+const cspViolations = recordCspViolations(document);
 
 const rootEl = document.getElementById('root');
 if (!rootEl) {
@@ -51,6 +55,7 @@ async function boot(): Promise<void> {
   // Files received in an earlier run and handed to the share sheet (downloads, print jobs).
   void sweepDownloadCache();
   const services = createAppServices(overrides);
+  cspViolations.attach(services.log);
   // DIAG-1: uncaught errors go to the local log (message only; no stack, no data).
   window.addEventListener('error', (e) => services.log.error('app', e.message || 'error'));
   window.addEventListener('unhandledrejection', (e) =>

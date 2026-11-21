@@ -36,6 +36,19 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
       is signed out). Tick "Don't ask again" + Go to: the next tap goes straight there and the
       setting shows "Go to the open session". With a session "Disconnected to save battery",
       Go to reconnects it instead of opening a duplicate. Same from "Jump back in".
+- [ ] MUL-5 (real server, non-admin account): open a connection, then force-quit the app (or
+      sign out of it on the server side) so the session stays on the server. Reopen the app
+      and sign in: the connection shows "In use", and back on the server list its "Jump back
+      in" card too (only once signed in; never a sign-in just for it). Tap it: "<name> is already
+      in use" with "You, since …". Open the existing one joins it (note how long it lasts
+      once the old tunnel times out, ~15 s on iOS, and what the next tap on the connection does
+      then: with "Go to the open session" it returns to that joined session). Repeat and choose End it and start fresh:
+      the old session disappears from the web client's Active Sessions and a new one opens;
+      no other user's session is touched. Open another starts a second session. With another
+      user's session on the connection: only Open another / Cancel and "Another user". With
+      "Always": a free connection asks "Connect to <name>?". With the server unreachable or
+      slow, the tap still connects within about 2 s. An app link confirmed in "Open … on …?"
+      asks nothing more. Pull to refresh and returning from a session update the badge.
 - [ ] Hardware keyboard typing reaches only the visible session.
 - [ ] Android back in a session: Keep open / Disconnect / Cancel.
 - [ ] Background > grace period (default 60 s): on return the session shows "Disconnected to
@@ -153,6 +166,38 @@ Compare each step with the Guacamole web client (Settings › Connections).
       Every server then asks for its password; open sessions closed; in the web client's
       active sessions the app's session is gone (for servers that were reachable). With
       "Remove servers too" ticked, the server list is empty afterwards.
+
+## Content-Security-Policy (AUDIT §7 R9)
+
+Release builds carry a strict CSP (`app/src/core/security/csp.ts`, injected into
+`dist/index.html` by `vite.config.ts`). Checked in desktop Chromium only. Anything it blocks
+is logged as a `[csp]` warning ("CSP blocked <directive>: <origin or keyword>") in
+**Settings › General & about › Diagnostics**; check that screen at the end of each step.
+
+- [ ] Cold start on iOS (current and the oldest supported iOS) and Android (current WebView):
+      the server list appears. **Failure:** blank or white screen at launch (bridge or bundle
+      blocked); connect Safari Web Inspector / `chrome://inspect` with an
+      `OMG_DEBUG_WEBVIEW=1` build and look for "Refused to ..." console lines.
+- [ ] Android with an old System WebView if one is available (an emulator image with the
+      factory WebView, or WebView disabled/rolled back): the app still starts. On WebViews
+      without `DOCUMENT_START_SCRIPT` Capacitor inserts its bridge as an inline script right
+      after `<head>`, before the policy meta, which the policy does not cover (simulated in
+      Chromium, not seen on a device).
+- [ ] Plugin calls work: saved password (secure storage), biometrics, haptics, share sheet,
+      clipboard, status bar colour. **Failure:** buttons that never finish or spinners that
+      hang (bridge messages blocked).
+- [ ] Sign in to a real server over https and over plain http, open a session (WebSocket
+      tunnel `wss:` / `ws:`), and one with the HTTP tunnel fallback. **Failure:** sign-in
+      "network error", or a session with no picture (`connect-src` / `img-src`).
+- [ ] In a session: audio plays, the remote cursor image shows, a video stream (if the
+      server sends one) plays, microphone works when enabled.
+- [ ] Download a file from the remote and save/share it; upload a file.
+- [ ] SSO sign-in in the in-app browser (native view, not covered by the page policy)
+      returns to the app.
+- [ ] Diagnostics shows no `[csp]` line after all of the above. Note any that appear.
+
+If a TestFlight or APK build is broken by the policy, rebuild with `OMG_CSP=off npm run
+build` and `npx cap sync` to confirm (docs/BUILDING.md §3.1); do not ship that build.
 
 ## Re-test after the audit fixes (2026-11-21)
 

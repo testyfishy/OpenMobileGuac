@@ -295,6 +295,28 @@ export class GuacAdminApi {
 
   // ---- active connections -----------------------------------------------------------------
 
+  /**
+   * `GET connections/{id}`: only its `activeConnections` (the number of active connections
+   * to it across all users, `APIConnection`; READ on the connection is enough). For the
+   * "already in use" check before connecting (docs/protocol-notes.md §8.5).
+   */
+  async getActiveConnectionCount(
+    session: AuthSession,
+    dataSource: string,
+    identifier: string,
+  ): Promise<number> {
+    const path = `connections/${encodeURIComponent(identifier)}`;
+    const raw = await this.getJson(session, dataSource, path);
+    return this.parse(raw, session, dataSource, path, (r) => {
+      if (!isRecord(r)) throw new ModelParseError('', 'expected an object');
+      const n = r['activeConnections'];
+      if (n === undefined || n === null) return 0;
+      if (typeof n !== 'number' || !Number.isFinite(n) || n < 0)
+        throw new ModelParseError('activeConnections', 'expected a count');
+      return Math.floor(n);
+    });
+  }
+
   async listActiveConnections(
     session: AuthSession,
     dataSource: string,

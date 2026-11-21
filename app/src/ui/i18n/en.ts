@@ -367,8 +367,10 @@ export const en = {
     empty: 'No connections are available to this account.',
     noResults: (q: string) => `No connections match “${q}”.`,
     loadFailed: 'Could not load connections',
-    inUse: (n: number) => (n === 1 ? 'In use by 1 user' : `In use by ${n} users`),
+    inUse: (n: number) =>
+      n === 1 ? '1 active session on the server' : `${n} active sessions on the server`,
     inUseShort: 'In use',
+    inUseBadge: (n: number) => (n > 1 ? `In use · ${n}` : 'In use'),
     addFavourite: (name: string) => `Add ${name} to favourites`,
     removeFavourite: (name: string) => `Remove ${name} from favourites`,
     expandGroup: (name: string) => `Expand ${name}`,
@@ -393,7 +395,7 @@ export const en = {
     protocol: 'Protocol',
     group: 'Group',
     rootGroup: 'Top level',
-    activeUsers: 'Active users',
+    activeUsers: 'Active sessions',
     identifier: 'Identifier',
     source: 'Data source',
     lastUsed: 'Last used',
@@ -466,6 +468,23 @@ export const en = {
     alreadyOpenAnother: 'Open another',
     alreadyOpenDontAsk:
       'Don’t ask again (change it in Settings › Sessions › When a connection is already open)',
+    inUseTitle: (name: string) => `${name} is already in use`,
+    inUseBody: (n: number) =>
+      n === 1
+        ? 'The server reports 1 active session on this connection.'
+        : `The server reports ${n} active sessions on this connection.`,
+    inUseYou: (since: string) => (since ? `You, since ${since}` : 'You'),
+    inUseUser: (name: string, since: string) => (since ? `${name}, since ${since}` : name),
+    inUseSomeone: (since: string) => (since ? `Another user, since ${since}` : 'Another user'),
+    inUseOpenExisting: 'Open the existing one',
+    inUseEnd: (n: number) => (n > 1 ? `End all ${n} and start fresh` : 'End it and start fresh'),
+    inUseAnother: 'Open another',
+    inUseCannotJoin: 'This account cannot join running sessions; an administrator account can.',
+    inUseEndFailed: 'The server did not end the session. Nothing was changed.',
+    inUseDontAsk: 'Don’t ask again (change it in Settings › Sessions › Ask before connecting)',
+    connectTitle: (name: string) => `Connect to ${name}?`,
+    connectBody: 'The server reports no active session on this connection.',
+    connectConfirm: 'Connect',
     suspendedTitle: 'Disconnected to save battery',
     suspendedBody:
       'The app was in the background longer than the time set in Settings, so this session was closed cleanly.',
@@ -640,6 +659,12 @@ export const en = {
     openAgainNew: 'Open another',
     openAgainHint:
       'What tapping a connection that has a session open in the app does. A disconnected session reconnects. A second session to the same computer may sign the first one out (for example with RDP). Joining someone’s session and share links always go to the open one.',
+    askInUse: 'Ask before connecting',
+    askInUseInUse: 'When in use',
+    askInUseAlways: 'Always',
+    askInUseNever: 'Never',
+    askInUseHint:
+      'Before connecting, the app asks the server whether the connection already has active sessions, for example one left running when the app was closed or lost its sign-in. If so, it offers to open the existing one, end it and start fresh, or open another. “When a connection is already open” is about sessions open in this app; this one is about sessions the server reports. If the server does not answer within 2 seconds, the app just connects. Never asked for the Demo, share links or joining a session.',
     backgroundDisconnect: 'Disconnect sessions after the app is in the background for',
     backgroundDisconnectIos:
       'On iPhone and iPad the system pauses the app soon after you leave it, so it cannot keep a session alive: the Guacamole server ends it about 15 seconds after the app goes quiet, whatever is chosen here. When you come back, the session reconnects by itself.',

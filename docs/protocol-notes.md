@@ -1145,14 +1145,53 @@ How the web client decides (mirrored in `app/src/ui/admin/permissions.ts`):
 
 - `APIActiveConnection` (`JAVA/rest/activeconnection/APIActiveConnection.java`) has
   `identifier`, `connectionIdentifier`, `startDate`, `remoteHost`, `username` and
-  `connectable`. The app filters the list by `connectionIdentifier` to show one
-  connection's sessions.
+  `connectable`, each copied unchanged from the `ActiveConnection`. The app filters
+  the list by `connectionIdentifier` to show one connection's sessions.
 - Who may disconnect, in the database extension: a privileged user or one with `DELETE` on
   that active connection (`JDBC/activeconnection/ActiveConnectionService.java`,
   `deleteObject` / `hasObjectPermissions`), which otherwise throws "Permission denied.". The
   web client's session list does not check this itself; it offers Delete for any selected
   session (`FE/settings/directives/guacSettingsSessions.js`, `canDeleteSessions`). The app
   shows Disconnect for system `ADMINISTER` or `DELETE` in `activeConnectionPermissions`.
+- Who sees what, in the database extension (read for "Ask before connecting", MUL-5;
+  `JDBC/` = `extensions/guacamole-auth-jdbc/modules/guacamole-auth-jdbc-base/src/main/java/org/apache/guacamole/auth/jdbc/`):
+  - `GET activeConnections` is **not** admin-only. `JDBC/tunnel/AbstractGuacamoleTunnelService.java`,
+    `getActiveConnections(ModeledAuthenticatedUser)`, returns every record to a privileged
+    user, and otherwise the records of every connection the user can READ (other users'
+    sessions included).
+  - `JDBC/activeconnection/ActiveConnectionService.java`, `retrieveObjects`, computes
+    `hasPrivilegedAccess = isPrivileged || username.equals(record.getUsername())` and calls
+    `TrackedActiveConnection.init(user, record, hasPrivilegedAccess, hasPrivilegedAccess)`.
+    `TrackedActiveConnection.init` copies `remoteHost`, `username` and the tunnel only when
+    that flag is set, and `isConnectable()` returns it. So a normal user gets
+    `username`, `remoteHost` and `connectable: true` only for their **own** sessions; other
+    users' sessions come with `identifier`, `connectionIdentifier` and `startDate` only.
+    "Own" therefore means `username` equal to the signed-in user name, never "username
+    present" (an administrator sees every name).
+  - `TrackedActiveConnection.connect` (joining with `GUAC_TYPE=a`) throws "Permission
+    denied." unless `isConnectable()`: a user can join their own running session without
+    being an administrator.
+  - `JDBC/activeconnection/ActiveConnectionPermissionService.java`, `retrievePermissions`:
+    READ on every active connection the user can see, DELETE only where the user is
+    privileged or the record's user name is theirs. `deleteObject` checks that DELETE, so a
+    user can end (PATCH remove) their own sessions.
+- One connection's count: `GET connections/{id}` returns `APIConnection`
+  (`JAVA/rest/connection/APIConnection.java`, `@JsonInclude(NON_NULL)`), whose
+  `activeConnections` is set from `connection.getActiveConnections()`. In the database
+  extension that is `tunnelService.getActiveConnections(this).size()`
+  (`JDBC/connection/ModeledConnection.java`), and `AbstractGuacamoleTunnelService`
+  `getActiveConnections(Connection)` returns every record for that connection identifier:
+  active connections to it across all users. READ on the connection is enough. The tree (§2) carries the same
+  field per connection and group, as of when it was loaded.
+- The app's check before connecting (`ui/sessions/inUseCheck.ts`) asks, in parallel and for
+  at most 2 s, `GET connections/{id}`, `GET activeConnections` (filtered by
+  `connectionIdentifier`) and `GET self/effectivePermissions`. If nothing answers in time it
+  just connects. It ends sessions only with the `PATCH` above, naming only the user's own
+  active connections on that connection (or, for an administrator with none of their own,
+  the ones listed), and only when DELETE is granted on every one.
+- **Unverified (needs a real server):** whether a session joined with `GUAC_TYPE=a` adds to
+  the connection's `activeConnections`, and how long a joined session lasts once the stale
+  owner's tunnel times out (a join shares the original connection and ends with it).
 - `PATCH` needs an atomic directory (`DirectoryResource.patchObjects` refuses otherwise). The
   database extension's directories are atomic: `JDBC/base/JDBCDirectory.java`,
   `tryAtomically`, runs the operation in a transaction with `atomic = true`.

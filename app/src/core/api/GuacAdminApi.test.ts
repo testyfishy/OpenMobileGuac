@@ -471,6 +471,25 @@ describe('GuacAdminApi groups', () => {
 });
 
 describe('GuacAdminApi active connections', () => {
+  it('reads one connection’s active count (GET connections/{id}, MUL-5)', async () => {
+    const http = server()
+      .on('GET', `${DATA}/connections/7`, () =>
+        jsonResponse(200, { identifier: '7', name: 'Lab', protocol: 'vnc', activeConnections: 2 }),
+      )
+      .on('GET', `${DATA}/connections/8`, () =>
+        jsonResponse(200, { identifier: '8', name: 'Idle', protocol: 'ssh' }),
+      )
+      .on('GET', `${DATA}/connections/9`, () =>
+        jsonResponse(200, { identifier: '9', name: 'Bad', activeConnections: 'x' }),
+      );
+    const api = new GuacAdminApi(http);
+    expect(await api.getActiveConnectionCount(session, 'postgresql', '7')).toBe(2);
+    expect(await api.getActiveConnectionCount(session, 'postgresql', '8')).toBe(0);
+    expect((await errorInfo(api.getActiveConnectionCount(session, 'postgresql', '9'))).kind).toBe(
+      'invalid-response',
+    );
+  });
+
   it('lists active connections from the identifier map', async () => {
     const http = server().on('GET', `${DATA}/activeConnections`, () =>
       jsonResponse(200, {

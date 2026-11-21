@@ -75,6 +75,12 @@ export interface AppSettings {
    * open session, or open another one.
    */
   readonly openAgain: OpenAgain;
+  /**
+   * MUL-5: ask before connecting when the server reports active sessions on the connection
+   * (`in-use`), before every connection (`always`), or never. About sessions on the server;
+   * `openAgain` is about sessions open in this app.
+   */
+  readonly askInUse: AskInUse;
   /** CON-4: keep a small picture of the last screen per connection. */
   readonly thumbnails: boolean;
   readonly connectionSort: ConnectionSort;
@@ -100,6 +106,10 @@ export type DemoVisibility = 'auto' | 'show' | 'hide';
 /** What tapping an already-open connection does (MUL-1). */
 export type OpenAgain = 'ask' | 'switch' | 'new';
 export const OPEN_AGAIN_CHOICES: readonly OpenAgain[] = ['ask', 'switch', 'new'];
+
+/** "Ask before connecting" (MUL-5). */
+export type AskInUse = 'in-use' | 'always' | 'never';
+export const ASK_IN_USE_CHOICES: readonly AskInUse[] = ['in-use', 'always', 'never'];
 
 /**
  * Whether the server list shows the Demo entry. `savedServers` is undefined while the list
@@ -128,6 +138,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   rememberConnectionUnlock: DEFAULT_REMEMBER_UNLOCK,
   maxSessions: 3,
   openAgain: 'switch',
+  askInUse: 'in-use',
   thumbnails: true,
   connectionSort: 'server',
   onboardingDone: false,
@@ -317,6 +328,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
         ? Math.min(MAX_SESSIONS_MAX, Math.max(MAX_SESSIONS_MIN, max))
         : d.maxSessions,
     openAgain: pick(raw['openAgain'], OPEN_AGAIN_CHOICES, d.openAgain),
+    askInUse: pick(raw['askInUse'], ASK_IN_USE_CHOICES, d.askInUse),
     thumbnails: typeof raw['thumbnails'] === 'boolean' ? raw['thumbnails'] : d.thumbnails,
     connectionSort: pick(
       raw['connectionSort'],

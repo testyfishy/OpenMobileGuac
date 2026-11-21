@@ -13,6 +13,11 @@ export interface PendingLaunch {
   readonly identifier: string;
   readonly dataSource: string | undefined;
   readonly type: 'c' | 'g';
+  /**
+   * The user already confirmed this launch ("Open … on …?" for an app link): no second
+   * question ("Ask before connecting", MUL-5) for the same tap.
+   */
+  readonly confirmed?: boolean;
 }
 
 export interface LaunchApi {
@@ -36,7 +41,7 @@ export function useLaunch(): LaunchApi {
 export function useConsumePendingLaunch(
   serverId: string,
   tree: ConnectionTree | undefined,
-  onTarget: (t: SessionTarget) => void,
+  onTarget: (t: SessionTarget, launch: PendingLaunch) => void,
   onMissing: () => void,
   version: number,
 ): void {
@@ -51,7 +56,7 @@ export function useConsumePendingLaunch(
     if (!p || p.serverId !== serverId) return;
     launch.take(serverId);
     const t = findTarget(tree, p.identifier, p.dataSource, p.type);
-    if (t) latest.current.onTarget(t);
+    if (t) latest.current.onTarget(t, p);
     else latest.current.onMissing();
   }, [tree, serverId, launch, version]);
 }

@@ -62,8 +62,8 @@ describe('CredentialSheet Remember box (SRV-11)', () => {
 });
 
 describe('"Remember connection passwords" setting', () => {
-  it('defaults to until the app is closed and parses stored values', () => {
-    expect(DEFAULT_APP_SETTINGS.rememberConnectionPasswords).toBe('app');
+  it('defaults to saved on this device and parses stored values', () => {
+    expect(DEFAULT_APP_SETTINGS.rememberConnectionPasswords).toBe('device');
     expect(
       parseAppSettings({ rememberConnectionPasswords: 'device' }).rememberConnectionPasswords,
     ).toBe('device');
@@ -71,9 +71,9 @@ describe('"Remember connection passwords" setting', () => {
       parseAppSettings({ rememberConnectionPasswords: '1h' }).rememberConnectionPasswords,
     ).toBe('1h');
     expect(parseAppSettings({ rememberConnectionPasswords: 42 }).rememberConnectionPasswords).toBe(
-      'app',
+      'device',
     );
-    expect(parseAppSettings({}).rememberConnectionPasswords).toBe('app');
+    expect(parseAppSettings({}).rememberConnectionPasswords).toBe('device');
   });
 
   it('is kept from this device when settings are restored from a backup', () => {

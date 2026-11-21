@@ -13,12 +13,15 @@ export function Dialog({
   actions,
   onCancel,
   tone,
+  stackActions,
 }: {
   title: string;
   children?: ReactNode;
   actions: ReactNode;
   onCancel: () => void;
   tone?: 'danger' | 'warning';
+  /** One button per line (many answers); the last one given is shown on top. */
+  stackActions?: boolean;
 }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -65,7 +68,9 @@ export function Dialog({
           {title}
         </h2>
         <div className="dialog-body">{children}</div>
-        <div className="dialog-actions">{actions}</div>
+        <div className={stackActions ? 'dialog-actions dialog-actions-stack' : 'dialog-actions'}>
+          {actions}
+        </div>
       </div>
     </div>
   );

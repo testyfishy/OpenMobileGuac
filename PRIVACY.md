@@ -27,7 +27,7 @@ versions Apache-2.0). You can check every statement here in the source code at
 | Saved server passwords | iOS Keychain / Android Keystore-protected storage | Only if you choose to save the password |
 | Sign-in tokens from your server | iOS Keychain / Android Keystore-protected storage | Used to avoid signing in again |
 | TOTP (two-factor) secret | iOS Keychain / Android Keystore-protected storage | Off by default. Only if you choose to store it |
-| Connection passwords you type when a connection asks for them | Memory, or the Keychain / Keystore | Kept in memory until the app closes by default. Saved on the device only if you pick "On this device" in Settings |
+| Connection passwords you type when a connection asks for them | Memory, or the Keychain / Keystore | Saved on the device in the Keychain / Keystore by default, released by Face ID, fingerprint or the device passcode where one is set up. You can choose memory-only, a time limit, or never in Settings, and untick "Remember" in the prompt |
 | Backup passphrase | iOS Keychain / Android Keystore-protected storage | Only if you set one for automatic backups |
 | Thumbnails: small pictures of the last screen of a session | App cache folder | Can be turned off and deleted in Settings. Not included in system backups |
 | Backups | App storage | Only if you make a backup or turn on automatic backups. A backup holds no passwords unless you set a passphrase; then passwords and TOTP secrets are encrypted with it. Sign-in tokens are never put in a backup |

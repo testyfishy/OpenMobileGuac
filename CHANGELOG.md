@@ -50,6 +50,8 @@ First public version.
   every control.
 - Connection and folder management for accounts allowed to do it: create, edit, clone,
   delete, quality presets, active sessions with Disconnect and Join.
+- "In use" badges, and a question before connecting when the server reports a session already
+  running on the connection: open the existing one, end it and start fresh, or open another.
 
 ### Session screen
 
@@ -74,6 +76,8 @@ First public version.
 - English and Spanish. A guide for adding languages is in `docs/TRANSLATING.md`.
 - Settings for theme, language, session defaults, clipboard, haptics and more.
 - A local diagnostics log (passwords removed) you can copy or share, and a connection test.
+- A strict Content-Security-Policy in release builds (no inline or eval'd script); anything it
+  blocks is noted in the diagnostics log.
 - No analytics, ads, tracking or account.
 
 ### Builds

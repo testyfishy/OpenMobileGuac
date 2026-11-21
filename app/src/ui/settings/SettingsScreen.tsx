@@ -46,6 +46,7 @@ import {
   SERVER_SIGN_OUT_CHOICES,
   diffFromDefaults,
   type DemoVisibility,
+  type AskInUse,
   type OpenAgain,
   mergeSessionSettings,
   parseServerOptions,
@@ -558,6 +559,22 @@ export function SettingsScreen() {
               ]}
             />
             <Hint text={t.openAgainHint} />
+          </>
+        );
+      case 'askInUse':
+        return (
+          <>
+            <Segmented<AskInUse>
+              label={t.askInUse}
+              value={settings.askInUse}
+              onChange={(v) => update({ ...settings, askInUse: v })}
+              options={[
+                { value: 'in-use', label: t.askInUseInUse },
+                { value: 'always', label: t.askInUseAlways },
+                { value: 'never', label: t.askInUseNever },
+              ]}
+            />
+            <Hint text={t.askInUseHint} />
           </>
         );
       case 'backgroundDisconnect':

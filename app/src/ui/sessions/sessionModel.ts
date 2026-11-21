@@ -25,6 +25,12 @@ export interface OpenSession {
   readonly state: SessionState;
   /** Bumped on reconnect so the session screen remounts with a fresh tunnel. */
   readonly epoch: number;
+  /**
+   * MUL-5: the user's own session that was still running on the server, joined with "Open
+   * the existing one". It then counts as that connection's open session (badges, "already
+   * open"), unlike joining someone else's session.
+   */
+  readonly resumed?: true;
 }
 
 export interface SessionsState {
@@ -130,6 +136,18 @@ export type OpenDecision =
   /** At the cap: the user must close one. `suggest` is the least recently shown. */
   | { readonly kind: 'limit'; readonly suggest: OpenSession };
 
+/** Whether an open session stands for `target` (a resumed own session stands for its connection). */
+function matches(s: OpenSession, target: SessionTarget): boolean {
+  if (sameTarget(s.target, target)) return true;
+  return (
+    s.resumed === true &&
+    target.join === undefined &&
+    s.target.type === target.type &&
+    s.target.dataSource === target.dataSource &&
+    s.target.identifier === target.identifier
+  );
+}
+
 /** The most recently shown open session of that server and target, if any. */
 export function findOpenSession(
   state: SessionsState,
@@ -138,7 +156,7 @@ export function findOpenSession(
 ): OpenSession | undefined {
   let best: OpenSession | undefined;
   for (const s of state.sessions) {
-    if (s.serverId !== serverId || !sameTarget(s.target, target)) continue;
+    if (s.serverId !== serverId || !matches(s, target)) continue;
     if (!best || s.lastShownAt > best.lastShownAt) best = s;
   }
   return best;
@@ -199,8 +217,9 @@ export function activeSession(state: SessionsState): OpenSession | undefined {
 export function openTargetKeys(state: SessionsState, serverId: string): Set<string> {
   return new Set(
     state.sessions
-      // A joined session is someone else's: it does not mark the connection as open.
-      .filter((s) => s.serverId === serverId && s.target.join === undefined)
+      // A joined session is someone else's: it does not mark the connection as open (unless
+      // it is the user's own one, resumed).
+      .filter((s) => s.serverId === serverId && (s.target.join === undefined || s.resumed))
       .map((s) => `${s.target.type}:${s.target.dataSource}:${s.target.identifier}`),
   );
 }

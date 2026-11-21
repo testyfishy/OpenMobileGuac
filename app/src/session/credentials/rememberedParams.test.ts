@@ -26,13 +26,13 @@ const T: RememberTarget = {
 const MIN = 60_000;
 
 describe('remember policy', () => {
-  it('defaults to "until the app is closed" and parses only known values', () => {
-    expect(DEFAULT_REMEMBER_POLICY).toBe('app');
+  it('defaults to "on this device" and parses only known values', () => {
+    expect(DEFAULT_REMEMBER_POLICY).toBe('device');
     expect(parseRememberPolicy('device')).toBe('device');
     expect(parseRememberPolicy('15m')).toBe('15m');
-    expect(parseRememberPolicy('forever')).toBe('app');
-    expect(parseRememberPolicy(300)).toBe('app');
-    expect(parseRememberPolicy(undefined)).toBe('app');
+    expect(parseRememberPolicy('forever')).toBe('device');
+    expect(parseRememberPolicy(300)).toBe('device');
+    expect(parseRememberPolicy(undefined)).toBe('device');
   });
 
   it('maps choices to time limits', () => {

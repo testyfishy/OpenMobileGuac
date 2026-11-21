@@ -235,7 +235,7 @@ function DeepLinks() {
   useEffect(() => {
     latest.current = { nav, services, toast, sessions, launch };
   });
-  const open = useCallback((link: PendingLink) => {
+  const open = useCallback((link: PendingLink, confirmed: boolean) => {
     const { nav: n, sessions: ss, launch: l } = latest.current;
     ss.hide();
     l.request({
@@ -243,6 +243,8 @@ function DeepLinks() {
       identifier: link.identifier,
       dataSource: link.dataSource,
       type: link.type,
+      // Confirmed in the dialog below: no "Ask before connecting" question on top (MUL-5).
+      confirmed,
     });
     n.open({ name: 'connections', serverId: link.serverId });
   }, []);
@@ -280,7 +282,7 @@ function DeepLinks() {
         };
         const options = parseServerOptions(await s.profiles.getOptions(link.serverId));
         // AUDIT §3 #8: confirm first unless the user chose not to be asked for this server.
-        if (isDemo || !options.confirmLinks) open(pending);
+        if (isDemo || !options.confirmLinks) open(pending, false);
         else {
           setDontAsk(false);
           setAsk(pending);
@@ -300,7 +302,7 @@ function DeepLinks() {
         serverOptionsToJson({ ...o, confirmLinks: false }),
       );
     }
-    open(link);
+    open(link, true);
   };
   return (
     <Dialog

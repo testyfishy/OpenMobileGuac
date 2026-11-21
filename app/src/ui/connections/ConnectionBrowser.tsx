@@ -5,6 +5,7 @@ import { useShowsEmptyGroups } from '../admin/AdminContext.ts';
 import { AdminGroupButton } from '../admin/EntryPoints.tsx';
 import { EmptyState } from '../components/Feedback.tsx';
 import { Icon } from '../components/Icon.tsx';
+import { serverOnlyCount } from '../sessions/inUse.ts';
 import { strings } from '../strings.ts';
 import {
   groupHasContent,
@@ -38,6 +39,11 @@ export interface ConnectionBrowserProps {
   lastUsed?: ReadonlyMap<string, number>;
   /** `c:ds:id` / `g:ds:id` of targets with an open session. */
   openKeys?: ReadonlySet<string>;
+  /**
+   * `c:ds:id` → live sessions of that connection in the app, subtracted from the server's
+   * count for the "In use" badge (MUL-5), so the app's own sessions do not show as in use.
+   */
+  liveCounts?: ReadonlyMap<string, number>;
   /** refKey → thumbnail data URL (CON-4). */
   thumbnails?: ReadonlyMap<string, string>;
   /** Hide data-source headings (e.g. the demo). */
@@ -59,6 +65,7 @@ export function ConnectionBrowser({
   sort = 'server',
   lastUsed,
   openKeys,
+  liveCounts,
   thumbnails,
   flat,
 }: ConnectionBrowserProps) {
@@ -96,6 +103,7 @@ export function ConnectionBrowser({
           showPath={showPath}
           favourite={favKeys.has(key)}
           open={openKeys?.has(key) ?? false}
+          inUse={serverOnlyCount(m.connection.activeConnections, liveCounts?.get(key) ?? 0)}
           thumbnail={thumb ? thumbnails?.get(key) : undefined}
           onConnect={onConnect}
           onToggleFavourite={onToggleFavourite}
@@ -291,6 +299,20 @@ function ActiveDot({ count }: { count: number }) {
   );
 }
 
+/**
+ * "In use" (MUL-5): the server reports `count` active sessions on the connection besides the
+ * ones open in this app. The count shows from 2; the accessible label always says it.
+ */
+export function InUseBadge({ count }: { count: number }) {
+  const c = strings.connections;
+  return (
+    <span className="badge badge-in-use" title={c.inUse(count)}>
+      <span aria-hidden="true">{c.inUseBadge(count)}</span>
+      <span className="visually-hidden">{c.inUse(count)}</span>
+    </span>
+  );
+}
+
 /** "Open": a session of this connection is open in the app (MUL-1). */
 export function OpenBadge() {
   const c = strings.connections;
@@ -309,6 +331,7 @@ function ConnectionRow({
   showPath,
   favourite,
   open,
+  inUse,
   thumbnail,
   onConnect,
   onToggleFavourite,
@@ -318,6 +341,8 @@ function ConnectionRow({
   showPath: boolean;
   favourite: boolean;
   open: boolean;
+  /** Server-reported sessions besides the app's own (0 = none). */
+  inUse: number;
   thumbnail: string | undefined;
   onConnect: (c: Connection) => void;
   onToggleFavourite: (c: Connection, favourite: boolean) => void;
@@ -389,17 +414,10 @@ function ConnectionRow({
             <span className="row-title">
               {connection.name}
               {open ? <OpenBadge /> : null}
+              {inUse > 0 ? <InUseBadge count={inUse} /> : null}
             </span>
-            <span className="row-subtitle">
-              {subtitle}
-              {connection.activeConnections > 0 ? (
-                <span className="in-use"> · {c.inUseShort}</span>
-              ) : null}
-            </span>
+            <span className="row-subtitle">{subtitle}</span>
           </span>
-          {connection.activeConnections > 0 ? (
-            <ActiveDot count={connection.activeConnections} />
-          ) : null}
         </button>
         <div className="row-trailing">
           <button

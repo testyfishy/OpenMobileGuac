@@ -154,6 +154,25 @@ describe('decideOpen', () => {
   it('builds open-target keys per server', () => {
     expect([...openTargetKeys(withSessions('a'), 's1')]).toEqual(['c:ds:a']);
   });
+
+  it('a resumed own session (MUL-5 "Open the existing one") counts as the connection’s open one', () => {
+    const joined: OpenSession = {
+      ...session('a', 1),
+      id: 'j',
+      target: { ...target('a'), join: '$own' },
+      resumed: true,
+    };
+    const s = sessionsReducer(INITIAL_SESSIONS, { type: 'open', session: joined });
+    expect(findOpenSession(s, 's1', target('a'))?.id).toBe('j');
+    expect(decideOpen(s, 's1', target('a'), 3, 'switch')).toEqual({ kind: 'existing', id: 'j' });
+    expect([...openTargetKeys(s, 's1')]).toEqual(['c:ds:a']);
+    // Someone else's joined session (admin Join) does not.
+    const { resumed: _resumed, ...plain } = joined;
+    void _resumed;
+    const other = sessionsReducer(INITIAL_SESSIONS, { type: 'open', session: plain });
+    expect(findOpenSession(other, 's1', target('a'))).toBeUndefined();
+    expect([...openTargetKeys(other, 's1')]).toEqual([]);
+  });
 });
 
 describe('lifecycle timing', () => {

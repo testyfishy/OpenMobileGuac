@@ -368,8 +368,10 @@ export const es: Strings = {
     empty: 'Esta cuenta no tiene conexiones disponibles.',
     noResults: (q: string) => `Ninguna conexión coincide con «${q}».`,
     loadFailed: 'No se pudieron cargar las conexiones',
-    inUse: (n: number) => (n === 1 ? 'En uso por 1 usuario' : `En uso por ${n} usuarios`),
+    inUse: (n: number) =>
+      n === 1 ? '1 sesión activa en el servidor' : `${n} sesiones activas en el servidor`,
     inUseShort: 'En uso',
+    inUseBadge: (n: number) => (n > 1 ? `En uso · ${n}` : 'En uso'),
     addFavourite: (name: string) => `Añadir ${name} a favoritos`,
     removeFavourite: (name: string) => `Quitar ${name} de favoritos`,
     expandGroup: (name: string) => `Desplegar ${name}`,
@@ -394,7 +396,7 @@ export const es: Strings = {
     protocol: 'Protocolo',
     group: 'Grupo',
     rootGroup: 'Nivel superior',
-    activeUsers: 'Usuarios activos',
+    activeUsers: 'Sesiones activas',
     identifier: 'Identificador',
     source: 'Origen de datos',
     lastUsed: 'Último uso',
@@ -469,6 +471,26 @@ export const es: Strings = {
     alreadyOpenAnother: 'Abrir otra',
     alreadyOpenDontAsk:
       'No volver a preguntar (se cambia en Ajustes › Sesiones › Si una conexión ya está abierta)',
+    inUseTitle: (name: string) => `${name} ya está en uso`,
+    inUseBody: (n: number) =>
+      n === 1
+        ? 'El servidor indica 1 sesión activa en esta conexión.'
+        : `El servidor indica ${n} sesiones activas en esta conexión.`,
+    inUseYou: (since: string) => (since ? `Tú, desde ${since}` : 'Tú'),
+    inUseUser: (name: string, since: string) => (since ? `${name}, desde ${since}` : name),
+    inUseSomeone: (since: string) => (since ? `Otro usuario, desde ${since}` : 'Otro usuario'),
+    inUseOpenExisting: 'Abrir la existente',
+    inUseEnd: (n: number) =>
+      n > 1 ? `Cerrar las ${n} y empezar de nuevo` : 'Cerrarla y empezar de nuevo',
+    inUseAnother: 'Abrir otra',
+    inUseCannotJoin:
+      'Esta cuenta no puede unirse a sesiones en curso; una cuenta de administrador sí puede.',
+    inUseEndFailed: 'El servidor no cerró la sesión. No se ha cambiado nada.',
+    inUseDontAsk:
+      'No volver a preguntar (se cambia en Ajustes › Sesiones › Preguntar antes de conectar)',
+    connectTitle: (name: string) => `¿Conectar a ${name}?`,
+    connectBody: 'El servidor no indica ninguna sesión activa en esta conexión.',
+    connectConfirm: 'Conectar',
     suspendedTitle: 'Desconectada para ahorrar batería',
     suspendedBody:
       'La app estuvo en segundo plano más tiempo del indicado en Ajustes, así que esta sesión se cerró de forma ordenada.',
@@ -699,6 +721,12 @@ export const es: Strings = {
     openAgainNew: 'Abrir otra',
     openAgainHint:
       'Qué hace tocar una conexión que ya tiene una sesión abierta en la app. Una sesión desconectada se vuelve a conectar. Una segunda sesión al mismo equipo puede cerrar la primera (por ejemplo con RDP). Unirse a la sesión de otra persona y los enlaces compartidos siempre van a la abierta.',
+    askInUse: 'Preguntar antes de conectar',
+    askInUseInUse: 'Si está en uso',
+    askInUseAlways: 'Siempre',
+    askInUseNever: 'Nunca',
+    askInUseHint:
+      'Antes de conectar, la app pregunta al servidor si la conexión ya tiene sesiones activas, por ejemplo una que quedó abierta al cerrarse la app o al perder el inicio de sesión. Si es así, ofrece abrir la existente, cerrarla y empezar de nuevo, o abrir otra. «Si una conexión ya está abierta» trata de las sesiones abiertas en esta app; este ajuste, de las sesiones que indica el servidor. Si el servidor no responde en 2 segundos, la app conecta sin más. Nunca se pregunta en la demo, en los enlaces compartidos ni al unirse a una sesión.',
     backgroundDisconnect: 'Desconectar las sesiones cuando la app lleve en segundo plano',
     backgroundDisconnectIos:
       'En iPhone y iPad el sistema pausa la app poco después de salir de ella, así que no puede mantener una sesión: el servidor Guacamole la cierra unos 15 segundos después de que la app deja de responder, elijas lo que elijas aquí. Al volver, la sesión se reconecta sola.',

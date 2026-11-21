@@ -55,6 +55,7 @@ export const APP_ITEMS = [
   // Sessions
   'maxSessions',
   'openAgain',
+  'askInUse',
   'backgroundDisconnect',
   'keepAlive',
   'thumbnails',
@@ -235,7 +236,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
       {
         id: 'open',
         title: () => P().groups.openSessions,
-        items: [app('maxSessions'), app('openAgain')],
+        items: [app('maxSessions'), app('openAgain'), app('askInUse')],
       },
       {
         id: 'background',
@@ -368,6 +369,17 @@ export function appItemText(id: AppItemId, ctx: SearchContext): { label: string;
       return {
         label: t.openAgain,
         text: [t.openAgainAsk, t.openAgainSwitch, t.openAgainNew, t.openAgainHint],
+      };
+    case 'askInUse':
+      return {
+        label: t.askInUse,
+        text: [
+          t.askInUseInUse,
+          t.askInUseAlways,
+          t.askInUseNever,
+          t.askInUseHint,
+          strings.connections.inUseShort,
+        ],
       };
     case 'backgroundDisconnect':
       return {

@@ -6,6 +6,7 @@ import { useBackInterceptor, useNav } from '../nav/NavContext.ts';
 import { protocolIcon } from '../connections/treeView.ts';
 import { strings } from '../strings.ts';
 import { AlreadyOpenDialog } from './AlreadyOpenDialog.tsx';
+import { ConnectConfirmDialog, InUseDialog } from './InUseDialog.tsx';
 import type { OpenSession } from './sessionModel.ts';
 import { useSessions } from './SessionsContext.ts';
 
@@ -53,11 +54,34 @@ export function SessionLayer() {
       onCancel={ask.cancel}
     />
   ) : null;
+  const inUse = sessions.inUse;
+  const confirm = sessions.connectConfirm;
+  const inUseDialog = inUse ? (
+    <InUseDialog
+      name={inUse.name}
+      plan={inUse.plan}
+      now={inUse.askedAt}
+      busy={inUse.busy}
+      error={inUse.error}
+      onExisting={inUse.openExisting}
+      onEnd={inUse.endAndStart}
+      onAnother={inUse.openAnother}
+      onCancel={inUse.cancel}
+    />
+  ) : confirm ? (
+    <ConnectConfirmDialog
+      name={confirm.name}
+      checked={confirm.checked}
+      onConnect={confirm.connect}
+      onCancel={confirm.cancel}
+    />
+  ) : null;
   if (list.length === 0)
     return (
       <>
         {limitDialog}
         {askDialog}
+        {inUseDialog}
       </>
     );
   const active = list.find((s) => s.id === activeId);
@@ -65,6 +89,7 @@ export function SessionLayer() {
     <>
       {limitDialog}
       {askDialog}
+      {inUseDialog}
       <div className="session-layer" data-active={active ? 'true' : 'false'}>
         {list.map((s) => (
           <SessionSlot key={s.id} session={s} active={s.id === activeId} />

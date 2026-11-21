@@ -289,7 +289,10 @@ export class FakeAdminServer implements HttpClient {
       connectionPermissions: read(this.conns.keys()),
       connectionGroupPermissions: { ...read(this.groups.keys()), ROOT: ['READ', 'UPDATE'] },
       sharingProfilePermissions: {},
-      activeConnectionPermissions: {},
+      // `ActiveConnectionPermissionService`: READ on every visible one, DELETE on own ones.
+      activeConnectionPermissions: Object.fromEntries(
+        this.active.map((a) => [a.identifier, a.username === user ? ['READ', 'DELETE'] : ['READ']]),
+      ),
       userPermissions: { [user]: ['READ'] },
       userGroupPermissions: {},
       systemPermissions: [] as string[],
@@ -620,19 +623,35 @@ export class FakeAdminServer implements HttpClient {
     this.groups.delete(id);
   }
 
+  /**
+   * Like the 1.6.0 database extension (`ActiveConnectionService.retrieveObjects`,
+   * `TrackedActiveConnection.init`): every active connection on a readable connection is
+   * listed (every fake connection is readable), but `username`, `remoteHost` and
+   * `connectable` only for administrators or the user's own ones.
+   */
   private activeRoute(req: HttpRequest, user: UserName): HttpResponse {
+    const privileged = user === 'admin' || user === 'stale';
     if (req.method === 'GET') {
-      const visible =
-        user === 'admin' || user === 'stale'
-          ? this.active
-          : this.active.filter((a) => a.username === user);
       return json(
         200,
-        Object.fromEntries(visible.map((a) => [a.identifier, { ...a, connectable: true }])),
+        Object.fromEntries(
+          this.active.map((a) => {
+            const full = privileged || a.username === user;
+            return [
+              a.identifier,
+              {
+                identifier: a.identifier,
+                connectionIdentifier: a.connectionIdentifier,
+                startDate: a.startDate,
+                connectable: full,
+                ...(full ? { username: a.username, remoteHost: a.remoteHost } : {}),
+              },
+            ];
+          }),
+        ),
       );
     }
     if (req.method === 'PATCH') {
-      if (user !== 'admin') return denied();
       const patches =
         req.body?.kind === 'json' && Array.isArray(req.body.value)
           ? (req.body.value as Json[])
@@ -640,6 +659,10 @@ export class FakeAdminServer implements HttpClient {
       const ids = patches
         .filter((p) => p['op'] === 'remove')
         .map((p) => String(p['path']).slice(1));
+      // DELETE: administrators, or the user's own active connections.
+      const allowed = (id: string) =>
+        user === 'admin' || this.active.some((a) => a.identifier === id && a.username === user);
+      if (!ids.every(allowed)) return denied();
       this.active = this.active.filter((a) => !ids.includes(a.identifier));
       return json(200, {
         patches: ids.map((identifier) => ({ op: 'remove', identifier, path: `/${identifier}` })),
