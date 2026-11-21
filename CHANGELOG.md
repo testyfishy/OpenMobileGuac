@@ -1,14 +1,15 @@
 # Changelog
 
-All notable changes to OpenMobileGuac are listed here. The format follows
+All notable changes to Open Mobile Guac (OMG) are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project intends to use
 [Semantic Versioning](https://semver.org/).
 
-"Untested on device" in [docs/FEATURES.md](docs/FEATURES.md) applies to most of the first
-release: it has been unit-tested and used in a desktop browser, and CI builds the Android and
-iOS apps, but the device checklists have not been completed yet.
+How far the first release has been tested: it is unit-tested, CI builds both apps, and the
+maintainer uses the iOS app daily through TestFlight against a real Guacamole server (VNC).
+The device checklists in docs/checklists have not been completed, and the Android app has
+not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](docs/FEATURES.md).
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-11-21
 
 First public version.
 
@@ -84,7 +85,8 @@ First public version.
 
 - CI runs typecheck, lint, format check, unit tests and a production build on pushes to `main` and on
   pull requests.
-- Android debug APK on the rolling `nightly` prerelease.
+- Signed Android APK attached to the GitHub release; a debug APK on the rolling `nightly`
+  prerelease.
 - iOS builds uploaded to TestFlight from `main` by the public workflow.
 
-[1.0.0]: https://github.com/testyfishy/OpenMobileGuac/commits/main
+[1.0.0]: https://github.com/testyfishy/OpenMobileGuac/releases/tag/v1.0.0
