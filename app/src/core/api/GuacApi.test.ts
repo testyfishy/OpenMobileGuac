@@ -297,6 +297,29 @@ describe('GuacApi.logout / isSessionValid', () => {
     valid = false;
     expect(await api.isSessionValid(session)).toBe(false);
   });
+
+  it('falls back to POST api/tokens on a pre-1.6.0 server that has no HEAD api/session', async () => {
+    let tokenValid = true;
+    const http = new FakeHttpClient()
+      // guacamole-client 1.5.x: SessionResource has no @HEAD, so a valid token gets 405.
+      .on('HEAD', sessionUrl, () => ({ status: 405, headers: {}, body: null }))
+      .on('POST', TOKENS, () =>
+        tokenValid ? jsonResponse(200, authResultJson) : jsonResponse(403, invalidCredentialsJson),
+      );
+    const api = new GuacApi(http);
+    expect(await api.isSessionValid(session)).toBe(true);
+    expect(formFields(http.requests[1])).toEqual({ token: session.token });
+    tokenValid = false;
+    expect(await api.isSessionValid(session)).toBe(false);
+  });
+
+  it('does not ask POST api/tokens when HEAD api/session refuses the token', async () => {
+    const http = new FakeHttpClient().on('HEAD', sessionUrl, () =>
+      jsonResponse(403, permissionDeniedJson),
+    );
+    expect(await new GuacApi(http).isSessionValid(session)).toBe(false);
+    expect(http.requests).toHaveLength(1);
+  });
 });
 
 describe('GuacApi.probe', () => {

@@ -353,3 +353,12 @@ describe('authFlowReducer: Duo combined with a forced password change', () => {
     expect(s.phase === 'form' && s.error).toBeFalsy();
   });
 });
+
+describe('start after a background sign-out', () => {
+  it('shows the form with the notice, and no notice when signing in silently', () => {
+    const s = authFlowReducer(initialAuthFlow(), start({ notice: 'Signed out' }));
+    expect(s).toMatchObject({ phase: 'form', step: 'credentials', notice: 'Signed out' });
+    const silent = authFlowReducer(initialAuthFlow(), start({ savedPassword: 'pw', notice: 'x' }));
+    expect(silent.phase).toBe('signing-in');
+  });
+});

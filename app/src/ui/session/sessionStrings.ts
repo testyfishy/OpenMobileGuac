@@ -313,9 +313,10 @@ export const sessionStringsEn = {
     },
     toolbarLandscape: 'Docked toolbar in landscape',
     toolbarLandscapeHint:
-      'With the phone on its side, a toolbar docked at the top or bottom moves to this side, leaving the full height for the desktop.',
+      'With the phone on its side, a toolbar docked at the top or bottom moves to this side, leaving the full height for the desktop. The side away from the camera gives the narrowest column.',
     toolbarLandscapeOptions: {
       same: 'Keep in place',
+      away: 'Side away from the camera',
       left: 'Left side',
       right: 'Right side',
     },

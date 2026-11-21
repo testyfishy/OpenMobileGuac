@@ -89,6 +89,16 @@ describe('GuacAdminApi error mapping', () => {
     expect(info.kind).toBe('session-expired');
   });
 
+  it('keeps permission-denied on a pre-1.6.0 server without HEAD api/session (405)', async () => {
+    const http = new FakeHttpClient()
+      .on('GET', `${DATA}/self/effectivePermissions`, denied)
+      .on('HEAD', SESSION, () => ({ status: 405, headers: {}, body: null }));
+    const info = await errorInfo(
+      new GuacAdminApi(http).getEffectivePermissions(session, 'postgresql'),
+    );
+    expect(info.kind).toBe('permission-denied');
+  });
+
   it('keeps permission-denied when the validity check cannot be made', async () => {
     const http = new FakeHttpClient()
       .on('GET', `${DATA}/self/effectivePermissions`, denied)

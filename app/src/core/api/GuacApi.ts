@@ -313,14 +313,30 @@ export class GuacApi {
     throw this.errorFor(res, session.baseUrl, true);
   }
 
-  /** `HEAD api/session`: whether the token is still valid. Network errors still reject. */
+  /**
+   * Whether the token is still valid. Network errors still reject.
+   *
+   * `HEAD api/session` (`SessionResource.checkValidity`) only exists from Guacamole 1.6.0;
+   * 1.5.x and older answer a *valid* token with 405 (no such method), while a dead token is
+   * refused with 401/403 before the method is looked up. So only 401/403 count as expired.
+   * Any other answer is settled the way the web client re-validates on page load
+   * (`POST api/tokens` with `token=`, `resumeSession`), which every version supports.
+   */
   async isSessionValid(session: AuthSession): Promise<boolean> {
     const res = await this.send({
       method: 'HEAD',
       url: joinUrl(session.baseUrl, 'api/session'),
       headers: { [TOKEN_HEADER]: session.token },
     });
-    return res.status >= 200 && res.status < 300;
+    if (res.status >= 200 && res.status < 300) return true;
+    if (res.status === 401 || res.status === 403) return false;
+    try {
+      await this.resumeSession(session, session.token);
+      return true;
+    } catch (err) {
+      if (err instanceof GuacApiError && err.info.kind === 'session-expired') return false;
+      throw err;
+    }
   }
 
   /**

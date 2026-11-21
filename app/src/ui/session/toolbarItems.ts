@@ -112,16 +112,40 @@ export const TOOLBAR_STYLES: readonly ToolbarStyle[] = [
 ];
 
 /** Where the toolbar actually goes: side docks only in landscape (portrait: bottom). */
-export const TOOLBAR_LANDSCAPE = ['same', 'left', 'right'] as const;
+/** `away`: the side without the camera cutout (the narrowest column); see `landscapeSide`. */
+export const TOOLBAR_LANDSCAPE = ['same', 'away', 'left', 'right'] as const;
 export type ToolbarLandscape = (typeof TOOLBAR_LANDSCAPE)[number];
+
+/** Which side of a landscape screen has the camera cutout (the top of the device). */
+export type CutoutSide = 'left' | 'right' | 'unknown';
+
+/**
+ * From `window.orientation`: 90 is the device turned anticlockwise, its top (and camera) on
+ * the left; -90 is the reverse. `screen.orientation` is not used: WebKit and Chromium
+ * disagree on which landscape is "primary". `unknown` in portrait or without a value.
+ */
+export function cutoutSide(angle: unknown): CutoutSide {
+  if (angle === 90) return 'left';
+  if (angle === -90 || angle === 270) return 'right';
+  return 'unknown';
+}
+
+/** The side an `away` toolbar docks to: opposite the cutout, right when it is unknown. */
+export function landscapeSide(
+  setting: ToolbarLandscape,
+  cutout: CutoutSide,
+): Exclude<ToolbarLandscape, 'away'> {
+  if (setting !== 'away') return setting;
+  return cutout === 'right' ? 'left' : 'right';
+}
 
 export function effectiveToolbarStyle(
   style: ToolbarStyle,
   landscape: boolean,
-  landscapeSide: ToolbarLandscape = 'same',
+  side: Exclude<ToolbarLandscape, 'away'> = 'same',
 ): ToolbarStyle {
-  if (landscape && landscapeSide !== 'same' && (style === 'dock-bottom' || style === 'dock-top')) {
-    return landscapeSide === 'left' ? 'dock-left' : 'dock-right';
+  if (landscape && side !== 'same' && (style === 'dock-bottom' || style === 'dock-top')) {
+    return side === 'left' ? 'dock-left' : 'dock-right';
   }
   if ((style === 'dock-left' || style === 'dock-right') && !landscape) return 'dock-bottom';
   return style;

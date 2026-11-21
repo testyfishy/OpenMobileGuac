@@ -36,6 +36,13 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
       save battery"; Reconnect works. "Never" keeps it connected as long as the OS allows.
 - [ ] Let the server token expire while a session is suspended (or sign out on the server):
       Reconnect signs in silently with the saved password, or asks to sign in again.
+- [ ] On a 1.5.x server (no `HEAD api/session`) **without** a saved password: background
+      > grace period, return, Reconnect: it reconnects with no password prompt (the token is
+      confirmed with `POST api/tokens`; the log shows `reconnect: ok`).
+- [ ] Settings › "Sign out of servers after …" = 1 min: background 2 min, return: sessions are
+      closed and the server asks for the password (with the "Signed out because…" notice) even
+      though it is saved; after signing in, the saved password is used silently again. Same
+      after swiping the app away for 2 min and reopening it. Default "Never": no prompt.
 - [ ] Token expiry during a **live** session: on a test server, invalidate the app's token
       (e.g. restart the Guacamole web application, which drops all tokens), then drop the
       connection (airplane mode on/off) so the session reconnects. The

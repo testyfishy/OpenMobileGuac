@@ -36,6 +36,7 @@ export const es: Strings = {
     immediately: 'Al instante',
     seconds: (n: number) => `${n} s`,
     minutes: (n: number) => `${n} min`,
+    hours: (n: number) => `${n} h`,
     moveUp: (name: string) => `Subir ${name}`,
     moveDown: (name: string) => `Bajar ${name}`,
   },
@@ -234,6 +235,8 @@ export const es: Strings = {
     useDifferentAccount: 'Empezar de nuevo',
     savedPasswordRejected: 'No se aceptó la contraseña guardada. Escríbela de nuevo.',
     sessionExpired: 'Tu sesión ha caducado. Vuelve a iniciar sesión.',
+    signedOutInBackground:
+      'Se cerró la sesión porque la app estuvo en segundo plano (Ajustes › Cerrar sesión en los servidores tras). Escribe tu contraseña para continuar.',
     logout: 'Cerrar sesión',
     signedInAs: (user: string) => `Sesión iniciada como ${user}`,
     anonymous: 'Sesión iniciada (anónima)',
@@ -586,7 +589,11 @@ export const es: Strings = {
     backgroundDisconnect: 'Desconectar las sesiones cuando la app lleve en segundo plano',
     backgroundDisconnectIos:
       'En iPhone y iPad el sistema pausa la app poco después de salir de ella, así que no puede mantener una sesión: el servidor Guacamole la cierra unos 15 segundos después de que la app deja de responder, elijas lo que elijas aquí. Al volver, la sesión se reconecta sola.',
-    backgroundDisconnectHint: 'Ahorra batería y datos. Puedes volver a conectar con un toque.',
+    backgroundDisconnectHint:
+      'Ahorra batería y datos. No cierra tu sesión en el servidor: volver a conectar es un toque.',
+    serverSignOut: 'Cerrar sesión en los servidores cuando la app lleve en segundo plano',
+    serverSignOutHint:
+      'Pasado este tiempo, la app cierra la sesión en todos los servidores y el siguiente inicio de sesión pide la contraseña aunque esté guardada. «Nunca» mantiene la sesión hasta que el propio servidor la termine (por defecto, tras una hora sin uso). Es distinto de desconectar las sesiones (arriba) y del bloqueo de la app, que solo pide Face ID / huella / código del dispositivo. No se aplica mientras Android mantiene las sesiones conectadas en segundo plano.',
     thumbnails: 'Guardar una miniatura de cada sesión',
     thumbnailsHint:
       'Una imagen pequeña de la última pantalla, que se muestra en recientes. Solo se guarda en este dispositivo.',

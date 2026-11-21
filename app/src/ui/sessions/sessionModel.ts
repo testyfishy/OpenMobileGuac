@@ -181,6 +181,24 @@ export function shouldLockOnResume(
   return now - backgroundedAt >= afterSeconds * 1000;
 }
 
+/**
+ * Whether to sign out of the servers on return (or at start-up, with the persisted
+ * timestamp) after `backgroundedAt` ("Sign out of servers after …"; `null` = never).
+ * Not while the Android keep-alive service held the sessions: the user chose to keep them.
+ */
+export function shouldSignOutAfterBackground(input: {
+  readonly afterSeconds: number | null;
+  readonly backgroundedAt: number | null;
+  readonly now: number;
+  readonly keepAliveRunning?: boolean;
+}): boolean {
+  if (input.afterSeconds === null || input.backgroundedAt === null) return false;
+  if (input.keepAliveRunning) return false;
+  // A clock set back (timestamp in the future) cannot prove the time passed.
+  const away = input.now - input.backgroundedAt;
+  return away >= 0 && away >= input.afterSeconds * 1000;
+}
+
 // ---- expired sign-in during a live session (T2.1) ---------------------------------------
 
 /** How long an automatic re-login counts as "just happened". */

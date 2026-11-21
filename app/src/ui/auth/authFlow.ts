@@ -87,6 +87,8 @@ export type AuthFlowEvent =
       readonly savedPassword: string | null;
       readonly remember: boolean;
       readonly needsHttpConfirm: boolean;
+      /** Shown on the form if one is needed (e.g. signed out after the background time). */
+      readonly notice?: string;
     }
   | { readonly type: 'token-ok'; readonly seq: number }
   | {
@@ -200,7 +202,7 @@ export function authFlowReducer(state: AuthFlowState, event: AuthFlowEvent): Aut
       };
       if (event.hasToken) return { ...base, seq: base.seq + 1, phase: 'checking-token' };
       if (event.savedPassword !== null) return sendCredentials(base, true, 'credentials');
-      return form(base, 'credentials');
+      return form(base, 'credentials', event.notice ? { notice: event.notice } : {});
     }
 
     case 'token-ok':

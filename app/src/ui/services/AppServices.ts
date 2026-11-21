@@ -16,7 +16,9 @@ import { CacheFileKeyValueStore } from '../../core/storage/CacheFileKeyValueStor
 import { MemoryKeyValueStore, type KeyValueStore } from '../../core/storage/KeyValueStore.ts';
 import { ProfileStore } from '../../core/storage/ProfileStore.ts';
 import type { SecureStore } from '../../core/storage/SecureStore.ts';
+import { shouldSignOutAfterBackground } from '../sessions/sessionModel.ts';
 import { AuthService } from './AuthService.ts';
+import { BackgroundClock } from './backgroundClock.ts';
 import { getDevServer, type DevServer } from './devServer.ts';
 import { SettingsStore } from './SettingsStore.ts';
 import { isShareServerId, ShareProfiles } from './shareSessions.ts';
@@ -49,6 +51,34 @@ export interface AppServices {
   readonly lock: LockService;
   /** Per-server certificate trust (SRV-8); `available` is false on the web build. */
   readonly tls: TlsTrustService;
+  /** When the app went to the background ("Sign out of servers after …"). */
+  readonly backgroundClock: BackgroundClock;
+}
+
+/**
+ * "Sign out of servers after …" for time spent while the app was not running: the system
+ * may end a backgrounded app, so the persisted background time is checked at start-up,
+ * before anything can sign in (`AuthService.setEntryCheck`).
+ */
+export async function signOutIfAwayTooLong(
+  clock: BackgroundClock,
+  settings: SettingsStore,
+  auth: AuthService,
+  log: Logger,
+): Promise<void> {
+  const at = await clock.take();
+  if (at === null) return;
+  const { serverSignOutAfterSeconds } = await settings.load();
+  if (
+    shouldSignOutAfterBackground({
+      afterSeconds: serverSignOutAfterSeconds,
+      backgroundedAt: at,
+      now: Date.now(),
+    })
+  ) {
+    log.info('auth', 'start-up after a long time in the background: signing out of servers');
+    await auth.signOutAfterBackground();
+  }
 }
 
 /** Dev harnesses only (`?harness=admin`): swap the HTTP stack and the dev-server entry. */
@@ -83,7 +113,10 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
   const api = new GuacApi(http, { timeoutMs: 20_000 });
   const probeApi = new GuacApi(http, { timeoutMs: 6_000 });
   const admin = new GuacAdminApi(http, { timeoutMs: 20_000 });
-  const auth = new AuthService(api, secure, profiles, log);
+  const auth = new AuthService(api, secure, profiles, log, kv);
+  const settings = new SettingsStore(kv);
+  const backgroundClock = new BackgroundClock(kv);
+  auth.setEntryCheck(signOutIfAwayTooLong(backgroundClock, settings, auth, log));
   const devServer = overrides.devServer ?? getDevServer();
   if (devServer) auth.setVirtualPassword(devServer.profile.id, devServer.password);
   const lock = new LockService();
@@ -105,11 +138,12 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
     probeApi,
     admin,
     auth,
-    settings: new SettingsStore(kv),
+    settings,
     devServer,
     shares: new ShareProfiles(),
     log,
     lock,
     tls,
+    backgroundClock,
   };
 }

@@ -6,6 +6,8 @@ import { sessionStrings } from './sessionStrings.ts';
 
 /** Downward drag (px) on the header that closes the sheet. */
 const SWIPE_CLOSE_PX = 72;
+/** How long a sheet takes to follow the keyboard (about the system keyboard's own slide). */
+const SHEET_MOVE_MS = 260;
 
 /**
  * A bottom sheet / popover for session menus. Escape, the close button or (when
@@ -42,6 +44,35 @@ export function Sheet({
     return () => document.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
+  // When the space above the keyboard changes (it opens, closes, or the phone turns), the
+  // sheet glides to its new place instead of jumping there.
+  const sheetRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = sheetRef.current;
+    const layer = el?.parentElement;
+    if (!el || !layer || typeof ResizeObserver === 'undefined' || !el.animate) return;
+    const place = () => {
+      const r = layer.getBoundingClientRect();
+      return { top: r.top + el.offsetTop, height: r.height };
+    };
+    let last = place();
+    const moved = () => {
+      const next = place();
+      const dy = last.top - next.top;
+      const resized = Math.abs(next.height - last.height) > 1;
+      last = next;
+      if (!resized || Math.abs(dy) < 8) return;
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+      el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }], {
+        duration: SHEET_MOVE_MS,
+        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+      });
+    };
+    const ro = new ResizeObserver(moved);
+    ro.observe(layer);
+    return () => ro.disconnect();
+  }, []);
+
   const drag = useRef<{ id: number; y: number } | null>(null);
   const [offset, setOffset] = useState(0);
   const onDown = (e: PointerEvent<HTMLElement>) => {
@@ -76,6 +107,7 @@ export function Sheet({
         aria-hidden="true"
       />
       <section
+        ref={sheetRef}
         className={className ? `omg-sheet ${className}` : 'omg-sheet'}
         role="dialog"
         aria-modal="true"

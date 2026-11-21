@@ -6,6 +6,7 @@ import { FieldType } from '../../core/models/ApiErrorBody.ts';
 import type { AuthSession } from '../../core/models/AuthSession.ts';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import type { ProfileStore } from '../../core/storage/ProfileStore.ts';
+import type { KeyValueStore } from '../../core/storage/KeyValueStore.ts';
 import { secretKeys, type SecureStore } from '../../core/storage/SecureStore.ts';
 import {
   parseTotpInput,
@@ -30,6 +31,11 @@ export interface SavedSecrets {
   readonly password: string | null;
   /** A saved password exists but the gate refused it (the user cancelled the unlock). */
   readonly lockedOut?: boolean;
+  /**
+   * The app signed out of this server after its time in the background ("Sign out of
+   * servers after …"): the saved password is not used until the user signs in once.
+   */
+  readonly signedOutInBackground?: boolean;
 }
 
 export interface LoginRequest {
@@ -43,6 +49,8 @@ export interface LoginRequest {
 export type RevalidateResult = 'ok' | 'relogged' | 'needs-sign-in';
 
 export type CredentialGate = () => Promise<boolean>;
+
+const passwordRequiredKey = (profileId: string): string => `auth/passwordRequired/${profileId}`;
 
 /** Enough of a session to call `DELETE api/session` with a stored token. */
 export function tokenOnlySession(baseUrl: string, token: string): AuthSession {
@@ -74,12 +82,38 @@ export class AuthService {
   private unlocked: () => Promise<void> = () => Promise.resolve();
   private readonly listeners = new Set<(profileId: string) => void>();
   private readonly passwordListeners = new Set<(profileId: string, password: string) => void>();
+  private readonly backgroundSignOutListeners = new Set<(profileId: string) => void>();
+  /** Servers signed out after the background time: known answer per id (`kv` is the truth). */
+  private readonly passwordRequired = new Map<string, boolean>();
+  private readonly kv: KeyValueStore | undefined;
+  /** Start-up check ("Sign out of servers after …" while the app was not running). */
+  private entry: Promise<void> = Promise.resolve();
 
-  constructor(api: GuacApi, secure: SecureStore, profiles: ProfileStore, log?: Logger) {
+  constructor(
+    api: GuacApi,
+    secure: SecureStore,
+    profiles: ProfileStore,
+    log?: Logger,
+    kv?: KeyValueStore,
+  ) {
     this.api = api;
     this.secure = secure;
     this.profiles = profiles;
     this.log = log;
+    this.kv = kv;
+  }
+
+  /**
+   * Holds every use of a stored token or password until `check` settles: the start-up
+   * background sign-out must run before anything signs in with what it removes.
+   */
+  setEntryCheck(check: Promise<void>): void {
+    this.entry = check.catch(() => undefined);
+  }
+
+  private async ready(): Promise<void> {
+    await this.entry;
+    await this.unlocked();
   }
 
   /** Installs the biometric gate (SRV-6). Without one, saved credentials are used freely. */
@@ -127,7 +161,7 @@ export class AuthService {
     // Share-link sessions are memory only (CON-6): their "stored" token is the live one, so
     // the sign-in flow resumes it instead of showing a password form.
     if (isShareServerId(profileId)) return this.sessions.get(profileId)?.token ?? null;
-    await this.unlocked();
+    await this.ready();
     return this.secure.get(secretKeys.authToken(profileId)).catch(() => null);
   }
 
@@ -147,8 +181,11 @@ export class AuthService {
       this.transientPasswords.delete(profile.id);
       return { token, password: transient || null };
     }
+    if (await this.isPasswordRequired(profile.id)) {
+      return { token, password: null, signedOutInBackground: true };
+    }
     if (!(await this.hasSavedPassword(profile))) return { token, password: null };
-    await this.unlocked();
+    await this.ready();
     if (this.gate && !(await this.gate())) {
       this.log?.info('auth', 'saved password not used: unlock cancelled');
       return { token, password: null, lockedOut: true };
@@ -159,7 +196,7 @@ export class AuthService {
 
   /** Re-validates the stored token. Rejects with `GuacApiError` (`session-expired`, …). */
   async resume(profile: ServerProfile, token: string): Promise<AuthSession> {
-    await this.unlocked();
+    await this.ready();
     const live = this.sessions.get(profile.id);
     if (live && live.token === token) return live;
     try {
@@ -177,7 +214,7 @@ export class AuthService {
   }
 
   async login(profile: ServerProfile, req: LoginRequest): Promise<AuthSession> {
-    await this.unlocked();
+    await this.ready();
     // A forced password change (`new-password`, database extension) is stored by the server
     // during this request, so the new password is the one to remember.
     const newPassword = req.extra[NEW_PASSWORD_FIELD] || undefined;
@@ -232,7 +269,7 @@ export class AuthService {
     profile: ServerProfile,
     parameters: Readonly<Record<string, string>>,
   ): Promise<AuthSession> {
-    await this.unlocked();
+    await this.ready();
     const session = await this.api.loginWithParameters(profile, parameters);
     await this.adopt(profile.id, session);
     return session;
@@ -240,6 +277,8 @@ export class AuthService {
 
   private async adopt(profileId: string, session: AuthSession): Promise<void> {
     this.sessions.set(profileId, session);
+    // Signed in by the user: the saved password may be used silently again.
+    await this.setPasswordRequired(profileId, false);
     this.log?.info('auth', `signed in (${session.dataSources.length} data source(s))`);
     if (isShareServerId(profileId)) {
       // A share key's session is never persisted (CON-6).
@@ -294,7 +333,7 @@ export class AuthService {
     oldPassword: string,
     newPassword: string,
   ): Promise<{ readonly savedUpdated: boolean }> {
-    await this.unlocked();
+    await this.ready();
     const session = this.sessions.get(profile.id);
     if (!session || isShareServerId(profile.id)) {
       throw new GuacApiError({
@@ -392,9 +431,76 @@ export class AuthService {
     this.transientPasswords.delete(profileId);
     this.lastTotpCounter.delete(profileId);
     this.httpConfirmed.delete(profileId);
+    await this.setPasswordRequired(profileId, false);
     for (const key of secretKeys.all(profileId)) {
       await this.secure.remove(key).catch(() => undefined);
     }
+  }
+
+  // ---- "Sign out of servers after …" (background time) ----------------------------------
+
+  /** Called for each server the background sign-out ended (screens start their sign-in over). */
+  onBackgroundSignOut(fn: (profileId: string) => void): () => void {
+    this.backgroundSignOutListeners.add(fn);
+    return () => this.backgroundSignOutListeners.delete(fn);
+  }
+
+  /**
+   * Ends every server sign-in on this device after the app was too long in the background:
+   * live sessions and stored tokens are dropped (the servers are told in the background,
+   * best effort) and the next sign-in asks for the password, even when one is saved, until
+   * the user signs in once. Saved passwords and TOTP seeds stay. Returns how many servers
+   * were signed out.
+   *
+   * The live sessions are dropped before the first `await`, so no reconnect that runs right
+   * after this call can still pick up a token.
+   */
+  async signOutAfterBackground(): Promise<number> {
+    const live = [...this.sessions.entries()];
+    this.sessions.clear();
+    const ids = new Set(live.map(([id]) => id));
+    const revoke: AuthSession[] = live.map(([, s]) => s);
+    const profiles = await this.profiles.list().catch((): ServerProfile[] => []);
+    for (const p of profiles) {
+      const stored = await this.secure.get(secretKeys.authToken(p.id)).catch(() => null);
+      if (stored === null) continue;
+      ids.add(p.id);
+      if (!revoke.some((s) => s.token === stored)) revoke.push(tokenOnlySession(p.baseUrl, stored));
+      await this.secure.remove(secretKeys.authToken(p.id)).catch(() => undefined);
+    }
+    for (const id of ids) {
+      this.transientPasswords.delete(id);
+      if (!isShareServerId(id)) await this.setPasswordRequired(id, true);
+    }
+    for (const id of ids) {
+      this.emit(id);
+      for (const l of this.backgroundSignOutListeners) l(id);
+    }
+    if (ids.size > 0)
+      this.log?.info('auth', `signed out of ${ids.size} server(s) after background`);
+    void Promise.allSettled(revoke.map((s) => this.api.logout(s)));
+    return ids.size;
+  }
+
+  /** Whether the saved password is held back until the user signs in (see above). */
+  async isPasswordRequired(profileId: string): Promise<boolean> {
+    const known = this.passwordRequired.get(profileId);
+    if (known !== undefined) return known;
+    const stored = this.kv
+      ? (await this.kv.get(passwordRequiredKey(profileId)).catch(() => null)) === '1'
+      : false;
+    this.passwordRequired.set(profileId, stored);
+    return stored;
+  }
+
+  private async setPasswordRequired(profileId: string, required: boolean): Promise<void> {
+    if (this.passwordRequired.get(profileId) === required) return;
+    this.passwordRequired.set(profileId, required);
+    if (!this.kv) return;
+    const key = passwordRequiredKey(profileId);
+    // Best effort: without the persisted mark a restart only means the saved password is
+    // used again (the behaviour before this setting existed).
+    await (required ? this.kv.set(key, '1') : this.kv.remove(key)).catch(() => undefined);
   }
 
   // ---- TOTP seed (SRV-9) -----------------------------------------------------------------
@@ -412,7 +518,7 @@ export class AuthService {
   async loadTotpSeed(profileId: string): Promise<TotpParams | undefined> {
     const raw = await this.secure.get(secretKeys.totpSeed(profileId)).catch(() => null);
     if (raw === null) return undefined;
-    await this.unlocked();
+    await this.ready();
     if (this.gate && !(await this.gate())) return undefined;
     try {
       return parseTotpInput(raw);
@@ -461,7 +567,7 @@ export class AuthService {
     profile: ServerProfile,
     opts: { readonly httpAllowed: boolean; readonly totpAutofill: boolean },
   ): Promise<RevalidateResult> {
-    await this.unlocked();
+    await this.ready();
     const live = this.sessions.get(profile.id);
     if (live && (await this.api.isSessionValid(live))) return 'ok';
     if (isShareServerId(profile.id)) {

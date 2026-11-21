@@ -224,7 +224,7 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   terminalPinchFont: false,
   commandKey: 'super',
   toolbarStyle: 'dock-bottom',
-  toolbarLandscape: 'right',
+  toolbarLandscape: 'away',
   toolbarItems: null,
   toolbarLabels: 'auto',
   toolbarAutoHide: true,

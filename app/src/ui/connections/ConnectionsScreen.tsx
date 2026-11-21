@@ -152,6 +152,20 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
     [saveOptions],
   );
 
+  // Signed out after the background time ("Sign out of servers after …"): start over, so
+  // the form asks for the password (the saved one is held back until a sign-in).
+  const [startNonce, setStartNonce] = useState(0);
+  useEffect(
+    () =>
+      auth.onBackgroundSignOut((id) => {
+        if (id !== profile.id) return;
+        setTree({ nonce: 0 });
+        setTreeNonce((n) => n + 1);
+        setStartNonce((n) => n + 1);
+      }),
+    [auth, profile.id],
+  );
+
   // Start: stored token → saved password → form.
   useEffect(() => {
     let live = true;
@@ -173,14 +187,16 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
         savedPassword: secrets.password,
         remember: profile.rememberPassword,
         needsHttpConfirm: insecure && !dismissed && !auth.isHttpConfirmed(profile.id),
+        ...(secrets.signedOutInBackground ? { notice: strings.login.signedOutInBackground } : {}),
       });
     })();
     return () => {
       live = false;
     };
-    // Run once per profile; later profile edits remount this component (keyed by id).
+    // Run once per profile (and again after a background sign-out); later profile edits
+    // remount this component (keyed by id).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [startNonce]);
 
   // Side effects of the auth flow. Results carry `seq`; the reducer drops stale ones.
   const { phase, seq } = flow;

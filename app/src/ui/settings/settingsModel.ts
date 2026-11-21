@@ -41,6 +41,12 @@ export interface AppSettings {
   readonly lock: LockSettings;
   /** T2.1: disconnect open sessions after this long in the background; `null` = never. */
   readonly backgroundDisconnectSeconds: number | null;
+  /**
+   * Sign out of every server after the app has been this long in the background; the next
+   * sign-in then asks for the password even when one is saved. `null` = never (stay signed
+   * in until the server itself ends the session).
+   */
+  readonly serverSignOutAfterSeconds: number | null;
   /** MUL-1: how many sessions may be open at once. */
   readonly maxSessions: number;
   /** CON-4: keep a small picture of the last screen per connection. */
@@ -77,6 +83,7 @@ export function demoVisible(pref: DemoVisibility, savedServers: number | undefin
 
 export const LOCK_AFTER_CHOICES = [0, 30, 60, 300, 900] as const;
 export const BACKGROUND_DISCONNECT_CHOICES = [30, 60, 300, 900, null] as const;
+export const SERVER_SIGN_OUT_CHOICES = [60, 300, 900, 3600, null] as const;
 export const MAX_SESSIONS_MIN = 1;
 export const MAX_SESSIONS_MAX = 6;
 
@@ -86,6 +93,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   language: 'system',
   lock: { enabled: false, afterSeconds: 60 },
   backgroundDisconnectSeconds: 60,
+  serverSignOutAfterSeconds: null,
   maxSessions: 3,
   thumbnails: true,
   connectionSort: 'server',
@@ -263,6 +271,11 @@ export function parseAppSettings(raw: unknown): AppSettings {
       raw['backgroundDisconnectSeconds'],
       BACKGROUND_DISCONNECT_CHOICES,
       d.backgroundDisconnectSeconds as 60,
+    ),
+    serverSignOutAfterSeconds: pick(
+      raw['serverSignOutAfterSeconds'],
+      SERVER_SIGN_OUT_CHOICES,
+      d.serverSignOutAfterSeconds as null,
     ),
     maxSessions:
       typeof max === 'number' && Number.isInteger(max)

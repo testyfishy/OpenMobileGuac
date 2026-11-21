@@ -35,6 +35,7 @@ export const en = {
     immediately: 'Immediately',
     seconds: (n: number) => `${n} s`,
     minutes: (n: number) => `${n} min`,
+    hours: (n: number) => `${n} h`,
     moveUp: (name: string) => `Move ${name} up`,
     moveDown: (name: string) => `Move ${name} down`,
   },
@@ -233,6 +234,8 @@ export const en = {
     useDifferentAccount: 'Start over',
     savedPasswordRejected: 'The saved password was not accepted. Enter it again.',
     sessionExpired: 'Your session expired. Sign in again.',
+    signedOutInBackground:
+      'Signed out because the app was in the background (Settings › Sign out of servers after). Enter your password to continue.',
     logout: 'Sign out',
     signedInAs: (user: string) => `Signed in as ${user}`,
     anonymous: 'Signed in (anonymous)',
@@ -529,7 +532,11 @@ export const en = {
     backgroundDisconnect: 'Disconnect sessions after the app is in the background for',
     backgroundDisconnectIos:
       'On iPhone and iPad the system pauses the app soon after you leave it, so it cannot keep a session alive: the Guacamole server ends it about 15 seconds after the app goes quiet, whatever is chosen here. When you come back, the session reconnects by itself.',
-    backgroundDisconnectHint: 'Saves battery and data. You can reconnect with one tap.',
+    backgroundDisconnectHint:
+      'Saves battery and data. This does not sign you out of the server: reconnecting takes one tap.',
+    serverSignOut: 'Sign out of servers after the app is in the background for',
+    serverSignOutHint:
+      'After this time the app signs out of every server, and the next sign-in asks for the password even if one is saved. “Never” keeps you signed in until the server itself ends the sign-in (by default after an hour without use). Separate from disconnecting sessions above, and from the app lock, which only asks for Face ID / fingerprint / device passcode. Does not apply while Android keeps sessions connected in the background.',
     thumbnails: 'Save a thumbnail of each session',
     thumbnailsHint:
       'A small picture of the last screen, shown in recents. Stored on this device only.',

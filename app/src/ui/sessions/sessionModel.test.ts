@@ -8,6 +8,7 @@ import {
   openTargetKeys,
   sessionsReducer,
   shouldLockOnResume,
+  shouldSignOutAfterBackground,
   shouldSuspend,
   type OpenSession,
   type SessionsState,
@@ -111,6 +112,23 @@ describe('lifecycle timing', () => {
     expect(shouldLockOnResume(true, 30, 0, 29_000)).toBe(false);
     expect(shouldLockOnResume(true, 30, 0, 30_000)).toBe(true);
     expect(shouldLockOnResume(true, 30, null, 30_000)).toBe(false);
+  });
+
+  it('signs out of servers after the chosen background time, never by default', () => {
+    const at = 1_000_000;
+    const decide = (afterSeconds: number | null, now: number, keepAliveRunning = false) =>
+      shouldSignOutAfterBackground({ afterSeconds, backgroundedAt: at, now, keepAliveRunning });
+    expect(decide(null, at + 10 * 24 * 3600_000)).toBe(false);
+    expect(decide(300, at + 299_999)).toBe(false);
+    expect(decide(300, at + 300_000)).toBe(true);
+    expect(decide(3600, at + 3600_000)).toBe(true);
+    // The Android keep-alive held the sessions: the user chose to stay connected.
+    expect(decide(300, at + 300_000, true)).toBe(false);
+    // Never in the background, or a clock set back.
+    expect(shouldSignOutAfterBackground({ afterSeconds: 60, backgroundedAt: null, now: at })).toBe(
+      false,
+    );
+    expect(decide(60, at - 120_000)).toBe(false);
   });
 });
 

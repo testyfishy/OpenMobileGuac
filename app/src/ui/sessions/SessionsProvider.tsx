@@ -31,6 +31,7 @@ import {
   decideAuthRecovery,
   decideOpen,
   sessionsReducer,
+  shouldSignOutAfterBackground,
   type OpenSession,
 } from './sessionModel.ts';
 import { SessionsContext, type SessionsApi } from './SessionsContext.ts';
@@ -293,11 +294,38 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'suspend-all' });
       }
     };
+    // "Sign out of servers after …": decided from the timestamp on return. The sessions close
+    // and the in-memory sign-ins are dropped synchronously, before a resumed session can
+    // reconnect with the old token.
+    const signOutIfDue = () => {
+      const afterSeconds = settingsRef.current.serverSignOutAfterSeconds;
+      if (
+        !shouldSignOutAfterBackground({
+          afterSeconds,
+          backgroundedAt,
+          now: Date.now(),
+          keepAliveRunning: keepAliveRunning(),
+        })
+      ) {
+        return;
+      }
+      services.log.info('session', 'background sign-out time over: signing out of servers');
+      const all = stateRef.current.sessions;
+      for (const s of all) {
+        if (s.serverId !== DEMO_PROFILE_ID) dispatch({ type: 'close', id: s.id });
+      }
+      if (all.every((s) => s.serverId !== DEMO_PROFILE_ID)) setSwitcherOpen(false);
+      void services.auth.signOutAfterBackground();
+    };
     const sub = onAppActiveChange((active) => {
       // The biometric prompt itself can pause/resume the app on Android.
       if (services.lock.promptActive()) return;
       if (!active) {
         backgroundedAt = Date.now();
+        // Persisted too: the system may end the app while it is away (checked at start-up).
+        if (settingsRef.current.serverSignOutAfterSeconds !== null) {
+          services.backgroundClock.note(backgroundedAt);
+        }
         const grace = settingsRef.current.backgroundDisconnectSeconds;
         if (
           graceApplies({ graceSeconds: grace, keepAliveRunning: keepAliveRunning() }) &&
@@ -307,15 +335,17 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         }
       } else {
         clearTimeout(timer);
+        signOutIfDue();
         suspendIfDue();
         backgroundedAt = null;
+        services.backgroundClock.clear();
       }
     });
     return () => {
       clearTimeout(timer);
       sub.dispose();
     };
-  }, [services.lock, services.log]);
+  }, [services.lock, services.log, services.auth, services.backgroundClock]);
 
   // Sessions of a server whose sign-in ended elsewhere (sign out) cannot continue.
   useEffect(

@@ -414,7 +414,9 @@ export class GuacAdminApi {
           url: joinUrl(session.baseUrl, 'api/session'),
           headers: { [TOKEN_HEADER]: session.token },
         });
-        valid = head.status >= 200 && head.status < 300;
+        // Only 401/403 mean a dead token: before 1.6.0 there is no `HEAD api/session`, and
+        // a valid token gets 405 (docs/protocol-notes.md §1.3).
+        valid = head.status !== 401 && head.status !== 403;
       } catch {
         // Cannot tell; treat it as a permission problem rather than signing the user out.
         valid = true;

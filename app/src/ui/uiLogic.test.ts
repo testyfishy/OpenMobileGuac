@@ -241,6 +241,24 @@ describe('settings model', () => {
     });
   });
 
+  it('parses "Sign out of servers after" with "never" as the default', () => {
+    expect(DEFAULT_APP_SETTINGS.serverSignOutAfterSeconds).toBeNull();
+    expect(parseAppSettings({}).serverSignOutAfterSeconds).toBeNull();
+    expect(parseAppSettings({ serverSignOutAfterSeconds: 300 }).serverSignOutAfterSeconds).toBe(
+      300,
+    );
+    expect(parseAppSettings({ serverSignOutAfterSeconds: 3600 }).serverSignOutAfterSeconds).toBe(
+      3600,
+    );
+    // Not one of the choices, or the wrong type: back to the default.
+    expect(
+      parseAppSettings({ serverSignOutAfterSeconds: 42 }).serverSignOutAfterSeconds,
+    ).toBeNull();
+    expect(
+      parseAppSettings({ serverSignOutAfterSeconds: '300' }).serverSignOutAfterSeconds,
+    ).toBeNull();
+  });
+
   it('keeps the session input options and touch mode through ProfileStore', async () => {
     const store = new ProfileStore(new MemoryKeyValueStore());
     const ref = { dataSource: 'ds', identifier: '1', type: 'c' } as const;

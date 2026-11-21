@@ -172,6 +172,24 @@ describe('AuthService', () => {
     );
   });
 
+  it('keeps a valid token on a pre-1.6.0 server without HEAD api/session', async () => {
+    // guacamole-client <= 1.5.5 has no SessionResource @HEAD: a valid token gets 405.
+    const http = new FakeHttpClient()
+      .on('HEAD', `${BASE}/api/session`, () => ({ status: 405, headers: {}, body: null }))
+      .on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    const { auth, profile, secure } = await setup(http);
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: false, extra: {} });
+    expect(await auth.revalidate(profile, { httpAllowed: true, totpAutofill: false })).toBe('ok');
+    expect(auth.current(profile.id)?.token).toBe(authResultJson.authToken);
+    expect(await secure.get(secretKeys.authToken(profile.id))).toBe(authResultJson.authToken);
+    // Confirmed with the token, not with a password.
+    const last = http.requests.at(-1);
+    expect(last?.method).toBe('POST');
+    expect(last?.body?.kind === 'form' ? last.body.fields : {}).toEqual({
+      token: authResultJson.authToken,
+    });
+  });
+
   it('clears password, token and TOTP seed', async () => {
     const { auth, profile, secure } = await setup(new FakeHttpClient());
     for (const k of secretKeys.all(profile.id)) await secure.set(k, 'x');
@@ -424,5 +442,94 @@ describe('AuthService: forced password change and Change password', () => {
       info: { kind: 'session-expired' },
     });
     expect(await auth.canChangePassword(profile.id)).toBe(false);
+  });
+});
+
+describe('AuthService: sign out of servers after the background time', () => {
+  async function signedIn() {
+    const kv = new MemoryKeyValueStore();
+    const secure = new MemorySecureStore();
+    const profiles = new ProfileStore(new MemoryKeyValueStore(), { secureStore: secure });
+    const profile = await profiles.add({ name: 'Lab', baseUrl: BASE, rememberPassword: true });
+    const http = new FakeHttpClient()
+      .on('POST', TOKENS, () => jsonResponse(200, authResultJson))
+      .on('HEAD', `${BASE}/api/session`, () => jsonResponse(403, permissionDeniedJson))
+      .on('DELETE', `${BASE}/api/session`, () => jsonResponse(204, null));
+    const auth = new AuthService(new GuacApi(http), secure, profiles, undefined, kv);
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: true, extra: {} });
+    return {
+      auth,
+      profile: (await profiles.get(profile.id)) ?? profile,
+      profiles,
+      secure,
+      kv,
+      http,
+    };
+  }
+
+  it('drops the sign-in, keeps the saved password and holds it back until a sign-in', async () => {
+    const { auth, profile, secure, http } = await signedIn();
+    const ended: string[] = [];
+    auth.onBackgroundSignOut((id) => ended.push(id));
+    const done = auth.signOutAfterBackground();
+    // Dropped at once, before any await: a reconnect right after cannot use the token.
+    expect(auth.current(profile.id)).toBeUndefined();
+    expect(await done).toBe(1);
+    expect(ended).toEqual([profile.id]);
+    expect(await secure.get(secretKeys.authToken(profile.id))).toBeNull();
+    expect(await secure.get(secretKeys.password(profile.id))).toBe('pw');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(http.requests.some((r) => r.method === 'DELETE')).toBe(true);
+    // The next sign-in asks: no silent use of the saved password, here or on reconnect.
+    expect(await auth.loadSecrets(profile)).toEqual({
+      token: null,
+      password: null,
+      signedOutInBackground: true,
+    });
+    expect(await auth.revalidate(profile, { httpAllowed: true, totpAutofill: false })).toBe(
+      'needs-sign-in',
+    );
+    // A sign-in by the user lifts it.
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: true, extra: {} });
+    expect((await auth.loadSecrets(profile)).password).toBe('pw');
+  });
+
+  it('remembers the hold-back across a restart of the app', async () => {
+    const { auth, profile, profiles, secure, kv } = await signedIn();
+    await auth.signOutAfterBackground();
+    const restarted = new AuthService(
+      new GuacApi(new FakeHttpClient()),
+      secure,
+      profiles,
+      undefined,
+      kv,
+    );
+    expect(await restarted.isPasswordRequired(profile.id)).toBe(true);
+    expect((await restarted.loadSecrets(profile)).password).toBeNull();
+  });
+
+  it('signs out with a stored token only (app ended while in the background)', async () => {
+    const { profile, profiles, secure, kv } = await signedIn();
+    const http = new FakeHttpClient().on('DELETE', `${BASE}/api/session`, () =>
+      jsonResponse(204, null),
+    );
+    const fresh = new AuthService(new GuacApi(http), secure, profiles, undefined, kv);
+    expect(await fresh.signOutAfterBackground()).toBe(1);
+    expect(await secure.get(secretKeys.authToken(profile.id))).toBeNull();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(http.requests[0]?.headers?.['Guacamole-Token']).toBe(authResultJson.authToken);
+  });
+
+  it('holds stored-token reads until the start-up check has run', async () => {
+    const { auth, profile } = await signedIn();
+    let release: () => void = () => undefined;
+    auth.setEntryCheck(new Promise<void>((r) => (release = r)));
+    let token: string | null | 'pending' = 'pending';
+    void auth.loadToken(profile.id).then((t) => (token = t));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(token).toBe('pending');
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(token).toBe(authResultJson.authToken);
   });
 });

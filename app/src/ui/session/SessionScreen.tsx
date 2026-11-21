@@ -72,7 +72,15 @@ import { TextInputBar } from './TextInputBar.tsx';
 import { StatusOverlay } from './StatusOverlay.tsx';
 import { Toolbar } from './Toolbar.tsx';
 import { ToolbarEditor } from './ToolbarEditor.tsx';
-import { NO_EDGES, dockReserve, effectiveToolbarStyle, type Edges } from './toolbarItems.ts';
+import {
+  NO_EDGES,
+  cutoutSide,
+  dockReserve,
+  effectiveToolbarStyle,
+  landscapeSide,
+  type CutoutSide,
+  type Edges,
+} from './toolbarItems.ts';
 import { ViewMenu } from './ViewMenu.tsx';
 import './SessionScreen.css';
 
@@ -187,6 +195,11 @@ type Menu =
 function isPhoneSized(): boolean {
   if (typeof window === 'undefined' || !window.screen) return true;
   return Math.min(window.screen.width, window.screen.height) <= 540;
+}
+
+function readCutout(): CutoutSide {
+  if (typeof window === 'undefined') return 'unknown';
+  return cutoutSide((window as { orientation?: unknown }).orientation);
 }
 
 function readLandscape(fromScreen = false): boolean {
@@ -432,13 +445,20 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   // ---- Toolbar style: floating over the desktop, or docked (space reserved at an edge)
   const keyboardActive = snap.keyboardActive;
   const [landscape, setLandscape] = useState(readLandscape);
+  const [cutout, setCutout] = useState(readCutout);
   useEffect(() => {
     // A keyboard that shrinks the WebView (Android) can make a phone look landscape: while
     // it is up, size changes are ignored (re-read when it closes), but a real rotation
     // (`orientationchange`, `screen.orientation` change) still applies at once.
-    const on = () => setLandscape(readLandscape());
+    const on = () => {
+      setLandscape(readLandscape());
+      setCutout(readCutout());
+    };
     const rotated = () => {
-      const read = () => setLandscape(readLandscape(keyboardActive));
+      const read = () => {
+        setLandscape(readLandscape(keyboardActive));
+        setCutout(readCutout());
+      };
       read();
       // Some WebViews report the new orientation a little after the event.
       setTimeout(read, 250);
@@ -460,7 +480,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     settings.toolbarStyle,
     landscape,
     // Phones only: a tablet in landscape has height to spare, so its dock stays put.
-    isPhoneSized() ? settings.toolbarLandscape : 'same',
+    isPhoneSized() ? landscapeSide(settings.toolbarLandscape, cutout) : 'same',
   );
   const docked = toolbarStyle !== 'floating';
   const dockBottom = toolbarStyle === 'dock-bottom';
@@ -877,6 +897,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
         data-split={split ? 'on' : 'off'}
         data-immersive={settings.immersive ? 'on' : 'off'}
         data-toolbar={toolbarStyle}
+        data-cutout={landscape ? cutout : 'unknown'}
         data-active={active ? 'true' : 'false'}
         aria-hidden={active ? undefined : true}
       >

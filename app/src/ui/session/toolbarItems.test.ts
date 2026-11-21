@@ -8,7 +8,9 @@ import {
   availableToolbarActions,
   dockReserve,
   editToolbarItems,
+  cutoutSide,
   effectiveToolbarStyle,
+  landscapeSide,
   normalizeToolbarItems,
   resolveToolbarItems,
 } from './toolbarItems.ts';
@@ -75,6 +77,18 @@ describe('toolbar placement', () => {
     expect(effectiveToolbarStyle('dock-bottom', true, 'same')).toBe('dock-bottom');
     expect(effectiveToolbarStyle('dock-left', true, 'right')).toBe('dock-left');
     expect(effectiveToolbarStyle('floating', true, 'right')).toBe('floating');
+  });
+
+  it('finds the camera side and docks an `away` toolbar opposite it', () => {
+    expect(cutoutSide(90)).toBe('left');
+    expect(cutoutSide(-90)).toBe('right');
+    expect(cutoutSide(0)).toBe('unknown');
+    expect(cutoutSide(undefined)).toBe('unknown');
+    expect(landscapeSide('away', 'left')).toBe('right');
+    expect(landscapeSide('away', 'right')).toBe('left');
+    expect(landscapeSide('away', 'unknown')).toBe('right');
+    expect(landscapeSide('left', 'left')).toBe('left');
+    expect(landscapeSide('same', 'right')).toBe('same');
   });
 
   it('a docked toolbar reserves its own edge; floating reserves nothing', () => {

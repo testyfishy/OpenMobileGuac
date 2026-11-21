@@ -29,6 +29,7 @@ import {
   LOCK_AFTER_CHOICES,
   MAX_SESSIONS_MAX,
   MAX_SESSIONS_MIN,
+  SERVER_SIGN_OUT_CHOICES,
   diffFromDefaults,
   type DemoVisibility,
   mergeSessionSettings,
@@ -41,6 +42,7 @@ import { SessionListEditor } from './SessionListEditors.tsx';
 function durationLabel(seconds: number | null): string {
   if (seconds === null) return strings.common.never;
   if (seconds === 0) return strings.common.immediately;
+  if (seconds >= 3600 && seconds % 3600 === 0) return strings.common.hours(seconds / 3600);
   return seconds < 60 ? strings.common.seconds(seconds) : strings.common.minutes(seconds / 60);
 }
 
@@ -300,6 +302,18 @@ export function SettingsScreen() {
           />
           <p className="field-hint">{t.backgroundDisconnectHint}</p>
           {ios ? <p className="field-hint">{t.backgroundDisconnectIos}</p> : null}
+          <Segmented<string>
+            label={t.serverSignOut}
+            value={String(settings.serverSignOutAfterSeconds)}
+            onChange={(v) =>
+              update({ ...settings, serverSignOutAfterSeconds: v === 'null' ? null : Number(v) })
+            }
+            options={SERVER_SIGN_OUT_CHOICES.map((s) => ({
+              value: String(s),
+              label: durationLabel(s),
+            }))}
+          />
+          <p className="field-hint">{t.serverSignOutHint}</p>
           <Toggle
             label={t.keepAlive}
             hint={android ? t.keepAliveHintAndroid : ios ? t.keepAliveHintIos : t.keepAliveHintWeb}

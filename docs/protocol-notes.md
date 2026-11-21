@@ -77,7 +77,17 @@ Sources:
 
 - Check validity: `HEAD api/session` with the token header. Success means the token is
   usable. Sources: `FE/auth/service/authenticationService.js`, `service.getValidity`; and
-  `JAVA/rest/session/SessionResource.java`, `@HEAD checkValidity`.
+  `JAVA/rest/session/SessionResource.java`, `@HEAD checkValidity`. **Only from 1.6.0**:
+  1.4.0 through 1.5.5 have no `@HEAD` (nor `@GET`) on `SessionResource`, so a *valid* token
+  gets 405, while a dead token is still refused with 403 by `getGuacamoleSession` before the
+  method is looked up. `GuacApi.isSessionValid` therefore counts only 401/403 as expired
+  and settles any other answer with `POST api/tokens` + `token=` (the web client's
+  page-load re-validation, all versions); `GuacAdminApi` likewise treats only 401/403 as a
+  dead token when telling `PERMISSION_DENIED` apart.
+- Server-side expiry (`HashTokenSessionMap`, `api-session-timeout`, default 60 min): a
+  session with open tunnels is never evicted; otherwise it goes after the timeout since its
+  last access. Adding or removing a tunnel counts as an access (`GuacamoleSession`), so a
+  short time in the background after a session closes does not end the sign-in.
 - Log out: `DELETE api/session` with the token header. This is what the web client does
   (`authenticationService.js`, `service.revokeToken` and `service.logout`). Server side:
   `SessionResource.java`, `@DELETE invalidate`. `JAVA/rest/session/SessionRESTService.java`

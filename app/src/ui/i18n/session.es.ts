@@ -308,9 +308,10 @@ export const sessionEs: SessionStrings = {
     },
     toolbarLandscape: 'Barra fija en horizontal',
     toolbarLandscapeHint:
-      'Con el teléfono en horizontal, una barra fijada arriba o abajo pasa a este lado y deja toda la altura para el escritorio.',
+      'Con el teléfono en horizontal, una barra fijada arriba o abajo pasa a este lado y deja toda la altura para el escritorio. El lado opuesto a la cámara da la columna más estrecha.',
     toolbarLandscapeOptions: {
       same: 'No mover',
+      away: 'Lado opuesto a la cámara',
       left: 'Lado izquierdo',
       right: 'Lado derecho',
     },
