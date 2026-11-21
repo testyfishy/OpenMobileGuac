@@ -1,15 +1,32 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { FieldType, type FieldDescriptor } from '../../core/models/ApiErrorBody.ts';
-import type { SsoKind } from '../../core/sso/sso.ts';
+import { findDuoRedirect, type SsoKind } from '../../core/sso/sso.ts';
+import type { TranslationTable } from '../admin/labels.ts';
 import { secondsRemaining, totpAt, totpCounter, type TotpParams } from '../../core/totp/totp.ts';
 import { ErrorBanner, InfoBanner } from '../components/Feedback.tsx';
 import { TextField, Toggle } from '../components/Form.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { strings } from '../strings.ts';
-import { visibleExtraFields, type AuthFlowState, type LoginValues } from './authFlow.ts';
+import {
+  CONFIRM_NEW_PASSWORD_FIELD,
+  NEW_PASSWORD_FIELD,
+  visibleExtraFields,
+  type AuthFlowState,
+  type LoginValues,
+} from './authFlow.ts';
+import { loginFieldLabel, serverMessageText } from './serverText.ts';
 
 export interface SsoProps {
-  readonly kind: SsoKind;
+  /** Providers the server offers, in the server's order (usually one). */
+  readonly kinds: readonly SsoKind[];
+  readonly available: boolean;
+  readonly busy: boolean;
+  readonly error?: string;
+  readonly onStart: (kind: SsoKind) => void;
+}
+
+/** The Duo step (a `duo_code` REDIRECT field after the password). */
+export interface DuoProps {
   readonly available: boolean;
   readonly busy: boolean;
   readonly error?: string;
@@ -38,6 +55,10 @@ export interface LoginFormProps {
   onEnrollSecret?: (secret: string, field: FieldDescriptor) => void;
   /** A banner above the form (for example "unlock was cancelled"). */
   notice?: string;
+  /** Duo verification, shown on the extra step when the server asks for it. */
+  duo?: DuoProps;
+  /** The server's translation table, for its prompt and error texts and field labels. */
+  serverTable?: TranslationTable | null;
 }
 
 /** Username/password, then any additional fields the server asks for (SRV-4, SRV-5). */
@@ -51,6 +72,8 @@ export function LoginForm({
   totp,
   onEnrollSecret,
   notice,
+  duo,
+  serverTable,
 }: LoginFormProps) {
   const l = strings.login;
   const busy = state.phase === 'signing-in';
@@ -60,18 +83,40 @@ export function LoginForm({
   const [remember, setRemember] = useState(state.values.remember);
   const [extra, setExtra] = useState<Record<string, string>>({});
   const [saveEnrolment, setSaveEnrolment] = useState(false);
+  const [localError, setLocalError] = useState<string | undefined>(undefined);
   const fields = visibleExtraFields(state.expected);
+  const duoStep = step === 'extra' && findDuoRedirect(state.expected) !== undefined;
+  const prompt = step === 'extra' ? serverMessageText(state.prompt, serverTable) : undefined;
+  const error =
+    state.phase === 'form' && state.error
+      ? {
+          ...state.error,
+          detail: serverMessageText(state.serverError, serverTable) ?? state.error.detail,
+        }
+      : undefined;
   const totpField = fields.find((f) => f.type === FieldType.GUAC_TOTP_CODE);
   const auto = useTotpCode(totp && totpField ? totp : undefined);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (busy) return;
+    setLocalError(undefined);
     if (step === 'credentials') {
       onSubmit({ username: username.trim(), password, remember });
       setPassword('');
     } else {
       const values = { ...extra };
+      const hasNew = fields.some((f) => f.name === NEW_PASSWORD_FIELD);
+      const hasConfirm = fields.some((f) => f.name === CONFIRM_NEW_PASSWORD_FIELD);
+      if (
+        hasNew &&
+        hasConfirm &&
+        (values[NEW_PASSWORD_FIELD] ?? '') !== (values[CONFIRM_NEW_PASSWORD_FIELD] ?? '')
+      ) {
+        // Checked here too, so a typo does not cost a round trip (the server checks again).
+        setLocalError(l.passwordMismatch);
+        return;
+      }
       if (totpField && auto.code && !values[totpField.name]) {
         if (auto.waiting) return;
         values[totpField.name] = auto.code;
@@ -93,8 +138,9 @@ export function LoginForm({
       <h2 className="form-title">{step === 'extra' ? l.additionalTitle : l.title(serverName)}</h2>
       {notice ? <InfoBanner>{notice}</InfoBanner> : null}
       {state.phase === 'form' && state.notice ? <InfoBanner>{state.notice}</InfoBanner> : null}
-      {state.phase === 'form' && state.error ? <ErrorBanner error={state.error} /> : null}
-      {sso && step === 'credentials' ? <SsoSection sso={sso} /> : null}
+      {error ? <ErrorBanner error={error} /> : null}
+      {localError ? <p className="field-error">{localError}</p> : null}
+      {sso && step === 'credentials' && sso.kinds.length > 0 ? <SsoSection sso={sso} /> : null}
       {step === 'credentials' ? (
         <>
           <TextField
@@ -125,11 +171,17 @@ export function LoginForm({
         </>
       ) : (
         <>
-          <p className="muted">{l.additionalHint}</p>
+          {prompt ? (
+            <InfoBanner>{prompt}</InfoBanner>
+          ) : duoStep ? null : (
+            <p className="muted">{l.additionalHint}</p>
+          )}
+          {duoStep ? <DuoSection duo={duo} /> : null}
           {fields.map((f, i) => (
             <ExtraField
               key={f.name}
               field={f}
+              label={loginFieldLabel(f.name, serverTable)}
               value={extra[f.name] ?? (f === totpField && auto.code ? auto.code : '')}
               autoFocus={i === 0 && !(f === totpField && auto.code)}
               disabled={busy}
@@ -142,15 +194,17 @@ export function LoginForm({
         </>
       )}
       <div className="form-actions">
-        <button
-          type="submit"
-          className="btn btn-primary btn-block"
-          disabled={
-            busy || (step === 'extra' && auto.waiting && !(totpField && extra[totpField.name]))
-          }
-        >
-          {busy ? l.signingIn : l.signIn}
-        </button>
+        {duoStep && fields.length === 0 ? null : (
+          <button
+            type="submit"
+            className="btn btn-primary btn-block"
+            disabled={
+              busy || (step === 'extra' && auto.waiting && !(totpField && extra[totpField.name]))
+            }
+          >
+            {busy ? l.signingIn : l.signIn}
+          </button>
+        )}
         {step === 'extra' ? (
           <button
             type="button"
@@ -168,26 +222,60 @@ export function LoginForm({
 
 function SsoSection({ sso }: { sso: SsoProps }) {
   const s = strings.login.sso;
+  const providerName = (k: SsoKind) => s.providers[k] ?? s.providers['unknown'] ?? '';
+  const single = sso.kinds.length === 1 ? sso.kinds[0] : undefined;
   return (
     <div className="sso-box">
       <p className="sso-title">
         <Icon name="globe" /> {s.title}
       </p>
-      <p>{s.body(s.providers[sso.kind] ?? s.providers['unknown'] ?? '')}</p>
+      <p>{single ? s.body(providerName(single)) : s.choose}</p>
       {sso.error ? <p className="field-error">{sso.error}</p> : null}
-      {sso.available ? (
+      {!sso.available ? (
+        <p className="muted">{s.unavailable}</p>
+      ) : sso.busy ? (
+        <button type="button" className="btn btn-primary btn-block" disabled>
+          {s.waiting}
+        </button>
+      ) : (
+        sso.kinds.map((k) => (
+          <button
+            key={k}
+            type="button"
+            className="btn btn-primary btn-block"
+            onClick={() => sso.onStart(k)}
+          >
+            {single ? s.button : providerName(k)}
+          </button>
+        ))
+      )}
+      <p className="field-hint">{s.experimental}</p>
+    </div>
+  );
+}
+
+function DuoSection({ duo }: { duo: DuoProps | undefined }) {
+  const d = strings.login.duo;
+  return (
+    <div className="sso-box">
+      <p className="sso-title">
+        <Icon name="key" /> {d.title}
+      </p>
+      <p>{d.body}</p>
+      {duo?.error ? <p className="field-error">{duo.error}</p> : null}
+      {duo?.available ? (
         <button
           type="button"
           className="btn btn-primary btn-block"
-          onClick={sso.onStart}
-          disabled={sso.busy}
+          onClick={duo.onStart}
+          disabled={duo.busy}
         >
-          {sso.busy ? s.waiting : s.button}
+          {duo.busy ? d.waiting : d.button}
         </button>
       ) : (
-        <p className="muted">{s.unavailable}</p>
+        <p className="muted">{d.unavailable}</p>
       )}
-      <p className="field-hint">{s.experimental}</p>
+      <p className="field-hint">{d.experimental}</p>
     </div>
   );
 }
@@ -228,14 +316,10 @@ function useTotpCode(p: TotpAutofillProps | undefined): AutoCode {
   };
 }
 
-function prettyName(name: string): string {
-  const s = name.replace(/^guac-/, '').replace(/[-_]+/g, ' ');
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
 /** Renders one server-requested field from its descriptor. */
 function ExtraField({
   field,
+  label,
   value,
   onChange,
   autoFocus,
@@ -245,6 +329,7 @@ function ExtraField({
   onSaveEnrolment,
 }: {
   field: FieldDescriptor;
+  label: string;
   value: string;
   onChange: (value: string) => void;
   autoFocus: boolean;
@@ -304,7 +389,7 @@ function ExtraField({
     case FieldType.BOOLEAN:
       return (
         <Toggle
-          label={prettyName(field.name)}
+          label={label}
           checked={value === 'true'}
           onChange={(c) => onChange(c ? 'true' : '')}
           disabled={disabled}
@@ -314,7 +399,7 @@ function ExtraField({
       return (
         <div className="field">
           <label htmlFor={selectId} className="field-label">
-            {prettyName(field.name)}
+            {label}
           </label>
           <select
             id={selectId}
@@ -335,9 +420,14 @@ function ExtraField({
     default:
       return (
         <TextField
-          label={prettyName(field.name)}
+          label={label}
           value={value}
           onChange={onChange}
+          autoComplete={
+            field.name === NEW_PASSWORD_FIELD || field.name === CONFIRM_NEW_PASSWORD_FIELD
+              ? 'new-password'
+              : undefined
+          }
           type={
             field.type === FieldType.PASSWORD
               ? 'password'

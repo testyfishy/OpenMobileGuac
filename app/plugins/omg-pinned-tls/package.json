@@ -1,0 +1,24 @@
+{
+  "name": "omg-pinned-tls",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenMobileGuac's local Capacitor plugin: HTTPS and WebSocket connections that accept exactly one user-pinned certificate (SRV-8, docs/tls.md).",
+  "license": "Apache-2.0",
+  "files": [
+    "android/src/main/",
+    "android/build.gradle",
+    "ios/Sources",
+    "Package.swift"
+  ],
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  }
+}

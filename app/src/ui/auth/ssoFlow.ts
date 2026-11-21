@@ -5,9 +5,11 @@ import {
 } from '@capacitor/inappbrowser';
 import type { Logger } from '../../core/diagnostics/log.ts';
 import {
+  expectedReturnTargets,
   extractCallbackParam,
-  extractSsoParam,
+  extractReturnParams,
   newSsoState,
+  returnParamNames,
   withAppCallback,
   type SsoRedirect,
 } from '../../core/sso/sso.ts';
@@ -15,9 +17,9 @@ import { isNative } from '../services/native.ts';
 import type { SsoMode } from '../settings/settingsModel.ts';
 
 /**
- * Completes an identity-provider sign-in (SRV-7, experimental) and returns the single-use
- * value the server expects (`id_token`, `ticket` or `state`). Exchanging it for a token is
- * the caller's job (`AuthService.loginWithParameters`).
+ * Completes an identity-provider sign-in (SRV-7, experimental) or a Duo step and returns the
+ * single-use values the server expects (`id_token`, `ticket` or `state`; for Duo both
+ * `duo_code` and `state`). Posting them to `api/tokens` is the caller's job.
  *
  * Two hand-offs, see docs/sso.md:
  * - `webview`: open the IdP page in an in-app web view and watch its navigations; when it
@@ -29,7 +31,7 @@ import type { SsoMode } from '../settings/settingsModel.ts';
  */
 
 export type SsoOutcome =
-  | { readonly ok: true; readonly value: string }
+  | { readonly ok: true; readonly values: Readonly<Record<string, string>> }
   | { readonly ok: false; readonly reason: 'cancelled' | 'unavailable' | 'timeout' };
 
 const TIMEOUT_MS = 10 * 60_000;
@@ -57,6 +59,8 @@ export async function runSso(
   // One random `state` per attempt; a callback without it is ignored (AUDIT #13). The
   // id_token's nonce, checked by this server, binds it to the expected server as well.
   const state = newSsoState();
+  const names = returnParamNames(redirect);
+  const targets = expectedReturnTargets(redirect, baseUrl);
   const callbackUrl =
     mode === 'app-callback' && redirect.kind === 'openid'
       ? withAppCallback(redirect.redirectUrl, state)
@@ -72,10 +76,11 @@ export async function runSso(
     const finish = (outcome: SsoOutcome) => {
       if (finished) return;
       finished = true;
+      // First, before any other work: the server's page must stop as soon as possible.
+      void InAppBrowser.close().catch(() => undefined);
       clearTimeout(timer);
       callbackWaiter = null;
       for (const h of handles) void h.remove().catch(() => undefined);
-      void InAppBrowser.close().catch(() => undefined);
       log?.info('sso', outcome.ok ? 'received sign-in result' : `ended: ${outcome.reason}`);
       resolve(outcome);
     };
@@ -85,8 +90,10 @@ export async function runSso(
     );
     const check = (url: string | undefined) => {
       if (!url) return;
-      const value = extractSsoParam(url, baseUrl, redirect.paramName);
-      if (value) finish({ ok: true, value });
+      const values = extractReturnParams(url, targets, names);
+      // Close first: every millisecond the server's own page keeps running it may submit
+      // the single-use values itself (docs/sso.md, "the race").
+      if (values) finish({ ok: true, values });
     };
 
     void (async () => {
@@ -100,7 +107,7 @@ export async function runSso(
         if (callbackUrl) {
           callbackWaiter = (url) => {
             const value = extractCallbackParam(url, redirect.paramName, state);
-            if (value) finish({ ok: true, value });
+            if (value) finish({ ok: true, values: { [redirect.paramName]: value } });
             else log?.warn('sso', 'ignored an app callback that does not match this sign-in');
           };
           await InAppBrowser.openInSystemBrowser({

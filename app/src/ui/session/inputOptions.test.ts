@@ -24,7 +24,7 @@ import {
 const BASE: SessionSettings = {
   fitMode: 'fit-screen',
   pointerMode: 'direct',
-  matchDeviceSize: false,
+  matchDeviceSize: true,
   pointerSpeed: 1,
   naturalScroll: true,
   haptics: true,
@@ -38,6 +38,26 @@ describe('input settings (PTR-7)', () => {
   it('old stored settings (without the new fields) load with defaults', () => {
     const s = normalizeSessionSettings(BASE);
     expect(s).toEqual(DEFAULT_SESSION_SETTINGS);
+  });
+
+  it('follows the view by default; an explicit stored "off" is kept', () => {
+    expect(DEFAULT_SESSION_SETTINGS.matchDeviceSize).toBe(true);
+    expect(normalizeSessionSettings({ ...BASE, matchDeviceSize: false }).matchDeviceSize).toBe(
+      false,
+    );
+    expect(sanitizeSessionSettingsPatch({})).not.toHaveProperty('matchDeviceSize');
+  });
+
+  it('microphone is off and received files go to Downloads by default', () => {
+    expect(DEFAULT_SESSION_SETTINGS.microphone).toBe(false);
+    expect(DEFAULT_SESSION_SETTINGS.receivedFiles).toBe('downloads');
+    expect(
+      normalizeSessionSettings({ ...BASE, receivedFiles: 'nope' as never }).receivedFiles,
+    ).toBe('downloads');
+    expect(sanitizeSessionSettingsPatch({ microphone: true, receivedFiles: 'share' })).toEqual({
+      microphone: true,
+      receivedFiles: 'share',
+    });
   });
 
   it.each([

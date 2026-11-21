@@ -222,6 +222,18 @@ export const adminEn = {
     ongoing: 'Still connected',
     duration: (minutes: number) => plural(minutes, '1 minute', `${minutes} minutes`),
     unavailable: 'The server did not share this information with this account.',
+    // All active sessions on the server (Settings › Active Sessions in the web client)
+    allTitle: 'Active sessions',
+    allButton: 'Active sessions on this server',
+    allIntro:
+      'Everyone connected right now, on every connection this account can see. Join opens their session next to yours; Disconnect ends it.',
+    unknownConnection: 'Unknown connection',
+    join: 'Join',
+    joinTitle: (user: string, connection: string) => `Join ${user}’s session on ${connection}?`,
+    joinBody:
+      'You see their screen and your input reaches it, unless the connection is read-only. Guacamole tells the owner that someone joined. Joining does not change any of your settings.',
+    joinedName: (connection: string, user: string) => `${connection} (${user})`,
+    refresh: 'Refresh',
   },
 };
 

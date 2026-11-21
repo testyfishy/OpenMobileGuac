@@ -178,6 +178,136 @@ The client uses it to pick the right base URL from the candidates (SPEC SRV-2) w
 sending credentials to any URL that has not been confirmed. This choice is ours; the web
 client never needs to probe.
 
+### 1.6 Single sign-on detection and return (OpenID, SAML, CAS)
+
+Checked against the 1.6.0 source and, for OpenID, a local 1.6.0 server (official Docker
+image, database + OpenID extensions) with Keycloak 26 on 2026-11-20. Details and the
+hand-offs: `docs/sso.md`.
+
+- **The REDIRECT field is not always sent.** With the database extension ahead of OpenID
+  (the default order there), `POST api/tokens` with no fields answered
+  `INVALID_CREDENTIALS` with `expected: [username, password]` only. The web client then
+  offers SSO through HTML patches: `GET api/patches` (no token) returns a JSON array of
+  HTML strings, and each SSO extension adds
+  `<li class="sso-provider sso-provider-openid"><a href="api/ext/openid/login">…`
+  (`extensions/guacamole-auth-sso/modules/*/src/main/resources/html/sso-provider-*.html`).
+  `GET api/ext/<name>/login` answers `303` to the IdP with a fresh nonce
+  (`guacamole-auth-sso-base` `SSOResource`). The app reads both sources
+  (`core/sso/sso.ts` `findSsoRedirect`, `ssoProvidersFromPatches`).
+- **Return shapes.** OpenID (`response_type=id_token`, implicit flow) came back as
+  `<redirect_uri>#session_state=…&iss=…&id_token=…`. The OpenID extension's
+  `transformToken.js` rewrites that fragment to `#/?…` before Angular routes, and the
+  route's `updateCurrentToken($location.search())` posts every URL parameter to
+  `api/tokens` (`FE/index/config/indexRouteConfig.js`; real query parameters are moved
+  behind `#/` first by `relocateParameters.js`). SAML returns `?state=…` from
+  `api/ext/saml/callback` (`AssertionConsumerServiceResource`), CAS `?ticket=…`.
+- **Single use.** Replaying an `id_token` the server's own page had already posted gave
+  `403 INVALID_CREDENTIALS` with `expected: [username, password]` (nonce removed by
+  `NonceService.isValid`).
+- **Timing of the server's page** (desktop Chromium, localhost): page load finished at
+  753 ms, and the page's own `POST api/tokens` started at 923 ms. So a web view that closes
+  on its "navigation completed" event can beat the page, but only by the margin of the
+  plugin's event delivery. This was not measured on a phone.
+- **Return address.** The return URL is server configuration (`openid-redirect-uri`, CAS
+  `service`, `duo-redirect-uri`), not necessarily the address the app uses. The app accepts
+  the base URL and, when the redirect names one, that address (`expectedReturnTargets`).
+- **App callback check.** With `redirect_uri=openmobileguac://sso-callback` and an added
+  `state`, Keycloak returned `openmobileguac://sso-callback/#state=…&session_state=…&iss=…&id_token=…`,
+  and that token was accepted by `POST api/tokens` (the server does not check
+  `redirect_uri`).
+
+### 1.7 Duo (guacamole-auth-duo 1.6.0, Duo Universal Prompt)
+
+From the source (`extensions/guacamole-auth-duo/src/main/java/org/apache/guacamole/auth/duo/`);
+not run against Duo (no tenant).
+
+1. The user signs in with username and password. After the primary back end accepts them,
+   `DuoAuthenticationProvider.getUserContext` calls
+   `UserVerificationService.verifyAuthenticatedUser`. Without `duo_code` and `state` in the
+   request it stores the credentials under a fresh Duo `state`
+   (`DuoAuthenticationSessionManager.defer`, expires after `duo-auth-timeout` minutes,
+   default 5) and throws `TranslatableGuacamoleInsufficientCredentialsException`, key
+   `LOGIN.INFO_DUO_AUTH_REQUIRED`, with one `RedirectField` `duo_code` whose `redirectUrl`
+   is Duo's authorize URL (`?scope=openid&response_type=code&redirect_uri=<raw>&client_id=…&request=<JWT>`,
+   duo-universal-sdk 1.3.1 `Client.createAuthUrl`; the JWT carries `redirect_uri`, `state`,
+   `duo_uname`). HTTP 403, `type: INSUFFICIENT_CREDENTIALS`.
+2. Duo returns the browser to `duo-redirect-uri` (the Guacamole address) with
+   `?duo_code=…&state=…`.
+3. The next `POST api/tokens` must carry **both** `duo_code` and `state`.
+   `DuoAuthenticationProvider.updateCredentials` looks `state` up
+   (`AuthenticationSessionManager.resume`, single use) and replaces the request's
+   credentials with the deferred ones, so the username and password are not needed again;
+   the web client sends only the URL parameters. If `state` is unknown or already used the
+   request's own credentials are used unchanged.
+4. `verifyAuthenticatedUser` exchanges `duo_code` with Duo
+   (`exchangeAuthorizationCodeFor2FAResult`). `allow` → signed in. A denial, a missing
+   result or a `DuoException` (stale or reused code) → a new deferral and a new `duo_code`
+   REDIRECT field, i.e. step 1 again.
+
+What the app does (`ui/connections/ConnectionsScreen.tsx` `startDuo`, `ui/auth/authFlow.ts`):
+the Duo field is shown on the extra step (not as SSO); the in-app browser opens
+`redirectUrl` and waits for a page at the return address carrying both values; the app
+then posts `username`, `password`, `duo_code` and `state` together. Sending the password
+again is harmless when `state` resumes (the deferred credentials replace it) and is what
+keeps a stale or already-used `state` from ending in "invalid login": the server then
+authenticates the password again and offers a fresh Duo step. A repeated Duo field is
+shown as "Duo did not confirm the sign-in". The race with the server's own page (§1.6)
+applies to Duo too, since `duo-redirect-uri` is the Guacamole web app.
+
+### 1.8 Forced password change at sign-in (database extension)
+
+Checked against a local 1.6.0 server (PostgreSQL extension, minimum length 10, digit
+required, TOTP extension on) on 2026-11-20.
+
+- An account with `expired` set (or past `*-user-password-max-age`) is answered, after a
+  correct password, with `INSUFFICIENT_CREDENTIALS`, message "Password has expired", key
+  `LOGIN.INFO_PASSWORD_EXPIRED`, and `expected: [username, password, new-password,
+  confirm-new-password]` (`guacamole-auth-jdbc-base` `UserService.resetExpiredPassword`,
+  called from `JDBCAuthenticationProviderService.getUserContext`).
+- The next attempt sends `username`, the **old** `password`, `new-password` and
+  `confirm-new-password`. Refusals are `400 BAD_REQUEST` with translatable keys:
+  `LOGIN.ERROR_PASSWORD_SAME`, `LOGIN.ERROR_PASSWORD_MISMATCH`, `LOGIN.ERROR_PASSWORD_BLANK`,
+  `PASSWORD_POLICY.ERROR_TOO_SHORT` `{ LENGTH: 10 }`, `PASSWORD_POLICY.ERROR_REQUIRES_DIGIT`, …
+- **The new password is stored before later steps run.** With TOTP also installed, the
+  reset request was answered with the TOTP enrolment step, and from then on the old
+  password got `INVALID_CREDENTIALS` while the new one worked. TOTP checks in `decorate`,
+  after the database extension's `getUserContext`. So after a reset request that returns a
+  different extra step, the app uses `new-password` as the password and saves it if the
+  password is remembered (`authFlow.ts`, `AuthService.login`).
+- **With Duo as well** (from the source only): Duo verifies in its `getUserContext`, and
+  `AuthenticationService.getUserContexts` calls providers in extension order, so Duo may
+  run before or after the reset. If a Duo step follows the reset request the app keeps the
+  old password and `new-password` (Duo defers that whole request and replays it after the
+  check, so the reset then happens). If the database extension ran first, the reset is
+  already stored and the replayed old password fails; upstream (web client included) then
+  answers "invalid login", and the user must sign in with the new password. Not tested.
+- The web client shows the step's `translatableMessage` above the fields and labels them
+  `LOGIN.FIELD_HEADER_NEW_PASSWORD` / `…_CONFIRM_NEW_PASSWORD`. The app does the same from
+  the server's `translations/<lang>.json` (§8.4), formatting `{VAR}` and
+  `{VAR, plural, …}` itself (`ui/auth/serverText.ts`), and falls back to `message`.
+
+### 1.9 Change own password
+
+`PUT api/session/data/{dataSource}/users/{username}/password`, token header, JSON body
+`{ "oldPassword": "…", "newPassword": "…" }` (`guacamole/src/main/java/org/apache/guacamole/rest/user/UserResource.java`
+`updatePassword`, `APIUserPasswordUpdate`; web client `userService.updateUserPassword`).
+`{dataSource}` is the session's `dataSource` (`authenticationService.getDataSource()`).
+Results on a 1.6.0 server:
+
+| Case | Answer |
+|---|---|
+| Success | `204`; the session token stays valid |
+| Wrong old password | `403 PERMISSION_DENIED` "Permission denied." (credentials exceptions are turned into `GuacamoleSecurityException`) |
+| No `UPDATE` on the own user | the same `403 PERMISSION_DENIED` "Permission denied." |
+| Unknown token | `403 PERMISSION_DENIED` "Permission Denied." |
+| Password policy | `400 BAD_REQUEST`, e.g. key `PASSWORD_POLICY.ERROR_TOO_SHORT` `{ LENGTH: 10 }` |
+
+The web client offers the form only when `GET …/self/effectivePermissions` grants `UPDATE`
+on the own user or system `ADMINISTER` (`guacSettingsPreferences.js` `canUpdateSelf`). A
+new database user had only `READ` on itself, so on a default setup the administrator must
+grant it. The app checks the same permission first, then tells a wrong old password from
+an expired token with `HEAD api/session` (`GuacApi.changePassword`).
+
 ## 2. Connection tree
 
 | | |
@@ -613,8 +743,32 @@ Implemented in `app/src/ui/session/` (`SessionController.ts`, `argv.ts`, `transf
   intercepts the stream and sends the first ack itself (`JAVA/tunnel/OutputStreamInterceptingFilter.java`,
   `handleInterceptedStream`). In band, the client must send that first `ack OK SUCCESS`;
   `Guacamole.BlobReader` then acks every blob with "OK" / SUCCESS (`JS/BlobReader.js`).
-  OpenMobileGuac uses the in-band path (no same-origin REST channel), which costs one round
-  trip per blob.
+  In band costs one round trip per 4 KB blob.
+- **What the app does (2026-11).** On native, received files use the same stream endpoint,
+  requested through native HTTP (`@capacitor/filesystem` `downloadFile`: no CORS, body
+  written straight to disk) with the token in the `Guacamole-Token` header (§1.2), not in
+  the URL. Facts that shape it (guacamole-client 1.6.0):
+  - `OutputStreamInterceptingFilter.handleBlob` acks guacd itself, except for the first blob
+    after each `sync`, which it forwards to the client with empty data and leaves the ack to
+    the client (so the display keeps up); `end` is passed through.
+  - `StreamInterceptingFilter.interceptStream` returns at once (an empty 200) when the tunnel
+    is not open, and every intercepted stream is closed normally when the tunnel closes
+    (`StreamInterceptingTunnel.close`). So a 200 does not mean complete: the app counts a
+    file as complete only when the in-band `end` arrived too, else it deletes it.
+  - An error ack from the client makes guacd free the stream without `end`
+    (`rdp/download.c`), while the server keeps the intercepted stream (and its blocked
+    request) under an index guacd may reuse. Cancel therefore stops acking the forced
+    blobs: guacd stalls at the next `sync` (with a still remote screen that may not come, and
+    the file may finish first); the native request ends after 60 s without data, the part
+    file is deleted either way, and acks then resume so the server's next write fails and it
+    closes the stream itself. Unverified against a real server.
+  - `Filesystem.downloadFile` uses the platform HTTP stack (Android: the bridge's SSL socket
+    factory; iOS: `URLSession`), not the pinned-TLS plugin (`docs/tls.md`), so a server
+    trusted by fingerprint gets the in-band fallback.
+  - The native plugin cannot abort a request; Android counts progress in a 32-bit `Int`
+    (wraps past 2 GiB; the app unwraps it).
+  The in-band path remains for the web build, the Demo and a request that fails before any
+  data (the stream was then never intercepted).
 - A file under a filesystem is downloaded by requesting its stream name
   (`ManagedFilesystem.downloadFile`); a disabled download sends no `body` at all
   (`SRV/protocols/rdp/download.c` only logs), so the client needs a timeout.

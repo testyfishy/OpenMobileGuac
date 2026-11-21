@@ -4,6 +4,8 @@ import {
   type ServerProfile,
 } from '../models/ServerProfile.ts';
 import { isRecord } from '../models/json.ts';
+import { pinOrigin } from '../tls/fingerprint.ts';
+import { pinForBaseUrl, type TlsPin } from '../tls/TlsPin.ts';
 import { sameServerEndpoint } from '../url/normalizeServerUrl.ts';
 import { MemoryKeyValueStore, type KeyValueStore } from './KeyValueStore.ts';
 import { secretKeys, type SecureStore } from './SecureStore.ts';
@@ -79,9 +81,12 @@ export interface NewServerProfile {
   readonly baseUrl: string;
   readonly username?: string;
   readonly rememberPassword?: boolean;
+  /** Kept only when bound to `baseUrl`'s scheme, host and port (SRV-8). */
+  readonly tlsPin?: TlsPin;
 }
 
-export type ServerProfilePatch = Partial<Omit<ServerProfile, 'id' | 'createdAt'>>;
+/** The pin is changed only through `setTlsPinForOrigin` (SRV-8). */
+export type ServerProfilePatch = Partial<Omit<ServerProfile, 'id' | 'createdAt' | 'tlsPin'>>;
 
 export interface ProfileStoreOptions {
   readonly secureStore?: SecureStore;
@@ -121,6 +126,23 @@ function parseRef(raw: unknown): ConnectionRef | undefined {
   if (typeof dataSource !== 'string' || typeof identifier !== 'string') return undefined;
   if (type !== 'c' && type !== 'g') return undefined;
   return { dataSource, identifier, type };
+}
+
+/**
+ * SRV-8: the trust state of `baseUrl`'s origin among `profiles` (ignoring `exceptId`):
+ * `found` when another profile is at that scheme/host/port, with its pin or `undefined`.
+ */
+function originPinState(
+  profiles: readonly ServerProfile[],
+  baseUrl: string,
+  exceptId?: string,
+): { readonly found: boolean; readonly pin: TlsPin | undefined } {
+  const origin = pinOrigin(baseUrl);
+  if (origin === undefined) return { found: false, pin: undefined };
+  const other = profiles.find((p) => p.id !== exceptId && pinOrigin(p.baseUrl) === origin);
+  return other
+    ? { found: true, pin: pinForBaseUrl(other.tlsPin, other.baseUrl) }
+    : { found: false, pin: undefined };
 }
 
 function parseJson(text: string | null): unknown {
@@ -178,6 +200,10 @@ export class ProfileStore {
     return this.serialized(async () => {
       assertHttpBaseUrl(input.baseUrl);
       const profiles = await this.readProfiles();
+      // SRV-8: pins are per address. A new profile at an address that already has saved
+      // profiles takes their trust state (pin or none), never its own.
+      const there = originPinState(profiles, input.baseUrl);
+      const tlsPin = there.found ? there.pin : pinForBaseUrl(input.tlsPin, input.baseUrl);
       const profile: ServerProfile = {
         id: this.generateId(),
         name: input.name,
@@ -185,6 +211,7 @@ export class ProfileStore {
         username: input.username ?? '',
         rememberPassword: input.rememberPassword ?? false,
         createdAt: this.now(),
+        ...(tlsPin ? { tlsPin } : {}),
       };
       if (profiles.some((p) => p.id === profile.id)) throw new Error('Generated a duplicate id');
       await this.writeProfiles([...profiles, profile]);
@@ -200,13 +227,23 @@ export class ProfileStore {
       const current = profiles[index];
       if (!current) throw new Error(`No profile with id ${id}`);
       const defined = Object.fromEntries(
-        Object.entries(patch).filter(([, v]) => v !== undefined),
+        Object.entries(patch).filter(([k, v]) => v !== undefined && k !== 'tlsPin'),
       ) as ServerProfilePatch;
+      const { tlsPin: currentPin, ...rest } = current;
+      // SRV-8: a trusted certificate belongs to a scheme, host and port. It survives a path
+      // change on the same origin. On any other address change the profile takes the new
+      // address's trust state (another saved profile's pin there, or none).
+      const nextBase = defined.baseUrl ?? current.baseUrl;
+      const keptPin =
+        pinOrigin(nextBase) === pinOrigin(current.baseUrl)
+          ? pinForBaseUrl(currentPin, nextBase)
+          : originPinState(profiles, nextBase, id).pin;
       const updated: ServerProfile = {
-        ...current,
+        ...rest,
         ...defined,
         id: current.id,
         createdAt: current.createdAt,
+        ...(keptPin ? { tlsPin: keptPin } : {}),
       };
       const next = [...profiles];
       next[index] = updated;
@@ -300,9 +337,29 @@ export class ProfileStore {
       }
       for (const e of entries) {
         assertHttpBaseUrl(e.data.profile.baseUrl);
-        const profile: ServerProfile = { ...e.data.profile, id: e.targetId };
         const index = profiles.findIndex((p) => p.id === e.targetId);
         const previous = profiles[index];
+        // SRV-8: a backup never adds or replaces the trusted certificate of a saved address.
+        // - A saved server keeps its own pin (if still bound to the address).
+        // - A new server at an address that already has profiles (saved, or earlier in this
+        //   restore) takes that address's trust state, pin or none.
+        // - Only a server at an address new to this device takes the backup's pin, and only
+        //   when bound to its own scheme, host and port.
+        const { tlsPin: backupPin, ...restored } = e.data.profile;
+        const there = originPinState(profiles, restored.baseUrl, e.targetId);
+        const tlsPin =
+          previous && pinOrigin(previous.baseUrl) === pinOrigin(restored.baseUrl)
+            ? pinForBaseUrl(previous.tlsPin, restored.baseUrl)
+            : there.found
+              ? there.pin
+              : previous
+                ? undefined
+                : pinForBaseUrl(backupPin, restored.baseUrl);
+        const profile: ServerProfile = {
+          ...restored,
+          id: e.targetId,
+          ...(tlsPin ? { tlsPin } : {}),
+        };
         if (previous && !sameServerEndpoint(previous.baseUrl, profile.baseUrl)) {
           // Defence in depth: `planRestore` never maps a different endpoint onto an existing
           // id, but if a caller does, the old host's secrets must not survive.
@@ -338,6 +395,31 @@ export class ProfileStore {
         else await this.kv.set(profileKey(id, 'options'), JSON.stringify(options));
       }
       await this.writeProfiles(profiles);
+    });
+  }
+
+  // ---- trusted certificates (SRV-8) -----------------------------------------------------
+
+  /**
+   * Sets (or, with `undefined`, removes) the trusted certificate of every saved server whose
+   * address has this origin (`https://host:port`, see `pinOrigin`). A pin is per address, so
+   * two profiles for the same server never disagree about which certificate is trusted.
+   * Returns the ids that changed.
+   */
+  setTlsPinForOrigin(origin: string, pin: TlsPin | undefined): Promise<string[]> {
+    return this.serialized(async () => {
+      if (pin && pin.origin !== origin) throw new Error('Pin is for another address');
+      const profiles = await this.readProfiles();
+      const changed: string[] = [];
+      const next = profiles.map((p) => {
+        if (pinOrigin(p.baseUrl) !== origin || this.isEphemeral(p.id)) return p;
+        changed.push(p.id);
+        const { tlsPin: _old, ...rest } = p;
+        void _old;
+        return pin ? { ...rest, tlsPin: pin } : rest;
+      });
+      if (changed.length > 0) await this.writeProfiles(next);
+      return changed;
     });
   }
 

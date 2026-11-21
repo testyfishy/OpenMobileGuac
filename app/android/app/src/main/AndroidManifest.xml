@@ -82,4 +82,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- "Send microphone" in a session (off by default): the WebView's audio capture request
+         is granted by Capacitor's BridgeWebChromeClient only after the runtime RECORD_AUDIO
+         prompt, which appears when the user turns the option on and the server accepts
+         audio input. MODIFY_AUDIO_SETTINGS is requested with it by that same handler. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 </manifest>

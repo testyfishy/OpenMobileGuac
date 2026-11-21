@@ -51,7 +51,12 @@ export type SessionsAction =
   | { readonly type: 'reauth'; readonly id: string };
 
 export function sameTarget(a: SessionTarget, b: SessionTarget): boolean {
-  return a.type === b.type && a.dataSource === b.dataSource && a.identifier === b.identifier;
+  return (
+    a.type === b.type &&
+    a.dataSource === b.dataSource &&
+    a.identifier === b.identifier &&
+    a.join === b.join
+  );
 }
 
 export function sessionsReducer(state: SessionsState, action: SessionsAction): SessionsState {
@@ -147,7 +152,8 @@ export function activeSession(state: SessionsState): OpenSession | undefined {
 export function openTargetKeys(state: SessionsState, serverId: string): Set<string> {
   return new Set(
     state.sessions
-      .filter((s) => s.serverId === serverId)
+      // A joined session is someone else's: it does not mark the connection as open.
+      .filter((s) => s.serverId === serverId && s.target.join === undefined)
       .map((s) => `${s.target.type}:${s.target.dataSource}:${s.target.identifier}`),
   );
 }

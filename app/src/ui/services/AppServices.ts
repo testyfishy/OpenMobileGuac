@@ -8,8 +8,10 @@ import {
   createHttpClient,
   createKeyValueStore,
   createSecureStore,
+  getPinnedTlsPlugin,
   isNativePlatform,
 } from '../../core/platform.ts';
+import { TlsTrustService } from '../../core/tls/TlsTrustService.ts';
 import { CacheFileKeyValueStore } from '../../core/storage/CacheFileKeyValueStore.ts';
 import { MemoryKeyValueStore, type KeyValueStore } from '../../core/storage/KeyValueStore.ts';
 import { ProfileStore } from '../../core/storage/ProfileStore.ts';
@@ -45,6 +47,8 @@ export interface AppServices {
   readonly log: Logger;
   /** Biometric / device-credential app lock (SRV-6). */
   readonly lock: LockService;
+  /** Per-server certificate trust (SRV-8); `available` is false on the web build. */
+  readonly tls: TlsTrustService;
 }
 
 /** Dev harnesses only (`?harness=admin`): swap the HTTP stack and the dev-server entry. */
@@ -56,7 +60,6 @@ export interface AppServiceOverrides {
 export function createAppServices(overrides: AppServiceOverrides = {}): AppServices {
   const native = isNativePlatform();
   const log = new Logger();
-  const http = new LoggingHttpClient(overrides.http ?? createHttpClient(), log);
   const kv = createKeyValueStore();
   const secure = createSecureStore();
   const secretStorage: SecretStorageKind = secure.protectedAtRest
@@ -72,6 +75,11 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
     thumbnails: native ? new CacheFileKeyValueStore() : new MemoryKeyValueStore(),
   });
   void profiles.purgeLegacyThumbnails();
+  // SRV-8: a server with a trusted (pinned) certificate uses the native TLS path; every
+  // other request goes to the system client unchanged (docs/tls.md).
+  const tls = new TlsTrustService({ plugin: getPinnedTlsPlugin(), store: profiles });
+  void tls.refresh().catch(() => undefined);
+  const http = new LoggingHttpClient(overrides.http ?? tls.wrapHttpClient(createHttpClient()), log);
   const api = new GuacApi(http, { timeoutMs: 20_000 });
   const probeApi = new GuacApi(http, { timeoutMs: 6_000 });
   const admin = new GuacAdminApi(http, { timeoutMs: 20_000 });
@@ -102,5 +110,6 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
     shares: new ShareProfiles(),
     log,
     lock,
+    tls,
   };
 }

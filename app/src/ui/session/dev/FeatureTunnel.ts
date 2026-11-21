@@ -15,6 +15,11 @@
  * - `pushDownload()` / `pushPrint()`: a server-initiated `file` stream that only starts
  *   after the client's first ack.
  * - `playTone()`: an `audio` stream with a generated 440 Hz tone, audio/L16 mono 22050 Hz.
+ * - `userJoined()` / `userLeft()`: `msg` USER_JOINED (0x0001) / USER_LEFT (0x0002) with a
+ *   user id and name, as guacd sends the connection owner (`libguac/client.c`).
+ * - Client `audio` streams (microphone): acked SUCCESS while `audioInput` is true (RDP
+ *   `enable-audio-input`), else "Audio input unsupported" / UNSUPPORTED
+ *   (`libguac/user-handlers.c`); received bytes are counted and logged.
  */
 
 import { ScribbleTunnel } from './ScribbleTunnel.ts';
@@ -67,6 +72,11 @@ export class FeatureTunnel extends ScribbleTunnel {
   private readonly tree = new Map<string, Map<string, Uint8Array | null>>();
   /** Instructions the client sent that the checks look at. */
   readonly seen: string[] = [];
+  /** RDP `enable-audio-input`: accept the client's microphone stream. */
+  audioInput = true;
+  private readonly micStreams = new Map<string, number>();
+  private nextUser = 1;
+  private readonly users: string[] = [];
 
   constructor(options: { requireCredentials?: boolean; filesystem?: boolean } = {}) {
     super({ connectDelayMs: 300 });
@@ -192,6 +202,24 @@ export class FeatureTunnel extends ScribbleTunnel {
     tick();
   }
 
+  /** Another user joins (names cycle; every third is anonymous, as a share link). */
+  userJoined(): void {
+    if (!this.isConnected()) return;
+    const n = this.nextUser++;
+    const id = `@user-${n}`;
+    const name = n % 3 === 0 ? '' : `viewer${n}`;
+    this.users.push(id);
+    this.send(['msg', '1', id, name]);
+    this.record('other', `server: user ${id} joined`);
+  }
+
+  userLeft(): void {
+    const id = this.users.shift();
+    if (!id || !this.isConnected()) return;
+    this.send(['msg', '2', id, '']);
+    this.record('other', `server: user ${id} left`);
+  }
+
   /** Server-to-client stream that starts on the first ack, then one chunk per ack. */
   private startOutgoing(head: string[], data: Uint8Array, what: string, delayMs = 0): void {
     if (!this.isConnected()) return;
@@ -225,8 +253,30 @@ export class FeatureTunnel extends ScribbleTunnel {
       case 'file':
         this.onUpload(a[0] ?? '', a[2] ?? '', a[1] ?? '', true);
         return true;
+      case 'audio': {
+        const [idx = '', mimetype = ''] = a;
+        this.seen.push(`audio ${mimetype}`);
+        if (this.audioInput) {
+          this.micStreams.set(idx, 0);
+          this.send(['ack', idx, 'OK', '0']);
+          this.record('other', `client: microphone stream ${idx} (${mimetype}) accepted`);
+        } else {
+          this.send(['ack', idx, 'Audio input unsupported', '256']);
+          this.record('other', `client: microphone stream ${idx} refused`);
+        }
+        return true;
+      }
       case 'blob': {
         const idx = a[0] ?? '';
+        const mic = this.micStreams.get(idx);
+        if (mic !== undefined) {
+          const n = mic + unb64(a[1] ?? '').length;
+          this.micStreams.set(idx, n);
+          if (Math.floor(n / 100_000) > Math.floor(mic / 100_000)) {
+            this.record('other', `microphone: ${n} bytes received`);
+          }
+          return true;
+        }
         const arg = this.argv.get(idx);
         if (arg) {
           arg.data.push(unb64(a[1] ?? ''));
@@ -243,6 +293,14 @@ export class FeatureTunnel extends ScribbleTunnel {
       }
       case 'end': {
         const idx = a[0] ?? '';
+        if (this.micStreams.has(idx)) {
+          this.record(
+            'other',
+            `microphone stream ${idx} ended (${this.micStreams.get(idx)} bytes)`,
+          );
+          this.micStreams.delete(idx);
+          return true;
+        }
         const arg = this.argv.get(idx);
         if (arg) {
           this.argv.delete(idx);

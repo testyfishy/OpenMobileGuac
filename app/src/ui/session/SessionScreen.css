@@ -2039,3 +2039,14 @@
 .omg-gopt__why {
   font-style: italic;
 }
+
+/* AUD-2: the microphone is live (or starting): a clear, tappable indicator that stops it. */
+.omg-pill--mic {
+  border-color: color-mix(in srgb, var(--_danger) 80%, transparent);
+  background: color-mix(in srgb, var(--_danger) 18%, var(--_surface));
+}
+
+/* Other users connected to this shared session. */
+.omg-pill--viewers {
+  border-color: color-mix(in srgb, var(--_accent, #4a90e2) 80%, transparent);
+}

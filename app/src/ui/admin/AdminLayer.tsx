@@ -3,6 +3,7 @@ import { ROOT_GROUP_IDENTIFIER } from '../../core/models/Connection.ts';
 import { Icon, type IconName } from '../components/Icon.tsx';
 import { Sheet } from '../components/Sheet.tsx';
 import { ActivitySheet } from './ActivitySheet.tsx';
+import { SessionsSheet } from './SessionsSheet.tsx';
 import { useAdmin, type AdminAction } from './AdminContext.ts';
 import { adminStrings } from './adminStrings.ts';
 import { ConnectionEditor } from './ConnectionEditor.tsx';
@@ -68,6 +69,8 @@ export function AdminLayer({ action }: { action: AdminAction }) {
       );
     case 'group-menu':
       return <GroupMenu dataSource={action.dataSource} id={action.id} />;
+    case 'sessions':
+      return <SessionsSheet onClose={close} />;
     case 'move':
       return (
         <MoveSheet

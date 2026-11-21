@@ -2,18 +2,32 @@
  * File transfer glue (FIL-1): downloads the server pushes, filesystem objects (browse,
  * download, upload) and uploads without a filesystem, over the Guacamole tunnel itself.
  *
- * Deliberate deviation from the web client: upstream 1.6.0 moves file data over REST
- * (`rest/services/tunnelService.js` `downloadStream` / `uploadToStream`, which the web
- * application intercepts server side, `OutputStreamInterceptingFilter.java`). The app has
- * no same-origin REST channel for streams, so data goes in band as `blob` instructions,
- * which is the library's native path. Wire behaviour, read from the sources:
+ * Downloads, two paths (`fileSave.ts` decides which):
  *
- * - Download (`file` from the server, or the `body` of a requested file): guacd sends
- *   each blob only after a SUCCESS ack (guacamole-server `rdp/download.c`
- *   `guac_rdp_download_ack_handler`; the print job waits the same way, `rdp/print-job.c`).
- *   The interceptor normally sends the first ack ("OK"); here the client sends
- *   `ack <stream> OK 0` itself, then `BlobReader` acks every blob ("OK", 0x0000). A non-
- *   success ack aborts the stream (used for Cancel).
+ * - **Stream endpoint** (native, as the web client: `tunnelService.js` `downloadStream`).
+ *   The file is fetched from `api/session/tunnels/{uuid}/streams/{index}/{name}`; the web
+ *   application intercepts the stream, sends guacd the first ack and acks every blob itself
+ *   (`OutputStreamInterceptingFilter.java`). After each `sync` it forwards one blob with
+ *   empty data and leaves that ack to the client, so the client keeps acking every blob it
+ *   sees ("Acknowledge (and ignore) any received blobs"). The `end` instruction passes
+ *   through. The HTTP response also ends normally when the tunnel closes or when the
+ *   tunnel was not open (`StreamInterceptingFilter.interceptStream` returns at once), so a
+ *   file counts as complete only when the in-band `end` arrived as well.
+ *   Cancel: the native request has no abort, and an error ack makes guacd free the stream
+ *   without `end` (`rdp/download.c`), leaving the server's intercepted stream open under
+ *   an index guacd may reuse. So Cancel only stops acking the forced blobs: guacd stalls
+ *   at the next `sync` (a frame; on a remote screen that is not changing that may not come
+ *   soon, and the file may finish downloading first), the native request then times out
+ *   (60 s without data), and the part file is deleted either way. Acks resume once the
+ *   request has ended, so guacd writes again, the server's write to the closed response
+ *   fails and it closes the stream properly (error ack to guacd).
+ *   If the request fails before any data (old server, refused), the stream was never
+ *   intercepted: the download falls back to in band.
+ * - **In band** (web, Demo, fallback): guacd sends each blob only after a SUCCESS ack
+ *   (guacamole-server `rdp/download.c` `guac_rdp_download_ack_handler`; the print job waits
+ *   the same way, `rdp/print-job.c`). The client sends `ack <stream> OK 0` itself, then acks
+ *   every blob after it is written (backpressure for the disk). A non-success ack aborts the
+ *   stream (used for Cancel and write errors).
  * - Listing: `object.requestInputStream(dir, cb)` (`get`); the `body` must have the
  *   stream-index mimetype, else `ack "Unexpected mimetype" UNSUPPORTED`; then
  *   `ack "Ready" SUCCESS` and `ack "Received" SUCCESS` per blob, exactly as
@@ -46,7 +60,14 @@ import {
   type TransferEvent,
 } from '../../session/transfer/TransferModel.ts';
 import { decodeUtf8Chunks } from './clipboardText.ts';
-import type { DeliverResult } from './fileSave.ts';
+import { base64ToBytes } from '../../session/transfer/savedFiles.ts';
+import type {
+  DeliverResult,
+  FileReceiver,
+  FileSink,
+  HttpReceive,
+  ReceiveRequest,
+} from './fileSave.ts';
 import { decideIncoming } from './incomingFiles.ts';
 import { sessionStrings } from './sessionStrings.ts';
 import type { RemoteFilesPolicy } from './settings.ts';
@@ -94,7 +115,10 @@ export interface TransfersSnapshot {
 }
 
 export interface TransferManagerOptions {
-  readonly deliver: (blob: Blob, filename: string, print: boolean) => Promise<DeliverResult>;
+  /** Where received data goes (native files, stream endpoint); default: in memory + `deliver`. */
+  readonly receiver?: FileReceiver;
+  /** Without `receiver`: hand over a complete download (tests, simple hosts). */
+  readonly deliver?: (blob: Blob, filename: string, print: boolean) => Promise<DeliverResult>;
   readonly log: (level: 'info' | 'warn' | 'error', message: string) => void;
   /** A pushed download or print job finished or failed (for a toast). */
   readonly notify?: (text: string) => void;
@@ -118,7 +142,12 @@ interface FsState {
 interface Active {
   cancel: () => void;
   timer: ReturnType<typeof setTimeout> | null;
+  /** The connection is gone: drop partial data (the transfer is marked failed). */
+  abandon?: () => void;
 }
+
+/** After the HTTP response ends, how long to wait for the in-band `end`. */
+const END_GRACE_MS = 5000;
 
 export class TransferManager {
   private readonly opts: TransferManagerOptions;
@@ -207,6 +236,7 @@ export class TransferManager {
     this.pending = [];
     for (const [id, a] of this.active) {
       if (a.timer) clearTimeout(a.timer);
+      a.abandon?.();
       this.transfers = reduceTransfers(this.transfers, {
         type: 'fail',
         id,
@@ -294,46 +324,254 @@ export class TransferManager {
       });
     }
     const transfer = this.transfers.find((t) => t.id === id);
-    const print = transfer?.kind === 'print';
-    const reader = new Guacamole.BlobReader(stream, mimetype || 'application/octet-stream');
-    let cancelled = false;
-    reader.onprogress = () => {
-      if (!cancelled) this.apply({ type: 'progress', id, bytes: reader.getLength() }, false);
+    const req: ReceiveRequest = {
+      filename,
+      mimetype: mimetype || 'application/octet-stream',
+      print: transfer?.kind === 'print',
+      streamIndex: stream.index,
     };
-    reader.onend = () => {
-      if (cancelled) return;
-      this.active.delete(id);
-      const blob = reader.getBlob();
-      this.apply({ type: 'progress', id, bytes: blob.size });
-      void this.opts.deliver(blob, filename, print).then((r) => {
-        if (r.ok) {
-          this.apply({ type: 'done', id, at: Date.now(), outcome: r.outcome });
-          this.opts.notify?.(
-            print
-              ? sessionStrings.files.printReady(filename)
-              : sessionStrings.files.downloadReady(filename),
-          );
-        } else {
-          this.apply({ type: 'fail', id, at: Date.now(), message: r.error });
-          this.opts.notify?.(r.error);
+    const http = this.opts.receiver?.http(req, (bytes) => {
+      if (this.active.has(id)) this.apply({ type: 'progress', id, bytes }, false);
+    });
+    if (http) this.downloadHttp(id, stream, req, http);
+    else this.downloadInBand(id, stream, req);
+  }
+
+  /** The transfer finished: record the outcome and tell the user. */
+  private delivered(id: number, req: ReceiveRequest, r: DeliverResult): void {
+    if (!r.ok) {
+      this.apply({ type: 'fail', id, at: Date.now(), message: r.error });
+      this.opts.notify?.(r.error);
+      return;
+    }
+    this.apply({
+      type: 'done',
+      id,
+      at: Date.now(),
+      outcome: r.outcome,
+      ...(r.savedUri ? { savedUri: r.savedUri } : {}),
+    });
+    const name = r.savedName ?? req.filename;
+    const t = sessionStrings.files;
+    this.opts.notify?.(
+      req.print
+        ? t.printReady(name)
+        : r.savedUri
+          ? t.savedToDownloadsNamed(name)
+          : t.downloadReady(name),
+    );
+  }
+
+  private failDownload(id: number, message: string): void {
+    this.active.delete(id);
+    this.apply({ type: 'fail', id, at: Date.now(), message });
+    this.opts.notify?.(message);
+  }
+
+  /** Stream endpoint download (see the header). */
+  private downloadHttp(
+    id: number,
+    stream: InputStream,
+    req: ReceiveRequest,
+    http: HttpReceive,
+  ): void {
+    let cancelled = false;
+    let abandoned = false;
+    let ended = false;
+    let forcedPending = false;
+    let settled: { ok: boolean; bytes: number } | null = null;
+    let finished = false;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
+    const t = sessionStrings.files;
+
+    const finish = (): void => {
+      if (finished || settled === null) return;
+      if (cancelled || abandoned) {
+        finished = true;
+        void http.discard();
+        // Let the server notice the closed response (see the header).
+        if (forcedPending && !abandoned) {
+          forcedPending = false;
+          stream.sendAck('OK', SUCCESS);
         }
-      });
+        return;
+      }
+      if (!settled.ok) {
+        finished = true;
+        void http.discard();
+        if (settled.bytes === 0 && !ended && this.client) {
+          // Never intercepted (old server, refused request): receive it in band instead.
+          this.active.delete(id);
+          this.opts.log('info', 'Stream download unavailable; receiving in band');
+          this.downloadInBand(id, stream, req);
+          return;
+        }
+        this.failDownload(id, t.incomplete);
+        return;
+      }
+      if (!ended) {
+        // The response may end just before the `end` instruction arrives.
+        graceTimer ??= setTimeout(() => {
+          graceTimer = null;
+          if (finished) return;
+          finished = true;
+          void http.discard();
+          this.failDownload(id, t.incomplete);
+        }, END_GRACE_MS);
+        return;
+      }
+      finished = true;
+      if (graceTimer) clearTimeout(graceTimer);
+      this.active.delete(id);
+      this.apply({ type: 'progress', id, bytes: settled.bytes });
+      void http.commit().then((r) => this.delivered(id, req, r));
+    };
+
+    // The server forwards a blob (with empty data) after each `sync` and waits for our ack.
+    stream.onblob = () => {
+      if (cancelled && !finished) {
+        // Hold it: guacd stalls until the native request has ended (see the header).
+        forcedPending = true;
+        return;
+      }
+      // Normal flow, or the cancelled request has already ended: the ack lets the server's
+      // next write fail on the closed response, so it closes the stream itself.
+      stream.sendAck('OK', SUCCESS);
+    };
+    stream.onend = () => {
+      ended = true;
+      finish();
+    };
+    void http.done.then((r) => {
+      settled = r;
+      finish();
+    });
+    this.active.set(id, {
+      timer: null,
+      cancel: () => {
+        cancelled = true;
+        this.active.delete(id);
+        this.apply({ type: 'cancel', id, at: Date.now() });
+        finish();
+      },
+      abandon: () => {
+        abandoned = true;
+        if (graceTimer) clearTimeout(graceTimer);
+        finish();
+      },
+    });
+    this.apply({ type: 'open', id });
+    this.opts.log('info', 'Download started (stream endpoint)');
+  }
+
+  /** In-band download: blobs written to a sink, each acked once written. */
+  private downloadInBand(id: number, stream: InputStream, req: ReceiveRequest): void {
+    let cancelled = false;
+    let bytes = 0;
+    let sink: FileSink | null = null;
+    let chain: Promise<void> = Promise.resolve();
+    const t = sessionStrings.files;
+    const stop = (message: string) => {
+      stream.onblob = null;
+      stream.onend = null;
+      stream.sendAck(message, ABORT);
+    };
+    const start = (s: FileSink) => {
+      if (cancelled) {
+        void s.discard();
+        return;
+      }
+      sink = s;
+      stream.onblob = (data) => {
+        if (cancelled) return;
+        let chunk: Uint8Array;
+        try {
+          chunk = base64ToBytes(data);
+        } catch {
+          chunk = new Uint8Array(0);
+        }
+        bytes += chunk.length;
+        this.apply({ type: 'progress', id, bytes }, false);
+        chain = chain
+          .then(() => s.write(chunk))
+          .then(
+            () => {
+              if (!cancelled) stream.sendAck('OK', SUCCESS);
+            },
+            () => {
+              if (cancelled) return;
+              cancelled = true;
+              stop('Write failed');
+              void s.discard();
+              this.failDownload(id, t.noSpace);
+            },
+          );
+      };
+      stream.onend = () => {
+        if (cancelled) return;
+        void chain.then(() => {
+          if (cancelled) return;
+          this.active.delete(id);
+          this.apply({ type: 'progress', id, bytes });
+          void s.commit().then((r) => this.delivered(id, req, r));
+        });
+      };
+      // The server sends the first blob only after this ack (see the header).
+      stream.sendAck('OK', SUCCESS);
     };
     this.active.set(id, {
       timer: null,
       cancel: () => {
         cancelled = true;
         this.active.delete(id);
-        // Stop the reader from acking further blobs, then abort the stream on the server.
-        stream.onblob = null;
-        stream.onend = null;
-        stream.sendAck('Cancelled', ABORT);
+        // Stop acking further blobs, then abort the stream on the server.
+        stop('Cancelled');
+        void chain.then(() => sink?.discard());
         this.apply({ type: 'cancel', id, at: Date.now() });
+      },
+      abandon: () => {
+        cancelled = true;
+        void chain.then(() => sink?.discard());
       },
     });
     this.apply({ type: 'open', id });
-    // The server sends the first blob only after this ack (see the header).
-    stream.sendAck('OK', SUCCESS);
+    const made = this.receiverOrMemory().sink(req);
+    if (made instanceof Promise) {
+      made.then(start, () => {
+        if (cancelled) return;
+        cancelled = true;
+        stop('Cannot save');
+        this.failDownload(id, t.saveFailed);
+      });
+    } else {
+      start(made);
+    }
+  }
+
+  private memoryReceiver: FileReceiver | null = null;
+
+  /** `receiver`, or an in-memory one that hands the finished blob to `deliver`. */
+  private receiverOrMemory(): FileReceiver {
+    if (this.opts.receiver) return this.opts.receiver;
+    const deliver = this.opts.deliver;
+    this.memoryReceiver ??= {
+      http: () => null,
+      sink: (req) => {
+        const parts: Uint8Array<ArrayBuffer>[] = [];
+        return {
+          write: (b) => {
+            parts.push(b as Uint8Array<ArrayBuffer>);
+            return Promise.resolve();
+          },
+          commit: () =>
+            deliver
+              ? deliver(new Blob(parts, { type: req.mimetype }), req.filename, req.print)
+              : Promise.resolve({ ok: false as const, error: sessionStrings.files.saveFailed }),
+          discard: () => Promise.resolve(),
+        };
+      },
+    };
+    return this.memoryReceiver;
   }
 
   // ---- Filesystems

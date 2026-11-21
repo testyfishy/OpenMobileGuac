@@ -413,3 +413,47 @@ resolution" for each:
       connecting… waking the computer?" and the session opens when the PC is up.
 - [ ] "Send the device clipboard when the session connects" on: one paste prompt (iOS) at
       connect, not on every reconnect.
+
+**Large downloads, microphone, shared sessions, resize (2026-11)** — iPhone and Android:
+
+- [ ] RDP drive: download a file of 2 GB or more from Files. Progress counts up past 2 GB, the
+      app's memory stays flat (Xcode / Android Studio memory gauge), and the file appears
+      complete in Files › On My iPhone › OpenMobileGuac › Downloads (Android 11+: Files ›
+      Documents › OpenMobileGuac; Android 8–10: Android/data/<app id>/files/Downloads). Its
+      size and checksum match the original.
+- [ ] Download the same file again: it is saved as "name (2).ext", nothing is overwritten.
+- [ ] Transfers › Share on a finished download opens the share sheet with the file.
+- [ ] Cancel a large download half way while the remote screen is changing (move a window):
+      the row says Cancelled at once; about a minute later no `.omg-…part` file is left in
+      Downloads; the session keeps working (copy text on the remote: the clipboard still
+      arrives). Repeat with a still screen: the transfer may run to the end before the file is
+      deleted (expected: guacd only stalls at the next frame); note how long it takes.
+- [ ] Turn Wi-Fi off during a download: the row fails, no partial file remains. Kill the app
+      during a download, start it again: no `.omg-…part` file remains.
+- [ ] Settings › Files › Received files = "Share, keep no copy": the share sheet opens when
+      the file is complete and nothing is added to Downloads.
+- [ ] RDP print job: the share sheet opens to print; with "Save to Downloads" the PDF is also
+      in Downloads.
+- [ ] A server with a pinned self-signed certificate (SRV-8): the native stream download does
+      not use the pinned-TLS path, so downloads fall back to in band. Check they still complete
+      (slower: one round trip per 4 KB).
+- [ ] RDP connection with "Enable audio input": More › Sound › Send microphone. The OS asks
+      for the microphone once; the "Microphone on" pill shows; speech is heard in a remote
+      recorder app. Tapping the pill stops it and the OS microphone indicator goes off.
+- [ ] Same with audio input disabled on the connection: no OS prompt; a message explains the
+      connection does not accept microphone input; the option turns itself off.
+- [ ] Mic on, switch to another app: the OS indicator goes off; back in the session it comes
+      back. Disconnect: it goes off.
+- [ ] Deny the microphone permission: a message says so; the option turns off.
+- [ ] Share the session (More › Share this session) and open the link in a desktop browser:
+      the phone shows "Someone joined this session…" and a "1 viewer" pill; closing the browser
+      tab shows "…left" and the pill disappears. A second signed-in user joining from the web
+      client's Active Sessions shows their username.
+- [ ] Admin: connection list header › Active sessions lists every session on the server with
+      user, connection, start time and remote host; Join (after the confirmation) opens the
+      other user's session next to yours, and their desktop is not resized; Disconnect ends it.
+- [ ] Resize follows the view (new default): rotate the phone in an RDP session with
+      `resize-method` display-update: the desktop is redrawn at the new size after about half a
+      second. Open the soft keyboard: the desktop is not resized. Rotate with the keyboard up:
+      the resize happens when the keyboard closes. With Remote resolution 1920 × 1080 nothing is
+      resized. A connection where "Match device size" was turned off earlier stays off.

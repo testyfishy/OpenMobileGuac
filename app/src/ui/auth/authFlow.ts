@@ -1,5 +1,11 @@
+import { CONFIRM_NEW_PASSWORD_FIELD, NEW_PASSWORD_FIELD } from '../../core/api/authFields.ts';
 import type { GuacErrorInfo } from '../../core/api/errors.ts';
-import { FieldType, type FieldDescriptor } from '../../core/models/ApiErrorBody.ts';
+import {
+  FieldType,
+  type FieldDescriptor,
+  type TranslatableMessage,
+} from '../../core/models/ApiErrorBody.ts';
+import { DUO_CODE_PARAM, DUO_STATE_PARAM, findDuoRedirect } from '../../core/sso/sso.ts';
 import { describeGuacError, type UiError } from '../errors/errorMessages.ts';
 import { strings } from '../strings.ts';
 
@@ -17,7 +23,23 @@ import { strings } from '../strings.ts';
  * - A wrong TOTP code (`BAD_REQUEST` during the extra step) stays on the extra step and
  *   clears the code.
  * - Session expiry during use triggers at most one silent re-login before showing the form.
+ * - The server's explanation for an extra step (`message` / `translatableMessage`, e.g.
+ *   "Your password has expired") is kept as `prompt` for the form to show.
+ * - Forced password change (database extension, `UserService.resetExpiredPassword`): once a
+ *   request carrying `new-password` is answered with a different extra step (TOTP), the
+ *   server has already stored the new password, so it replaces `password` for every later
+ *   attempt. Sending the old one again would be refused (verified on a 1.6.0 server).
+ * - Duo: the `duo_code` REDIRECT field is completed by the screen (in-app browser) and
+ *   submitted as `{ duo_code, state }` extra values with the username and password.
  */
+
+export { CONFIRM_NEW_PASSWORD_FIELD, NEW_PASSWORD_FIELD };
+
+/** The server's own text for a step or an error, translated later by the form. */
+export interface ServerText {
+  readonly message: string | undefined;
+  readonly translatableMessage: TranslatableMessage | undefined;
+}
 
 export interface LoginValues {
   readonly username: string;
@@ -38,6 +60,8 @@ interface Common {
   readonly passwordIsSaved: boolean;
   /** Silent re-logins already done after session expiry (max 1). */
   readonly expiryRetries: number;
+  /** The server's explanation of the current extra step, if it gave one. */
+  readonly prompt?: ServerText;
 }
 
 export type AuthFlowState =
@@ -49,6 +73,8 @@ export type AuthFlowState =
       readonly phase: 'form';
       readonly step: FormStep;
       readonly error?: UiError;
+      /** The server's text behind `error`, so the form can show it in the UI language. */
+      readonly serverError?: ServerText;
       readonly notice?: string;
     } & Common)
   | ({ readonly phase: 'authenticated' } & Common);
@@ -85,7 +111,9 @@ export type AuthFlowEvent =
   /** Signed in without the form: single sign-on or a share link (SRV-7, CON-6). */
   | { readonly type: 'external-ok' }
   | { readonly type: 'logout' }
-  | { readonly type: 'start-over' };
+  | { readonly type: 'start-over' }
+  /** The account password was changed in the app ("Change password"). */
+  | { readonly type: 'password-changed'; readonly password: string };
 
 export function initialAuthFlow(): AuthFlowState {
   return {
@@ -107,7 +135,36 @@ function common(s: AuthFlowState): Common {
     needsHttpConfirm: s.needsHttpConfirm,
     passwordIsSaved: s.passwordIsSaved,
     expiryRetries: s.expiryRetries,
+    ...(s.prompt ? { prompt: s.prompt } : {}),
   };
+}
+
+function withoutPrompt(c: Common): Common {
+  const { prompt: _prompt, ...rest } = c;
+  void _prompt;
+  return rest;
+}
+
+/** `message`/`translatableMessage` of a server error, unless there is nothing useful. */
+export function serverTextOf(info: {
+  readonly message: string | undefined;
+  readonly translatableMessage: TranslatableMessage | undefined;
+}): ServerText | undefined {
+  const message = info.message?.trim() || undefined;
+  const tm = info.translatableMessage;
+  // `APP.TEXT_UNTRANSLATED` only wraps `message`.
+  const translatableMessage = tm && tm.key !== 'APP.TEXT_UNTRANSLATED' ? tm : undefined;
+  if (!message && !translatableMessage) return undefined;
+  return { message, translatableMessage };
+}
+
+/** What the extra step asks for, to tell "the same step again" from a new step. */
+function stepKey(expected: readonly FieldDescriptor[]): string {
+  return visibleExtraFields(expected)
+    .map((f) => f.name)
+    .concat(findDuoRedirect(expected) ? ['(duo)'] : [])
+    .sort()
+    .join('|');
 }
 
 /** Sends credentials, via the http gate when needed. */
@@ -119,7 +176,7 @@ function sendCredentials(c: Common, silent: boolean, step: FormStep): AuthFlowSt
 function form(
   c: Common,
   step: FormStep,
-  extra: { error?: UiError; notice?: string } = {},
+  extra: { error?: UiError; serverError?: ServerText; notice?: string } = {},
 ): AuthFlowState {
   return { ...c, phase: 'form', step, ...extra };
 }
@@ -182,34 +239,73 @@ export function authFlowReducer(state: AuthFlowState, event: AuthFlowEvent): Aut
       if (state.phase !== 'confirm-http') return state;
       return form(c, state.silent ? 'credentials' : state.step);
 
-    case 'login-ok':
+    case 'login-ok': {
       if (state.phase !== 'signing-in' || event.seq !== state.seq) return state;
+      // A forced password change in this request: the new password is now the password.
+      const password = c.values.extra[NEW_PASSWORD_FIELD] || c.values.password;
       // Keep the password in memory only when it is also saved (for silent re-login).
       return {
-        ...c,
+        ...withoutPrompt(c),
         phase: 'authenticated',
         expected: [],
         values: {
           ...c.values,
-          password: c.values.remember ? c.values.password : '',
+          password: c.values.remember ? password : '',
           extra: {},
         },
-        passwordIsSaved: c.values.remember && c.values.password !== '',
+        passwordIsSaved: c.values.remember && password !== '',
       };
+    }
 
     case 'login-failed': {
       if (state.phase !== 'signing-in' || event.seq !== state.seq) return state;
       const info = event.error;
       const ctx = { browser: event.browser, duringAdditionalStep: state.step === 'extra' };
       if (info.kind === 'additional-credentials-required') {
-        const resubmitted = state.step === 'extra';
+        // The same fields again after we sent them: that answer was not accepted (a Duo
+        // denial or a stale Duo code comes back this way, with a fresh redirect).
+        const resubmitted =
+          state.step === 'extra' && stepKey(info.expected) === stepKey(c.expected);
         const names = new Set(info.expected.map((f) => f.name));
+        // Duo's `duo_code` and `state` are single use: drop them when a new Duo step comes
+        // or once the Duo step is behind us.
+        const duoNext = findDuoRedirect(info.expected) !== undefined;
+        if (duoNext || findDuoRedirect(c.expected)) {
+          names.add(DUO_CODE_PARAM).add(DUO_STATE_PARAM);
+        }
+        let values: LoginValues = c.values;
+        let passwordIsSaved = c.passwordIsSaved;
+        const newPassword = c.values.extra[NEW_PASSWORD_FIELD];
+        // Not when the next step is Duo: Duo may run before the database extension, and
+        // then the reset has not happened yet (Duo keeps the whole request, new password
+        // included, and replays it after the check).
+        if (newPassword && !names.has(NEW_PASSWORD_FIELD) && !duoNext) {
+          // The reset went through (the server moved on to another step).
+          names.add(NEW_PASSWORD_FIELD).add(CONFIRM_NEW_PASSWORD_FIELD);
+          values = { ...values, password: newPassword };
+          passwordIsSaved = false;
+        }
         const extra = Object.fromEntries(
-          Object.entries(c.values.extra).filter(([k]) => !names.has(k)),
+          Object.entries(values.extra).filter(([k]) => !names.has(k)),
         );
-        return form({ ...c, expected: info.expected, values: { ...c.values, extra } }, 'extra', {
-          error: resubmitted
-            ? describeGuacError(
+        const prompt = serverTextOf(info);
+        const next: Common = {
+          ...withoutPrompt(c),
+          expected: info.expected,
+          values: { ...values, extra },
+          passwordIsSaved,
+          ...(prompt ? { prompt } : {}),
+        };
+        if (!resubmitted) return form(next, 'extra');
+        const duo = findDuoRedirect(info.expected) !== undefined;
+        return form(next, 'extra', {
+          error: duo
+            ? {
+                code: 'duo-failed',
+                title: strings.login.duo.failedTitle,
+                detail: strings.login.duo.failed,
+              }
+            : describeGuacError(
                 {
                   kind: 'server-error',
                   type: 'BAD_REQUEST',
@@ -218,20 +314,31 @@ export function authFlowReducer(state: AuthFlowState, event: AuthFlowEvent): Aut
                   translatableMessage: undefined,
                 },
                 ctx,
-              )
-            : undefined,
+              ),
         });
       }
       if (info.kind === 'server-error' && info.type === 'BAD_REQUEST' && state.step === 'extra') {
+        // A wrong TOTP code, or a new password the server refused (same as the old one,
+        // not matching, password policy). Show the server's reason.
+        const passwordStep = c.expected.some((f) => f.name === NEW_PASSWORD_FIELD);
+        const base = describeGuacError(info, ctx);
+        const serverError = serverTextOf(info);
         return form({ ...c, values: { ...c.values, extra: {} } }, 'extra', {
-          error: describeGuacError(info, ctx),
+          error: passwordStep
+            ? {
+                code: 'password-rejected',
+                title: strings.login.newPasswordRejected,
+                ...(base.detail ? { detail: base.detail } : {}),
+              }
+            : base,
+          ...(serverError ? { serverError } : {}),
         });
       }
       if (info.kind === 'invalid-credentials') {
         const error = describeGuacError(info, ctx);
         return form(
           {
-            ...c,
+            ...withoutPrompt(c),
             expected: [],
             values: { ...c.values, password: '', extra: {} },
             passwordIsSaved: false,
@@ -245,8 +352,10 @@ export function authFlowReducer(state: AuthFlowState, event: AuthFlowEvent): Aut
           },
         );
       }
+      const serverError = info.kind === 'server-error' ? serverTextOf(info) : undefined;
       return form(c, state.silent ? 'credentials' : state.step, {
         error: describeGuacError(info, ctx),
+        ...(serverError ? { serverError } : {}),
       });
     }
 
@@ -261,7 +370,7 @@ export function authFlowReducer(state: AuthFlowState, event: AuthFlowEvent): Aut
     case 'external-ok':
       if (state.phase === 'authenticated') return state;
       return {
-        ...c,
+        ...withoutPrompt(c),
         phase: 'authenticated',
         expected: [],
         values: { ...c.values, password: '', extra: {} },
@@ -283,7 +392,15 @@ export function authFlowReducer(state: AuthFlowState, event: AuthFlowEvent): Aut
 
     case 'start-over':
       if (state.phase !== 'form') return state;
-      return form({ ...c, expected: [], values: { ...c.values, extra: {} } }, 'credentials');
+      return form(
+        { ...withoutPrompt(c), expected: [], values: { ...c.values, extra: {} } },
+        'credentials',
+      );
+
+    case 'password-changed':
+      // Only a password this flow holds (kept for silent re-login) is replaced.
+      if (!state.values.password) return state;
+      return { ...state, values: { ...state.values, password: event.password } };
   }
 }
 

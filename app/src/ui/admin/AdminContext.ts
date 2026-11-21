@@ -32,6 +32,8 @@ export type AdminAction =
       readonly id: string;
       readonly name: string;
     }
+  /** Every active session in the managed data sources (Kill, Join). */
+  | { readonly type: 'sessions' }
   | {
       readonly type: 'activity';
       readonly dataSource: string;

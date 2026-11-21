@@ -221,6 +221,11 @@ export interface ActiveConnection {
   readonly startDate: number | undefined;
   readonly remoteHost: string | undefined;
   readonly username: string | undefined;
+  /**
+   * Whether the signed-in user may join it (`APIActiveConnection.connectable`: the active
+   * connection's tunnel can be connected to with `GUAC_TYPE=a`). Undefined when not sent.
+   */
+  readonly connectable: boolean | undefined;
 }
 
 export interface HistoryEntry {
@@ -254,6 +259,7 @@ export function parseActiveConnections(raw: unknown): ActiveConnection[] {
       startDate: optionalDate(a, 'startDate', key),
       remoteHost: optionalString(a, 'remoteHost', key),
       username: optionalString(a, 'username', key),
+      connectable: optionalBoolean(a, 'connectable', key),
     };
   });
 }

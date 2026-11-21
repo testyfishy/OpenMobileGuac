@@ -1,4 +1,5 @@
-import { isGuacApiError } from '../../core/api/errors.ts';
+import { NEW_PASSWORD_FIELD } from '../../core/api/authFields.ts';
+import { GuacApiError, isGuacApiError } from '../../core/api/errors.ts';
 import type { GuacApi } from '../../core/api/GuacApi.ts';
 import type { Logger } from '../../core/diagnostics/log.ts';
 import { FieldType } from '../../core/models/ApiErrorBody.ts';
@@ -13,6 +14,7 @@ import {
   waitForFreshCode,
   type TotpParams,
 } from '../../core/totp/totp.ts';
+import { findDuoRedirect } from '../../core/sso/sso.ts';
 import { isShareServerId } from './shareSessions.ts';
 
 /**
@@ -71,6 +73,7 @@ export class AuthService {
   /** Waits while the app lock is shown; every use of a stored secret passes it. */
   private unlocked: () => Promise<void> = () => Promise.resolve();
   private readonly listeners = new Set<(profileId: string) => void>();
+  private readonly passwordListeners = new Set<(profileId: string, password: string) => void>();
 
   constructor(api: GuacApi, secure: SecureStore, profiles: ProfileStore, log?: Logger) {
     this.api = api;
@@ -175,15 +178,40 @@ export class AuthService {
 
   async login(profile: ServerProfile, req: LoginRequest): Promise<AuthSession> {
     await this.unlocked();
-    const session = await this.api.login(
-      profile,
-      { username: req.username, password: req.password },
-      req.extra,
-    );
+    // A forced password change (`new-password`, database extension) is stored by the server
+    // during this request, so the new password is the one to remember.
+    const newPassword = req.extra[NEW_PASSWORD_FIELD] || undefined;
+    let session: AuthSession;
+    try {
+      session = await this.api.login(
+        profile,
+        { username: req.username, password: req.password },
+        req.extra,
+      );
+    } catch (err) {
+      // The server went on to another step (TOTP) after the reset: the new password is
+      // already in effect. Remember it now, so an interrupted sign-in does not leave the
+      // old one saved (docs/protocol-notes.md §1.7).
+      if (
+        newPassword &&
+        req.remember &&
+        !this.virtualPasswords.has(profile.id) &&
+        isGuacApiError(err, 'additional-credentials-required') &&
+        err.info.kind === 'additional-credentials-required' &&
+        !err.info.expected.some((f) => f.name === NEW_PASSWORD_FIELD) &&
+        // Duo may run before the database extension: then nothing was reset yet.
+        !findDuoRedirect(err.info.expected)
+      ) {
+        await this.secure.set(secretKeys.password(profile.id), newPassword).catch(() => undefined);
+      }
+      throw err;
+    }
     await this.adopt(profile.id, session);
     if (!this.virtualPasswords.has(profile.id)) {
       if (req.remember) {
-        await this.secure.set(secretKeys.password(profile.id), req.password).catch(() => undefined);
+        await this.secure
+          .set(secretKeys.password(profile.id), newPassword ?? req.password)
+          .catch(() => undefined);
       } else {
         await this.secure.remove(secretKeys.password(profile.id)).catch(() => undefined);
       }
@@ -240,6 +268,56 @@ export class AuthService {
     const session = this.sessions.get(profileId);
     await this.forgetToken(profileId);
     if (session) await this.api.logout(session).catch(() => undefined);
+  }
+
+  /** Called after the account password changed through the app (not at sign-in). */
+  onPasswordChange(fn: (profileId: string, password: string) => void): () => void {
+    this.passwordListeners.add(fn);
+    return () => this.passwordListeners.delete(fn);
+  }
+
+  /** Whether the signed-in account may change its own password (`GuacApi.canChangePassword`). */
+  async canChangePassword(profileId: string): Promise<boolean> {
+    const session = this.sessions.get(profileId);
+    if (!session || isShareServerId(profileId)) return false;
+    return this.api.canChangePassword(session);
+  }
+
+  /**
+   * Changes the account password on the server with the live session, then replaces a
+   * password saved on this device so silent sign-in keeps working. Rejects with
+   * `GuacApiError` (`invalid-credentials` = wrong current password). Returns whether a saved
+   * password was updated.
+   */
+  async changePassword(
+    profile: ServerProfile,
+    oldPassword: string,
+    newPassword: string,
+  ): Promise<{ readonly savedUpdated: boolean }> {
+    await this.unlocked();
+    const session = this.sessions.get(profile.id);
+    if (!session || isShareServerId(profile.id)) {
+      throw new GuacApiError({
+        kind: 'session-expired',
+        status: 0,
+        message: undefined,
+        translatableMessage: undefined,
+      });
+    }
+    await this.api.changePassword(session, oldPassword, newPassword);
+    this.log?.info('auth', 'account password changed');
+    let savedUpdated = false;
+    if (this.virtualPasswords.has(profile.id)) {
+      this.virtualPasswords.set(profile.id, newPassword);
+    } else if (await this.hasSavedPassword(profile)) {
+      savedUpdated = await this.secure
+        .set(secretKeys.password(profile.id), newPassword)
+        .then(() => true)
+        .catch(() => false);
+    }
+    this.transientPasswords.delete(profile.id);
+    for (const l of this.passwordListeners) l(profile.id, newPassword);
+    return { savedUpdated };
   }
 
   /** Saves or clears the password from the server form. */

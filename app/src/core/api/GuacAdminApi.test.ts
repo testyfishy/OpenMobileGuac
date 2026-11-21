@@ -482,6 +482,7 @@ describe('GuacAdminApi active connections', () => {
         startDate: 5000,
         remoteHost: '192.0.2.9',
         username: 'bob',
+        connectable: true,
       },
     ]);
   });

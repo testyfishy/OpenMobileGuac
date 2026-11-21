@@ -343,6 +343,15 @@ export function MoreSheet(p: MoreSheetProps) {
           hint={t.audioModeHint}
           onClick={() => p.onAudio(next(AUDIO_MODES, p.audio))}
         />
+        {a.mic.available ? (
+          <SwitchRow
+            icon={a.mic.icon}
+            label={t.microphone}
+            hint={p.context.micLive ? t.microphoneLive : t.microphoneHint}
+            on={a.mic.pressed ?? false}
+            onToggle={() => a.mic.onRun()}
+          />
+        ) : null}
       </Group>
 
       <Group title={t.groups.session}>

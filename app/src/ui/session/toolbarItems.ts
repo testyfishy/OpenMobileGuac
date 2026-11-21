@@ -20,6 +20,7 @@ export const TOOLBAR_ACTIONS = [
   'clipboard',
   'files',
   'sound',
+  'mic',
   'view-only',
   'options',
   'info',

@@ -31,6 +31,8 @@ export interface Transfer {
   readonly destination: string | null;
   /** Local result of a finished download (e.g. "Shared", "Saved"), if any. */
   readonly outcome: string | null;
+  /** A finished download kept on the device (Downloads): its URI, for Share. */
+  readonly savedUri: string | null;
   readonly startedAt: number;
   readonly endedAt: number | null;
 }
@@ -50,7 +52,13 @@ export type TransferEvent =
   | { readonly type: 'open'; readonly id: number }
   /** `bytes` = total transferred so far. */
   | { readonly type: 'progress'; readonly id: number; readonly bytes: number }
-  | { readonly type: 'done'; readonly id: number; readonly at: number; readonly outcome?: string }
+  | {
+      readonly type: 'done';
+      readonly id: number;
+      readonly at: number;
+      readonly outcome?: string;
+      readonly savedUri?: string;
+    }
   | {
       readonly type: 'fail';
       readonly id: number;
@@ -85,6 +93,7 @@ export function reduceTransfers(list: readonly Transfer[], e: TransferEvent): re
       code: null,
       destination: e.destination ?? null,
       outcome: null,
+      savedUri: null,
       startedAt: e.at,
       endedAt: null,
     };
@@ -116,6 +125,7 @@ export function reduceTransfers(list: readonly Transfer[], e: TransferEvent): re
         bytes: cur.size !== null && cur.direction === 'upload' ? cur.size : cur.bytes,
         endedAt: e.at,
         outcome: e.outcome ?? null,
+        savedUri: e.savedUri ?? null,
       };
       break;
     case 'fail':

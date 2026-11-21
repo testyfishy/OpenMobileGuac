@@ -11,6 +11,7 @@ import {
   canEditConnection,
   canManageConnection,
   canManageGroup,
+  canViewSessions,
 } from './permissions.ts';
 
 /**
@@ -18,18 +19,34 @@ import {
  * signed-in account may manage the item (docs/protocol-notes.md §8.3).
  */
 
-/** Header "+" button: New connection / New folder. */
+/**
+ * Header buttons: Active sessions (server-wide list, when permitted) and "+" (New connection
+ * / New folder). Both live here so the connection screen mounts a single entry point.
+ */
 export function AdminAddButton() {
   const admin = useAdmin();
   if (!admin) return null;
   const { connection, group } = admin.canCreateIn;
-  if (connection.length === 0 && group.length === 0) return null;
+  const sessions = [...admin.permissions.values()].some(canViewSessions);
+  const add = connection.length > 0 || group.length > 0;
+  if (!sessions && !add) return null;
   return (
-    <IconButton
-      icon="plus"
-      label={adminStrings.add}
-      onClick={() => admin.open({ type: 'add-menu' })}
-    />
+    <>
+      {sessions ? (
+        <IconButton
+          icon="pulse"
+          label={adminStrings.sessions.allButton}
+          onClick={() => admin.open({ type: 'sessions' })}
+        />
+      ) : null}
+      {add ? (
+        <IconButton
+          icon="plus"
+          label={adminStrings.add}
+          onClick={() => admin.open({ type: 'add-menu' })}
+        />
+      ) : null}
+    </>
   );
 }
 

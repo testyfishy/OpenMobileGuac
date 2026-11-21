@@ -1,6 +1,7 @@
 import { isRecord } from '../models/json.ts';
 import { sameServerEndpoint } from '../url/normalizeServerUrl.ts';
 import { parseServerProfile, type ServerProfile } from '../models/ServerProfile.ts';
+import type { TlsPin } from '../tls/TlsPin.ts';
 import type {
   ConnectionRef,
   ConnectionSettings,
@@ -33,6 +34,8 @@ export interface BackupServer {
   readonly recents: readonly RecentEntry[];
   readonly connectionSettings: Readonly<Record<string, ConnectionSettings>>;
   readonly options?: ConnectionSettings;
+  /** SRV-8: the trusted certificate; restored only under the rules in `ProfileStore.applyRestore`. */
+  readonly tlsPin?: TlsPin;
 }
 
 export interface EncryptedSecrets {
@@ -64,6 +67,8 @@ export type BackupSecrets = Readonly<
       readonly totpSeed?: string;
       /** The server address the secrets were saved for (newer backups). */
       readonly baseUrl?: string;
+      /** SHA-256 of the trusted certificate when the secrets were saved (SRV-8). */
+      readonly tlsPin?: string;
     }
   >
 >;
@@ -92,6 +97,7 @@ export function createBackup(input: {
       recents: d.recents,
       connectionSettings: d.connectionSettings,
       ...(d.options ? { options: d.options } : {}),
+      ...(d.profile.tlsPin ? { tlsPin: d.profile.tlsPin } : {}),
     })),
     ...(input.secrets ? { secrets: input.secrets } : {}),
   };
@@ -270,6 +276,9 @@ export function secretsToRestore(
     const server = backup.servers.find((x) => x.id === backupId);
     if (!server) continue;
     if (s.baseUrl !== undefined && !sameServerEndpoint(s.baseUrl, server.baseUrl)) continue;
+    // SRV-8: a password must never reach a certificate the user did not trust for it. When
+    // the plain part names a trusted certificate, the sealed part must name the same one.
+    if (server.tlsPin && s.tlsPin !== server.tlsPin.sha256) continue;
     out.push({
       id,
       ...(s.password ? { password: s.password } : {}),
@@ -288,6 +297,7 @@ function toProfileData(s: BackupServer, id: string): ProfileData {
       username: s.username,
       rememberPassword: s.rememberPassword,
       createdAt: s.createdAt,
+      ...(s.tlsPin ? { tlsPin: s.tlsPin } : {}),
     },
     favourites: s.favourites,
     recents: s.recents,
@@ -460,7 +470,10 @@ export async function decryptSecrets(
     throw new Error('bad-passphrase');
   }
   const parsed = JSON.parse(new TextDecoder().decode(plain)) as unknown;
-  const out: Record<string, { password?: string; totpSeed?: string; baseUrl?: string }> = {};
+  const out: Record<
+    string,
+    { password?: string; totpSeed?: string; baseUrl?: string; tlsPin?: string }
+  > = {};
   if (isRecord(parsed)) {
     for (const [id, v] of Object.entries(parsed)) {
       if (!isRecord(v)) continue;
@@ -468,6 +481,7 @@ export async function decryptSecrets(
         ...(typeof v['password'] === 'string' ? { password: v['password'] } : {}),
         ...(typeof v['totpSeed'] === 'string' ? { totpSeed: v['totpSeed'] } : {}),
         ...(typeof v['baseUrl'] === 'string' ? { baseUrl: v['baseUrl'] } : {}),
+        ...(typeof v['tlsPin'] === 'string' ? { tlsPin: v['tlsPin'] } : {}),
       };
     }
   }

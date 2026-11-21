@@ -7,6 +7,7 @@ import {
   optionalNumber,
   optionalString,
 } from './json.ts';
+import { pinForBaseUrl, type TlsPin } from '../tls/TlsPin.ts';
 
 /**
  * A saved Guacamole server (SPEC SRV-1).
@@ -30,6 +31,11 @@ export interface ServerProfile {
   readonly rememberPassword: boolean;
   /** Creation time, epoch milliseconds. */
   readonly createdAt: number;
+  /**
+   * SRV-8: a certificate the user trusted for this address (docs/tls.md). Only ever present
+   * when bound to `baseUrl`'s scheme, host and port; parsing drops any other pin.
+   */
+  readonly tlsPin?: TlsPin;
 }
 
 /** Throws `ModelParseError` unless `url` is an absolute http(s) URL. */
@@ -49,6 +55,8 @@ export function parseServerProfile(raw: unknown, path = ''): ServerProfile {
   const obj = expectRecord(raw, path);
   const baseUrl = expectNonEmptyString(obj, 'baseUrl', path);
   assertHttpBaseUrl(baseUrl, path ? `${path}.baseUrl` : 'baseUrl');
+  // A malformed pin, or one for another scheme/host/port, is dropped, never applied.
+  const tlsPin = pinForBaseUrl(obj['tlsPin'], baseUrl);
   return {
     id: expectNonEmptyString(obj, 'id', path),
     name: expectString(obj, 'name', path),
@@ -56,5 +64,6 @@ export function parseServerProfile(raw: unknown, path = ''): ServerProfile {
     username: optionalString(obj, 'username', path) ?? '',
     rememberPassword: optionalBoolean(obj, 'rememberPassword', path) ?? false,
     createdAt: optionalNumber(obj, 'createdAt', path) ?? 0,
+    ...(tlsPin ? { tlsPin } : {}),
   };
 }

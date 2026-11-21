@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TunnelTargetTypes } from '../../core/api/tunnel.ts';
-import { createWebSocketTransport } from '../../core/transport/SessionTransport.ts';
+import { TOKEN_HEADER } from '../../core/api/GuacApi.ts';
+import { streamDownloadUrl } from '../../session/transfer/savedFiles.ts';
 import type { ConnectionRef } from '../../core/storage/ProfileStore.ts';
 import type { TunnelLike } from '../../core/transport/TunnelLike.ts';
-import Guacamole from '../../vendor/guacamole-common-js/index.js';
 import { Dialog } from '../components/Dialog.tsx';
 import { Spinner } from '../components/Feedback.tsx';
 import { DEMO_AUTH_SESSION, DEMO_PROFILE_ID, DemoTunnel } from '../integration/demo.ts';
@@ -19,6 +19,7 @@ import { useAppSettings, useServices } from '../services/context.ts';
 import { copyText, haptic, saveTextFile, shareText } from '../services/native.ts';
 import { isShareServerId } from '../services/shareSessions.ts';
 import type { SessionSharing } from '../session/ShareSheet.tsx';
+import type { StreamRequest } from '../session/fileSave.ts';
 import type { OpenSession } from '../sessions/sessionModel.ts';
 import {
   applyConnectionPatch,
@@ -30,6 +31,7 @@ import {
   type AppSettings,
 } from '../settings/settingsModel.ts';
 import { strings } from '../strings.ts';
+import { sessionTransportFor } from '../tls/nativeTunnel.ts';
 import { deviceTimezone, makeConnectDataBuilder } from './connectData.ts';
 import { installKeepAwake } from './keepAwake.ts';
 import { currentMediaSupport } from './mediaSupport.ts';
@@ -81,6 +83,7 @@ export default function SessionHost({
   );
   const { serverId, target } = session;
   const isDemo = serverId === DEMO_PROFILE_ID;
+  const joined = target.join !== undefined;
   const ref: ConnectionRef = useMemo(
     () => ({ dataSource: target.dataSource, identifier: target.identifier, type: target.type }),
     [target.dataSource, target.identifier, target.type],
@@ -113,22 +116,23 @@ export default function SessionHost({
     (patch: Partial<SessionSettings>) => {
       setStored((prev) => {
         const next = applyConnectionPatch(prev, patch);
-        void services.profiles.setConnectionSettings(serverId, ref, next);
+        // A joined session is someone else's: changes apply to it only, nothing is stored.
+        if (!joined) void services.profiles.setConnectionSettings(serverId, ref, next);
         return next;
       });
     },
-    [services.profiles, serverId, ref],
+    [services.profiles, serverId, ref, joined],
   );
 
   const onUseDefault = useCallback(
     (keys: string[]) => {
       setStored((prev) => {
         const next = removeConnectionKeys(prev, keys);
-        void services.profiles.setConnectionSettings(serverId, ref, next);
+        if (!joined) void services.profiles.setConnectionSettings(serverId, ref, next);
         return next;
       });
     },
-    [services.profiles, serverId, ref],
+    [services.profiles, serverId, ref, joined],
   );
   const overridden = useMemo(() => overriddenKeys(stored), [stored]);
 
@@ -136,8 +140,9 @@ export default function SessionHost({
     if (isDemo) return new DemoTunnel();
     const auth = services.auth.current(serverId);
     if (!auth) throw new Error('Not signed in');
-    return createWebSocketTransport(Guacamole.WebSocketTunnel).createTunnel(auth);
-  }, [isDemo, services.auth, serverId]);
+    // SRV-8: the native tunnel for a pinned certificate, else the WebView WebSocket.
+    return sessionTransportFor(services.tls).createTunnel(auth);
+  }, [isDemo, services.auth, services.tls, serverId]);
 
   // AUDIT #3: no (re)connect sends the stored token while the app lock is up.
   const connectGate = useCallback(
@@ -151,13 +156,27 @@ export default function SessionHost({
         getToken: () =>
           isDemo ? DEMO_AUTH_SESSION.token : (services.auth.current(serverId)?.token ?? ''),
         dataSource: target.dataSource,
-        id: target.identifier,
+        // Admin "Join": the active connection (`GUAC_TYPE=a`, as the web client's session
+        // list links `ClientIdentifier.Types.ACTIVE_CONNECTION` with the active id).
+        id: target.join ?? target.identifier,
         type:
-          target.type === 'g' ? TunnelTargetTypes.CONNECTION_GROUP : TunnelTargetTypes.CONNECTION,
+          target.join !== undefined
+            ? TunnelTargetTypes.ACTIVE_CONNECTION
+            : target.type === 'g'
+              ? TunnelTargetTypes.CONNECTION_GROUP
+              : TunnelTargetTypes.CONNECTION,
         timezone: deviceTimezone(),
         media: currentMediaSupport,
       }),
-    [isDemo, services.auth, serverId, target.dataSource, target.identifier, target.type],
+    [
+      isDemo,
+      services.auth,
+      serverId,
+      target.dataSource,
+      target.identifier,
+      target.type,
+      target.join,
+    ],
   );
 
   // Checked once per mount (each reconnect remounts). Later sign-in changes are the
@@ -192,7 +211,7 @@ export default function SessionHost({
   // "Share this session" through the server's sharing profiles (not for the demo or a
   // session opened from a share link, which has no rights to share).
   const sharing = useMemo<SessionSharing | undefined>(() => {
-    if (isDemo || isShareServerId(serverId)) return undefined;
+    if (isDemo || isShareServerId(serverId) || joined) return undefined;
     const current = () => {
       const s = services.auth.current(serverId);
       if (!s) throw new Error('Not signed in');
@@ -205,10 +224,27 @@ export default function SessionHost({
       copy: (link) => copyText(link),
       insecure: (services.auth.current(serverId)?.baseUrl ?? '').startsWith('http:'),
     };
-  }, [isDemo, serverId, services.api, services.auth, target.name]);
+  }, [isDemo, serverId, services.api, services.auth, target.name, joined]);
+
+  // FIL-1: received files come from the web application's stream endpoint (native HTTP),
+  // as the web client's `tunnelService.downloadStream` does. Read at call time: the token
+  // may have been refreshed since the session opened.
+  const streamDownload = useCallback(
+    (uuid: string, index: number, filename: string): StreamRequest | null => {
+      if (isDemo) return null;
+      const auth = services.auth.current(serverId);
+      if (!auth) return null;
+      return {
+        url: streamDownloadUrl(auth.baseUrl, uuid, index, filename),
+        headers: { [TOKEN_HEADER]: auth.token },
+      };
+    },
+    [isDemo, services.auth, serverId],
+  );
 
   // CON-4 thumbnails come from the session screen itself (≤ 320 px JPEG).
-  const thumbnailsOn = app.thumbnails;
+  // Not for a joined session: that picture is someone else's screen.
+  const thumbnailsOn = app.thumbnails && !joined;
   const onThumbnail = useCallback(
     (dataUrl: string) => {
       if (!thumbnailsOn || !dataUrl.startsWith('data:image/')) return;
@@ -260,6 +296,8 @@ export default function SessionHost({
         saveTextFile={saveTextFile}
         {...(editConnection ? { onEditConnection: editConnection } : {})}
         {...(sharing ? { sharing } : {})}
+        sharedViewer={joined || isShareServerId(serverId)}
+        streamDownload={streamDownload}
         {...(isDemo ? {} : { onSignInExpired })}
       />
       {confirmExit && active ? (

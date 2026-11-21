@@ -22,9 +22,12 @@ import {
   type ServerFormValues,
 } from './serverForm.ts';
 import { useServerProfile } from './useServers.ts';
+import { ChangePasswordSection } from './ChangePasswordSection.tsx';
 import { ConnectionTestPanel, ServerOptionsSection, TotpSeedSection } from './ServerExtras.tsx';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { useToast } from '../components/toastContext.ts';
+import { CertificatePanel } from '../tls/CertificatePanel.tsx';
+import { CertificateRow } from '../tls/CertificateRow.tsx';
 
 /** Add / edit a server (SRV-1, SRV-2). Editing an unknown id shows the add form. */
 export function ServerEditScreen({ serverId }: { serverId?: string }) {
@@ -62,6 +65,8 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
   const [submitError, setSubmitError] = useState<UiError | undefined>();
   /** https failed and no scheme was typed: offer plain http explicitly (AUDIT #11). */
   const [offerHttp, setOfferHttp] = useState(false);
+  /** SRV-8: the https URL whose certificate failed, to offer trusting it. */
+  const [certUrl, setCertUrl] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -101,6 +106,7 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
     e?.preventDefault();
     if (busy) return;
     setOfferHttp(false);
+    setCertUrl(undefined);
     const withName = values.name.trim() ? values : { ...values, name: suggestName(values.url) };
     const found = validateServerForm(withName);
     setErrors(found);
@@ -122,6 +128,7 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
     } catch (err) {
       setSubmitError(describeError(err, { browser: !services.native }));
       setOfferHttp(err instanceof GuacApiError && err.httpFallbackAvailable);
+      setCertUrl(err instanceof GuacApiError && err.info.kind === 'tls' ? err.info.url : undefined);
     } finally {
       setBusy(false);
     }
@@ -145,6 +152,8 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
     const saved = profile
       ? await services.profiles.update(profile.id, fields)
       : await services.profiles.add(fields);
+    // SRV-8: a certificate trusted during this probe is saved with the profile.
+    await services.tls.adoptPending(saved);
     if (!withName.rememberPassword) {
       await services.auth.savePassword(saved.id, null);
       if (withName.password) services.auth.setTransientPassword(saved.id, withName.password);
@@ -260,6 +269,9 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
           hint={rememberHint}
         />
         {submitError ? <ErrorBanner error={submitError} /> : null}
+        {submitError && certUrl ? (
+          <CertificatePanel url={certUrl} onTrusted={() => void onSubmit(null)} />
+        ) : null}
         {offerHttp ? (
           <div className="http-fallback">
             <p className="field-hint">{f.httpFallbackHint}</p>
@@ -284,6 +296,8 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
         <div className="form server-extras">
           <ServerOptionsSection profile={profile} />
           <TotpSeedSection profile={profile} />
+          <ChangePasswordSection profile={profile} />
+          <CertificateRow profile={profile} />
           <div className="form-actions">
             <button
               type="button"

@@ -15,6 +15,7 @@ import { IconBack, IconDownload, IconFile, IconFolder, IconPrint, IconUpload } f
 import { sessionStrings } from './sessionStrings.ts';
 import { Sheet } from './Sheet.tsx';
 import type { TransferManager } from './transfers.ts';
+import { shareSavedFile } from './fileSave.ts';
 
 export interface FilesSheetProps {
   readonly transfers: TransferManager;
@@ -284,6 +285,15 @@ function TransferRow({ t, onCancel }: { t: Transfer; onCancel: () => void }) {
       {!isFinished(t) && (
         <ChromeButton className="omg-btn--ghost omg-btn--small" onClick={onCancel}>
           {sessionStrings.common.cancel}
+        </ChromeButton>
+      )}
+      {t.state === 'done' && t.savedUri !== null && (
+        <ChromeButton
+          className="omg-btn--ghost omg-btn--small"
+          aria-label={s.shareNamed(t.name)}
+          onClick={() => void shareSavedFile(t.savedUri ?? '', t.name, t.kind === 'print')}
+        >
+          {s.share}
         </ChromeButton>
       )}
     </li>

@@ -107,6 +107,24 @@ export const es: Strings = {
     clearCredentialsBody:
       'Se eliminan de este dispositivo la contraseña guardada, el token de sesión y cualquier clave de doble factor de este servidor. La próxima vez tendrás que iniciar sesión.',
     credentialsCleared: 'Credenciales guardadas borradas.',
+    changePassword: {
+      title: 'Contraseña de la cuenta',
+      open: 'Cambiar contraseña',
+      hint: 'Cambia la contraseña de esta cuenta en el servidor.',
+      signInFirst: 'Inicia sesión en este servidor para cambiar la contraseña de la cuenta.',
+      notAllowed: 'Este servidor no permite que esta cuenta cambie aquí su propia contraseña.',
+      oldPassword: 'Contraseña actual',
+      newPassword: 'Nueva contraseña',
+      confirmPassword: 'Confirma la nueva contraseña',
+      submit: 'Cambiar contraseña',
+      busy: 'Cambiando…',
+      blank: 'Escribe una contraseña nueva.',
+      mismatch: 'Las dos contraseñas nuevas no coinciden.',
+      wrongOld: 'La contraseña actual no es correcta.',
+      rejectedTitle: 'No se aceptó la nueva contraseña',
+      done: 'Contraseña cambiada.',
+      doneSaved: 'Contraseña cambiada. Se actualizó la contraseña guardada en este dispositivo.',
+    },
     test: 'Probar conexión',
     testing: 'Probando…',
     optionsTitle: 'Opciones de este servidor',
@@ -233,7 +251,8 @@ export const es: Strings = {
       } as Record<string, string>,
       button: 'Ir a la página de inicio de sesión',
       experimental:
-        'Experimental: comprobado con el código de Guacamole, no con un proveedor de identidad real.',
+        'Experimental: la parte del servidor se comprobó con Keycloak (OpenID Connect) en un servidor de pruebas, pero no la página de inicio de sesión dentro de la app en un teléfono. SAML y CAS solo con el código de Guacamole.',
+      choose: 'Iniciar sesión con',
       waiting: 'Termina de iniciar sesión en la página que se ha abierto…',
       unavailable:
         'El inicio de sesión único necesita la app móvil. En un navegador de escritorio no se puede completar aquí.',
@@ -241,6 +260,26 @@ export const es: Strings = {
       failed: 'El servidor no aceptó el resultado del inicio de sesión.',
       race: 'La propia página web del servidor usó el resultado de un solo uso antes que la app. Vuelve a intentarlo; si sigue pasando, pregunta a tu administrador por el retorno a la app (docs/sso.md).',
     },
+    duo: {
+      title: 'Verificación con Duo',
+      body: 'Este servidor te pide confirmar el inicio de sesión con Duo. La página de Duo se abre dentro de la app; la app continúa cuando termines.',
+      button: 'Ir a Duo',
+      waiting: 'Termina la comprobación de Duo en la página que se ha abierto…',
+      unavailable:
+        'La verificación con Duo necesita la app móvil. En un navegador de escritorio no se puede completar aquí.',
+      cancelled: 'Se canceló la comprobación de Duo.',
+      failedTitle: 'Duo no confirmó el inicio de sesión',
+      failed:
+        'La verificación con Duo no se completó, o la propia página del servidor usó el resultado antes. Vuelve a intentarlo.',
+      experimental:
+        'Experimental: hecho a partir del código de Guacamole 1.6.0, sin probar con una cuenta real de Duo.',
+    },
+    newPasswordRejected: 'No se aceptó la nueva contraseña',
+    passwordMismatch: 'Las dos contraseñas nuevas no coinciden.',
+    fieldLabels: {
+      'new-password': 'Nueva contraseña',
+      'confirm-new-password': 'Confirma la nueva contraseña',
+    } as Record<string, string>,
   },
 
   httpWarning: {

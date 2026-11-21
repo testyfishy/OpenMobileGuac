@@ -432,3 +432,149 @@ describe('session sharing (1.6.0 tunnel REST)', () => {
     );
   });
 });
+
+describe('GuacApi.changePassword (UserResource.updatePassword, 1.6.0)', () => {
+  const PW_URL = `${BASE_URL}/api/session/data/postgresql/users/testuser/password`;
+  const HEAD = `${BASE_URL}/api/session`;
+  const denied = {
+    message: 'Permission denied.',
+    translatableMessage: {
+      key: 'APP.TEXT_UNTRANSLATED',
+      variables: { MESSAGE: 'Permission denied.' },
+    },
+    statusCode: null,
+    expected: null,
+    type: 'PERMISSION_DENIED',
+  };
+
+  it('PUTs { oldPassword, newPassword } as JSON with the token header', async () => {
+    const http = new FakeHttpClient().on('PUT', PW_URL, () => jsonResponse(204, null));
+    await new GuacApi(http).changePassword(session, 'old pw', 'new pw');
+    const req = http.requests[0];
+    expect(req?.method).toBe('PUT');
+    expect(req?.headers?.[TOKEN_HEADER]).toBe(session.token);
+    expect(req?.body).toEqual({
+      kind: 'json',
+      value: { oldPassword: 'old pw', newPassword: 'new pw' },
+    });
+  });
+
+  it('encodes the data source and username in the path', async () => {
+    const odd = { ...session, primaryDataSource: 'my ds', username: 'a/b' };
+    const url = `${BASE_URL}/api/session/data/my%20ds/users/a%2Fb/password`;
+    const http = new FakeHttpClient().on('PUT', url, () => jsonResponse(204, null));
+    await new GuacApi(http).changePassword(odd, 'o', 'n');
+    expect(http.requests[0]?.url).toBe(url);
+  });
+
+  it('reports a wrong current password (PERMISSION_DENIED, session still valid) as invalid-credentials', async () => {
+    const http = new FakeHttpClient()
+      .on('PUT', PW_URL, () => jsonResponse(403, denied))
+      .on('HEAD', HEAD, () => jsonResponse(204, null));
+    const info = await errorInfo(new GuacApi(http).changePassword(session, 'wrong', 'n'));
+    expect(info.kind).toBe('invalid-credentials');
+  });
+
+  it('reports PERMISSION_DENIED with a dead token as session-expired', async () => {
+    const http = new FakeHttpClient()
+      .on('PUT', PW_URL, () => jsonResponse(403, denied))
+      .on('HEAD', HEAD, () => jsonResponse(403, permissionDeniedJson));
+    const info = await errorInfo(new GuacApi(http).changePassword(session, 'o', 'n'));
+    expect(info.kind).toBe('session-expired');
+  });
+
+  it('keeps a password-policy refusal with its translatable message', async () => {
+    const policy = {
+      message: 'Password does not meet minimum length requirements.',
+      translatableMessage: { key: 'PASSWORD_POLICY.ERROR_TOO_SHORT', variables: { LENGTH: 10 } },
+      statusCode: null,
+      expected: null,
+      type: 'BAD_REQUEST',
+    };
+    const http = new FakeHttpClient().on('PUT', PW_URL, () => jsonResponse(400, policy));
+    const info = await errorInfo(new GuacApi(http).changePassword(session, 'o', 'short'));
+    expect(info).toMatchObject({
+      kind: 'server-error',
+      type: 'BAD_REQUEST',
+      translatableMessage: { key: 'PASSWORD_POLICY.ERROR_TOO_SHORT', variables: { LENGTH: 10 } },
+    });
+  });
+});
+
+describe('GuacApi.canChangePassword', () => {
+  const PERMS = `${BASE_URL}/api/session/data/postgresql/self/effectivePermissions`;
+  const perms = (users: Record<string, string[]>, system: string[] = []) => ({
+    connectionPermissions: {},
+    connectionGroupPermissions: {},
+    sharingProfilePermissions: {},
+    activeConnectionPermissions: {},
+    userPermissions: users,
+    userGroupPermissions: {},
+    systemPermissions: system,
+  });
+
+  it('is true with UPDATE on the own user or with ADMINISTER', async () => {
+    let http = new FakeHttpClient().on('GET', PERMS, () =>
+      jsonResponse(200, perms({ testuser: ['READ', 'UPDATE'] })),
+    );
+    expect(await new GuacApi(http).canChangePassword(session)).toBe(true);
+    http = new FakeHttpClient().on('GET', PERMS, () =>
+      jsonResponse(200, perms({}, ['ADMINISTER'])),
+    );
+    expect(await new GuacApi(http).canChangePassword(session)).toBe(true);
+  });
+
+  it('is false with READ only (the 1.6.0 default for a new database user)', async () => {
+    const http = new FakeHttpClient().on('GET', PERMS, () =>
+      jsonResponse(200, perms({ testuser: ['READ'] })),
+    );
+    expect(await new GuacApi(http).canChangePassword(session)).toBe(false);
+  });
+
+  it('is false for a data source without users (SSO) and for anonymous sessions', async () => {
+    const sso = { ...session, primaryDataSource: 'openid' };
+    const http = new FakeHttpClient().on(
+      'GET',
+      `${BASE_URL}/api/session/data/openid/self/effectivePermissions`,
+      () => jsonResponse(404, notFoundJson),
+    );
+    expect(await new GuacApi(http).canChangePassword(sso)).toBe(false);
+    expect(
+      await new GuacApi(new FakeHttpClient()).canChangePassword({ ...session, username: '' }),
+    ).toBe(false);
+  });
+});
+
+describe('GuacApi.getSsoProviders', () => {
+  it('reads the login links from api/patches and never rejects', async () => {
+    const patch =
+      '<li class="sso-provider sso-provider-openid"><a href="api/ext/openid/login">x</a></li>';
+    const http = new FakeHttpClient().on('GET', `${BASE_URL}/api/patches`, () =>
+      jsonResponse(200, [patch]),
+    );
+    expect(await new GuacApi(http).getSsoProviders(profile)).toEqual([
+      { paramName: 'id_token', redirectUrl: `${BASE_URL}/api/ext/openid/login`, kind: 'openid' },
+    ]);
+    const down = new FakeHttpClient().on('GET', `${BASE_URL}/api/patches`, () => {
+      throw new HttpTransportError('unreachable', `${BASE_URL}/api/patches`, 'down');
+    });
+    expect(await new GuacApi(down).getSsoProviders(profile)).toEqual([]);
+  });
+});
+
+describe('GuacApi.login: Duo return (guacamole-auth-duo 1.6.0)', () => {
+  it('posts duo_code and state together with the username and password', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    await new GuacApi(http).login(profile, creds, { duo_code: 'C1', state: 'S1' });
+    // The web client posts only the URL parameters (duo_code, state); the server then
+    // replaces the credentials with the ones it deferred under `state`
+    // (DuoAuthenticationProvider.updateCredentials). The resent username and password
+    // only matter when `state` is unknown or used: a fresh Duo step instead of a failure.
+    expect(formFields(http.requests[0])).toEqual({
+      username: 'testuser',
+      password: 'pw & =?',
+      duo_code: 'C1',
+      state: 'S1',
+    });
+  });
+});

@@ -13,6 +13,12 @@ export interface SessionTarget {
   readonly type: 'c' | 'g';
   readonly name: string;
   readonly protocol: string;
+  /**
+   * Join someone else's running session instead (admin "Join"): the active connection's
+   * identifier, sent as `GUAC_TYPE=a` (`TunnelRequestType.ACTIVE_CONNECTION`). `identifier`
+   * stays the underlying connection, for its settings. Nothing is stored under it.
+   */
+  readonly join?: string;
 }
 
 export type Route =

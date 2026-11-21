@@ -34,7 +34,7 @@ describe('settings', () => {
     expect(DEFAULT_SESSION_SETTINGS).toMatchObject({
       fitMode: 'fit-screen',
       pointerMode: 'direct',
-      matchDeviceSize: false,
+      matchDeviceSize: true,
       pointerSpeed: 1,
       naturalScroll: true,
       haptics: true,

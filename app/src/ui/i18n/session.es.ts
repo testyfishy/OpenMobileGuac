@@ -216,6 +216,7 @@ export const sessionEs: SessionStrings = {
       clipboard: 'Portapapeles',
       files: 'Archivos',
       sound: 'Sonido',
+      mic: 'Micro',
       'view-only': 'Solo ver',
       options: 'Opciones',
       info: 'Información',
@@ -238,6 +239,7 @@ export const sessionEs: SessionStrings = {
       clipboard: 'Panel del portapapeles',
       files: 'Archivos',
       sound: 'Activar o silenciar el sonido',
+      mic: 'Enviar micrófono sí / no',
       'view-only': 'Solo ver (sin entrada al remoto)',
       options: 'Opciones de la sesión',
       info: 'Información de la sesión',
@@ -292,7 +294,7 @@ export const sessionEs: SessionStrings = {
       display: 'Cómo se ajusta el escritorio remoto a esta pantalla.',
       clipboard: 'Copiar y pegar entre este dispositivo y el remoto.',
       files: 'Qué ocurre cuando el remoto envía un archivo.',
-      sound: 'Audio remoto.',
+      sound: 'Audio remoto y envío del micrófono de este dispositivo.',
     },
     toolbarStyle: 'Estilo de la barra',
     toolbarStyleHint:
@@ -346,6 +348,16 @@ export const sessionEs: SessionStrings = {
       accept: 'Aceptar siempre',
       decline: 'Rechazar siempre',
     },
+    receivedFiles: 'Archivos recibidos',
+    receivedFilesHint:
+      'Guardar: se escriben directamente en una carpeta Descargas a medida que llegan (iPhone y iPad: Archivos › En mi iPhone › OpenMobileGuac › Downloads; Android: Documentos › OpenMobileGuac); luego puedes compartirlos desde Archivos › Transferencias. Compartir: se abre la hoja de compartir cuando el archivo está completo y no se guarda copia. Los trabajos de impresión siempre abren la hoja de compartir.',
+    receivedFilesOptions: {
+      downloads: 'Guardar en Descargas',
+      share: 'Compartir, sin guardar copia',
+    },
+    microphone: 'Enviar micrófono',
+    microphoneHint:
+      'Conexiones RDP con la entrada de audio activada. Desactivado por defecto; el sistema pide acceso al micrófono la primera vez que se activa. Se detiene cuando la sesión se oculta o se desconecta.',
     keyBarSwipeDismiss: 'Deslizar hacia abajo en las teclas extra para ocultar el teclado',
     keyBarSwipeDismissHint: 'Con el teclado oculto, el gesto oculta la barra de teclas.',
     haptics: 'Respuesta háptica',
@@ -582,6 +594,10 @@ export const sessionEs: SessionStrings = {
     pasteHint: 'Portapapeles del dispositivo al remoto',
     sound: 'Sonido',
     soundHint: 'Audio remoto',
+    microphone: 'Enviar micrófono',
+    microphoneHint: 'RDP con entrada de audio activada; pide acceso la primera vez',
+    microphoneLive: 'Activo: el remoto oye este dispositivo',
+    microphoneUnavailable: 'No disponible en este WebView',
     optionsHint: 'Puntero, teclado, barra de herramientas y más',
     toolbarButtons: 'Botones de la barra',
     toolbarButtonsHint: 'Elegir y ordenar la fila',
@@ -600,7 +616,7 @@ export const sessionEs: SessionStrings = {
     matchHintVnc:
       'La mayoría de los servidores VNC no pueden cambiar de tamaño; puede que se ignore la petición',
     matchHint:
-      'Pide al remoto que se ajuste a esta pantalla (RDP con actualización de pantalla, SSH)',
+      'Pide al remoto que cambie de tamaño cuando cambia esta vista (giro, barra de herramientas), como la app web. No mientras el teclado está abierto, ni con una resolución remota fija ni en la sesión de otra persona.',
   },
 
   input: {
@@ -921,6 +937,14 @@ export const sessionEs: SessionStrings = {
     shared: 'Compartido',
     shareClosed: 'Se cerró la hoja para compartir',
     savedByBrowser: 'Guardado por el navegador',
+    savedToDownloads: 'Guardado en Descargas',
+    savedToDownloadsNamed: (name: string) => `Guardado en Descargas: ${name}`,
+    share: 'Compartir',
+    shareNamed: (name: string) => `Compartir ${name}`,
+    incomplete:
+      'La descarga terminó antes de recibir el archivo completo. Se eliminó el archivo incompleto.',
+    noSpace:
+      'No se pudo escribir el archivo (¿está lleno el dispositivo?). Se eliminó el archivo incompleto.',
     browserBlocked: 'El navegador no permitió la descarga.',
     incomingTitle: '¿Recibir un archivo?',
     incomingPrintTitle: '¿Recibir un trabajo de impresión?',
@@ -1015,5 +1039,30 @@ export const sessionEs: SessionStrings = {
       custom: 'Personalizado',
       customNamed: (name: string) => `Personalizado (${name})`,
     },
+  },
+
+  viewers: {
+    joined: (name: string) => `${name} se unió a esta sesión`,
+    left: (name: string) => `${name} salió de esta sesión`,
+    anonymousJoined: 'Alguien se unió a esta sesión (por ejemplo, con un enlace compartido)',
+    anonymousLeft: 'Alguien salió de esta sesión',
+    anonymous: 'usuario anónimo',
+    pill: (n: number) => `${n} ${plural(n, 'espectador', 'espectadores')}`,
+    list: (names: string) => `También conectados: ${names}`,
+  },
+
+  mic: {
+    toolbar: 'Micro',
+    send: 'Enviar micrófono',
+    stop: 'Detener micrófono',
+    starting: 'Iniciando el micrófono…',
+    live: 'Micrófono activado · toca para detener',
+    on: 'Micrófono activado',
+    off: 'Micrófono desactivado',
+    notAccepted:
+      'Esta conexión no acepta entrada de micrófono. Un administrador puede activar la entrada de audio (RDP: «Habilitar entrada de audio»).',
+    denied: 'Se denegó el acceso al micrófono. Puedes permitirlo en los ajustes del sistema.',
+    unavailable: 'El micrófono no se puede usar aquí (este WebView no tiene entrada de audio).',
+    notConnected: 'Conéctate primero y luego activa el micrófono.',
   },
 };

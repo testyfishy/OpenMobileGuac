@@ -351,3 +351,78 @@ describe('signOutLocally', () => {
     await auth.signOutLocally([]);
   });
 });
+
+describe('AuthService: forced password change and Change password', () => {
+  const expiredTotp = {
+    message: 'TOTP enrollment must be completed before authentication can continue',
+    translatableMessage: { key: 'TOTP.INFO_ENROLL_REQUIRED', variables: null },
+    statusCode: null,
+    expected: [{ name: 'guac-totp', type: 'GUAC_TOTP_CODE', secret: 'ABC' }],
+    type: 'INSUFFICIENT_CREDENTIALS',
+  };
+  const reset = { 'new-password': 'New-pw-12345', 'confirm-new-password': 'New-pw-12345' };
+
+  it('remembers the new password after a forced reset', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    const { auth, profile, secure } = await setup(http);
+    await auth.login(profile, { username: 'u', password: 'old', remember: true, extra: reset });
+    expect(await secure.get(secretKeys.password(profile.id))).toBe('New-pw-12345');
+  });
+
+  it('remembers it as soon as the server moves on to TOTP (the reset is already stored)', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(403, expiredTotp));
+    const { auth, profile, secure } = await setup(http);
+    await secure.set(secretKeys.password(profile.id), 'old');
+    await expect(
+      auth.login(profile, { username: 'u', password: 'old', remember: true, extra: reset }),
+    ).rejects.toMatchObject({ info: { kind: 'additional-credentials-required' } });
+    expect(await secure.get(secretKeys.password(profile.id))).toBe('New-pw-12345');
+  });
+
+  const PW_URL = `${BASE}/api/session/data/postgresql/users/testuser/password`;
+
+  it('changes the password and replaces the saved one', async () => {
+    const http = new FakeHttpClient()
+      .on('POST', TOKENS, () => jsonResponse(200, authResultJson))
+      .on('PUT', PW_URL, () => jsonResponse(204, null));
+    const { auth, profile, secure } = await setup(http);
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: true, extra: {} });
+    const seen: string[] = [];
+    auth.onPasswordChange((_id, pw) => seen.push(pw));
+    expect(await auth.changePassword(profile, 'pw', 'pw2')).toEqual({ savedUpdated: true });
+    expect(await secure.get(secretKeys.password(profile.id))).toBe('pw2');
+    expect(seen).toEqual(['pw2']);
+  });
+
+  it('does not save a password that was not saved before', async () => {
+    const http = new FakeHttpClient()
+      .on('POST', TOKENS, () => jsonResponse(200, authResultJson))
+      .on('PUT', PW_URL, () => jsonResponse(204, null));
+    const { auth, profile, secure } = await setup(http);
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: false, extra: {} });
+    const p = { ...profile, rememberPassword: false };
+    expect(await auth.changePassword(p, 'pw', 'pw2')).toEqual({ savedUpdated: false });
+    expect(await secure.get(secretKeys.password(profile.id))).toBeNull();
+  });
+
+  it('keeps the saved password when the server refuses the change', async () => {
+    const http = new FakeHttpClient()
+      .on('POST', TOKENS, () => jsonResponse(200, authResultJson))
+      .on('PUT', PW_URL, () => jsonResponse(403, permissionDeniedJson))
+      .on('HEAD', `${BASE}/api/session`, () => jsonResponse(204, null));
+    const { auth, profile, secure } = await setup(http);
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: true, extra: {} });
+    await expect(auth.changePassword(profile, 'wrong', 'pw2')).rejects.toMatchObject({
+      info: { kind: 'invalid-credentials' },
+    });
+    expect(await secure.get(secretKeys.password(profile.id))).toBe('pw');
+  });
+
+  it('needs a live session', async () => {
+    const { auth, profile } = await setup(new FakeHttpClient());
+    await expect(auth.changePassword(profile, 'a', 'b')).rejects.toMatchObject({
+      info: { kind: 'session-expired' },
+    });
+    expect(await auth.canChangePassword(profile.id)).toBe(false);
+  });
+});

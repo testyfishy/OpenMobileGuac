@@ -95,8 +95,9 @@ import {
 } from '../../session/credentials/requiredParams.ts';
 import { ArgvTracker, sendArgumentValues, type MutableArgument } from './argv.ts';
 import { SessionAudio } from './audio.ts';
+import { SessionMicrophone, type MicProblem, type MicState } from './microphone.ts';
 import { readTextStream, writeTextStream } from './clipboardText.ts';
-import { deliverFile } from './fileSave.ts';
+import { createFileReceiver, type StreamRequest } from './fileSave.ts';
 import { isOnline, onAppResume, onNetworkChange } from './platform.ts';
 import { sessionStrings } from './sessionStrings.ts';
 import { TransferManager } from './transfers.ts';
@@ -162,6 +163,13 @@ export interface SessionSnapshot {
   readonly reconnectToApply: boolean;
   /** View only: no input reaches the remote. */
   readonly viewOnly: boolean;
+  /**
+   * Other users connected to this session, by name ('' = anonymous, e.g. a share link), as
+   * announced by guacd's `msg` USER_JOINED / USER_LEFT (sent to the owner only).
+   */
+  readonly viewers: readonly string[];
+  /** AUD-2: the microphone stream (`live` = audio is being sent). */
+  readonly microphone: MicState;
 }
 
 export type SessionLogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -185,6 +193,26 @@ export interface SessionControllerOptions {
    * lock uses it so no reconnect sends the stored token while the lock screen is up.
    */
   readonly connectGate?: () => Promise<void> | null;
+  /**
+   * Someone else's session (joined from the admin list, or opened from a share link): the
+   * view is never followed with `size`, which would resize the owner's desktop.
+   */
+  readonly sharedViewer?: boolean;
+  /**
+   * AUD-2: the microphone stopped on its own (server refused audio input, access denied,
+   * not available). The host turns "Send microphone" off.
+   */
+  readonly onMicrophoneProblem?: (problem: MicProblem) => void;
+  /**
+   * FIL-1: the web application's stream download request for a stream of this tunnel
+   * (`api/session/tunnels/{uuid}/streams/{index}/{name}` with the token header), or null
+   * when downloads must stay in band (Demo, no server).
+   */
+  readonly streamDownload?: (
+    tunnelUuid: string,
+    streamIndex: number,
+    filename: string,
+  ) => StreamRequest | null;
 }
 
 /** The `size` sent at connect, plus whether audio types are advertised (Quality, AUD-1). */
@@ -321,9 +349,29 @@ export class SessionController {
     () => this.publish(),
   );
   private readonly argv = new ArgvTracker(() => this.publish());
+  /** AUD-2: microphone input, only while "Send microphone" is on and the session is shown. */
+  private readonly mic = new SessionMicrophone({
+    changed: () => this.publish(),
+    log: (m) => this.log('info', m),
+    problem: (p) => {
+      const t = sessionStrings.mic;
+      this.opts?.notify?.(
+        p === 'not-accepted' ? t.notAccepted : p === 'denied' ? t.denied : t.unavailable,
+      );
+      this.opts?.onMicrophoneProblem?.(p);
+    },
+  });
   /** File transfers (FIL-1); the screen subscribes to it directly. */
   readonly transfers = new TransferManager({
-    deliver: (blob, name, print) => deliverFile(blob, name, { print }),
+    // FIL-1: written to the device as it arrives (stream endpoint on native, else in band).
+    receiver: createFileReceiver({
+      mode: () => this.settings.receivedFiles,
+      streamRequest: (index, name) => {
+        const uuid = this.tunnel?.uuid;
+        return uuid ? (this.opts?.streamDownload?.(uuid, index, name) ?? null) : null;
+      },
+      log: (level, message) => this.log(level, message),
+    }),
     log: (level, message) => this.log(level, message),
     notify: (text) => this.opts?.notify?.(text),
     incomingPolicy: () => this.settings.remoteFiles,
@@ -338,6 +386,9 @@ export class SessionController {
   private displayStats: InstanceType<typeof Guacamole.Display.Statistics> | null = null;
   /** The current (or last) tunnel, described for the info sheet. */
   private infoTunnel: TunnelLike | null = null;
+  /** Users joined to this session (guacd user id → name), see `viewers`. */
+  private readonly joined = new Map<string, string>();
+  private viewerNames: readonly string[] = [];
 
   // Layout
   private stable: Size | null = null;
@@ -350,6 +401,10 @@ export class SessionController {
   private keyboardCover = 0;
   private measured: Size = { width: 0, height: 0 };
   private matchSizeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The soft keyboard was open at the last measure. */
+  private keyboardUp = false;
+  /** A follow-the-view resize was held back while the keyboard was up. */
+  private matchAfterKeyboard = false;
 
   // Input / frame loop
   private tickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -433,6 +488,8 @@ export class SessionController {
         this.connectKey !== null &&
         this.connectKey !== connectSettingsKey(this.settings),
       viewOnly: this.settings.viewOnly,
+      viewers: this.viewerNames,
+      microphone: this.mic.getState(),
     };
   }
 
@@ -455,6 +512,8 @@ export class SessionController {
       prev.reconnectToApply === next.reconnectToApply &&
       prev.quietReconnect === next.quietReconnect &&
       prev.viewOnly === next.viewOnly &&
+      prev.viewers === next.viewers &&
+      prev.microphone === next.microphone &&
       prev.mutableArguments === next.mutableArguments &&
       (Object.keys(next.modifiers) as Modifier[]).every(
         (m) => prev.modifiers[m] === next.modifiers[m],
@@ -520,6 +579,7 @@ export class SessionController {
     }
     this.active = active;
     this.audio.setActive(active);
+    this.syncMicrophone();
     this.log('debug', active ? 'Session shown' : 'Session hidden');
     if (active) {
       this.stable = null;
@@ -799,6 +859,7 @@ export class SessionController {
       const intentional = this.closingOnPurpose || byServer;
       this.dispatch({ type: 'closed', intentional, byServer });
       this.releaseInputs();
+      this.mic.stop();
       this.transfers.detachClient();
       this.credentials = null;
       // The client does not follow a tunnel close on its own; stop its keep-alive.
@@ -851,6 +912,24 @@ export class SessionController {
     this.setTouchSupport(0);
     client.onmultitouch = (_layer, touches) => {
       if (live()) this.setTouchSupport(touches);
+    };
+    // Shared sessions (guacd 1.5+): the owner is told who joins and leaves (`msg`). The
+    // library fires onjoin/onleave from its "msg" handler (vendored Client.js).
+    this.setViewers(null);
+    client.onjoin = (userId, name) => {
+      if (!live()) return;
+      this.joined.set(userId, name);
+      this.setViewers([...this.joined.values()]);
+      this.log('info', 'A user joined this session');
+      this.opts?.notify?.(viewerNotice(name, true));
+    };
+    client.onleave = (userId, name) => {
+      if (!live()) return;
+      const known = this.joined.get(userId);
+      this.joined.delete(userId);
+      this.setViewers([...this.joined.values()]);
+      this.log('info', 'A user left this session');
+      this.opts?.notify?.(viewerNotice(known ?? name, false));
     };
     client.onclipboard = (stream, mimetype) => {
       if (!live() || !/^text\//.test(mimetype)) return;
@@ -930,6 +1009,10 @@ export class SessionController {
     client.onsync = null;
     client.onaudio = null;
     client.onargv = null;
+    client.onjoin = null;
+    client.onleave = null;
+    this.mic.stop();
+    this.setViewers(null);
     const display = client.getDisplay();
     display.onstatistics = null;
     display.statisticWindow = 0;
@@ -959,6 +1042,7 @@ export class SessionController {
     this.updateCursor();
     this.scheduleMatchSize();
     this.credentials = null;
+    this.syncMicrophone();
     this.stats.connectedAt = Date.now();
     // The first thumbnail comes from the timer below, not from the next `sync`.
     this.lastThumbAt = Date.now();
@@ -1068,6 +1152,15 @@ export class SessionController {
     };
   };
 
+  /** Replace the viewer list (`null` = nobody: a new or closed connection). */
+  private setViewers(names: readonly string[] | null): void {
+    if (names === null) this.joined.clear();
+    const next = names ?? [];
+    if (next.length === 0 && this.viewerNames.length === 0) return;
+    this.viewerNames = next;
+    this.publish();
+  }
+
   private setTouchSupport(n: number): void {
     const next = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
     if (next === this.touchSupport) return;
@@ -1141,7 +1234,29 @@ export class SessionController {
       this.log('info', 'View only off');
     }
     if (prev.audio !== next.audio) this.audio.setMuted(next.audio === 'muted');
+    if (prev.microphone !== next.microphone || prev.viewOnly !== next.viewOnly) {
+      this.syncMicrophone();
+    }
     this.publish();
+  }
+
+  /**
+   * AUD-2: the microphone runs only while "Send microphone" is on, the session is connected,
+   * shown and in the foreground, and not view only. It stops otherwise (hidden, background,
+   * disconnect) and starts again when all of that holds once more.
+   */
+  private syncMicrophone(): void {
+    const client = this.client;
+    const want =
+      this.settings.microphone &&
+      !this.settings.viewOnly &&
+      this.active &&
+      !this.disposed &&
+      client !== null &&
+      this.machine.phase.kind === 'connected' &&
+      (typeof document === 'undefined' || document.visibilityState !== 'hidden');
+    if (want) this.mic.start(client);
+    else this.mic.stop();
   }
 
   /** The effective pointer mode changed: drop in-flight input and reconfigure. */
@@ -1267,6 +1382,8 @@ export class SessionController {
       visualViewportInset: vvInset,
     });
     this.stable = out.stable;
+    const wasKeyboardUp = this.keyboardUp;
+    this.keyboardUp = keyboardOpen;
     const shrink = out.screen.height - this.measured.height;
     this.keyboardCover = Math.max(0, out.keyboardInset - shrink);
     const insets = this.readInsets();
@@ -1283,6 +1400,10 @@ export class SessionController {
       prev.insets.left !== insets.left ||
       prev.insets.right !== insets.right;
     const kbChanged = Math.abs(prev.keyboardInset - keyboardInset) >= 0.5;
+    if (wasKeyboardUp && !keyboardOpen && this.matchAfterKeyboard) {
+      this.matchAfterKeyboard = false;
+      this.scheduleMatchSize();
+    }
     if (!screenChanged && !insetsChanged && !kbChanged) {
       this.publish();
       return;
@@ -1332,7 +1453,6 @@ export class SessionController {
     this.setViewport(this.viewport);
   }
 
-  /** DSP-4: ask the server to match the device (debounced, only when different). */
   /** The size to request for an available area (CSS px), from the Quality settings. */
   private displayRequest(cssWidth: number, cssHeight: number): DisplayRequest {
     const s = this.settings;
@@ -1349,11 +1469,28 @@ export class SessionController {
     });
   }
 
+  /**
+   * Follow the view (DSP-4, "Match device size", on by default as in the web client's
+   * `guacClient.js` `mainElementResized`): send the size of the area left for the desktop,
+   * debounced, only when it differs from the last request.
+   *
+   * - A fixed or custom Remote resolution is never overridden.
+   * - Not while the soft keyboard is up: the keyboard only covers the desktop (the view pans
+   *   above it), so asking for a shorter desktop and back on every keyboard toggle would
+   *   make RDP redraw (or, with `resize-method=reconnect`, reconnect) twice per word typed.
+   *   A change that happens with the keyboard up (a rotation) is sent when it closes.
+   * - Not in a joined or shared session: guacd honours `size` from any user that is not
+   *   read-only (`rdp/user.c`), so a viewer would resize the owner's desktop.
+   */
   private scheduleMatchSize(): void {
-    if (!this.settings.matchDeviceSize) return;
+    if (!this.settings.matchDeviceSize || this.opts?.sharedViewer) return;
     // A fixed remote resolution never follows the device.
     const r = this.settings.remoteResolution;
     if (r !== 'auto' && r !== 'device') return;
+    if (this.keyboardUp) {
+      this.matchAfterKeyboard = true;
+      return;
+    }
     if (this.matchSizeTimer) clearTimeout(this.matchSizeTimer);
     this.matchSizeTimer = setTimeout(
       () => {
@@ -1361,6 +1498,10 @@ export class SessionController {
         const client = this.client;
         if (!client || !this.settings.matchDeviceSize) return;
         if (this.machine.phase.kind !== 'connected') return;
+        if (this.keyboardUp) {
+          this.matchAfterKeyboard = true;
+          return;
+        }
         const { width, height } = this.availableSize();
         if (width <= 0 || height <= 0) return;
         const size = this.displayRequest(width, height);
@@ -2013,6 +2154,7 @@ export class SessionController {
         // Visible again: start the quiet window before any queued close event runs.
         this.quietUntil = Date.now() + QUIET_RECONNECT_MS;
       }
+      this.syncMicrophone();
     };
     document.addEventListener('visibilitychange', onVisibility);
     this.cleanups.push(() => document.removeEventListener('visibilitychange', onVisibility));
@@ -2324,6 +2466,13 @@ function tunnelStateName(state: number): string {
     default:
       return names.closed;
   }
+}
+
+/** Toast for a user joining or leaving ('' = anonymous). */
+function viewerNotice(name: string, joined: boolean): string {
+  const t = sessionStrings.viewers;
+  if (name === '') return joined ? t.anonymousJoined : t.anonymousLeft;
+  return joined ? t.joined(name) : t.left(name);
 }
 
 function errorText(err: unknown): string {

@@ -292,6 +292,27 @@ export function IconVolume({ muted }: { muted: boolean }) {
   );
 }
 
+export function IconMic({ off }: { off: boolean }) {
+  return (
+    <Svg>
+      <rect x="9" y="3.5" width="6" height="11" rx="3" />
+      <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" />
+      {off && <path d="M4 4l16 16" />}
+    </Svg>
+  );
+}
+
+/** Other users connected to this session. */
+export function IconViewers() {
+  return (
+    <Svg>
+      <circle cx="9" cy="8.5" r="3" />
+      <path d="M3.5 19a5.5 5.5 0 0 1 11 0" />
+      <path d="M15.5 6a3 3 0 0 1 0 5.6M17.5 14.2A5.5 5.5 0 0 1 20.5 19" />
+    </Svg>
+  );
+}
+
 export function IconEye({ off }: { off: boolean }) {
   return (
     <Svg>

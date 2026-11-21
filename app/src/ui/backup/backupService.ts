@@ -90,7 +90,10 @@ export async function buildBackup(
   const profiles = await services.profiles.exportAll();
   let secrets;
   if (passphrase) {
-    const plain: Record<string, { password?: string; totpSeed?: string; baseUrl?: string }> = {};
+    const plain: Record<
+      string,
+      { password?: string; totpSeed?: string; baseUrl?: string; tlsPin?: string }
+    > = {};
     for (const p of profiles) {
       const id = p.profile.id;
       const password = await services.secure.get(secretKeys.password(id)).catch(() => null);
@@ -102,6 +105,8 @@ export async function buildBackup(
           ...(password ? { password } : {}),
           ...(totpSeed ? { totpSeed } : {}),
           baseUrl: p.profile.baseUrl,
+          // SRV-8: likewise the trusted certificate, so an edited plain pin cannot either.
+          ...(p.profile.tlsPin ? { tlsPin: p.profile.tlsPin.sha256 } : {}),
         };
       }
     }
@@ -128,14 +133,54 @@ export interface BackupVault {
   remove(name: string): Promise<void>;
 }
 
-/** App-private documents storage (`Directory.Data`/backups) on native, the KV store on web. */
+/**
+ * Where automatic backups live on native. Not `Directory.Data`: on iOS that is the
+ * Documents folder, which the Files app shows (the app shares it for downloads), and a
+ * backup lists server addresses and user names. Library is app-private on both platforms.
+ */
+const VAULT_DIR = Directory.Library;
+
+/** iOS, once per launch: move backups written by older versions out of Documents. */
+let migrated: Promise<void> | null = null;
+function migrateOldBackups(): Promise<void> {
+  if (Capacitor.getPlatform() !== 'ios') return Promise.resolve();
+  migrated ??= (async () => {
+    try {
+      const old = await Filesystem.readdir({ path: DIR, directory: Directory.Data });
+      for (const file of old.files) {
+        if (file.type === 'directory' || !isAutoBackupName(file.name)) continue;
+        const path = `${DIR}/${file.name}`;
+        const r = await Filesystem.readFile({
+          path,
+          directory: Directory.Data,
+          encoding: Encoding.UTF8,
+        });
+        await Filesystem.writeFile({
+          path,
+          data: typeof r.data === 'string' ? r.data : await r.data.text(),
+          directory: VAULT_DIR,
+          encoding: Encoding.UTF8,
+          recursive: true,
+        });
+        await Filesystem.deleteFile({ path, directory: Directory.Data });
+      }
+      await Filesystem.rmdir({ path: DIR, directory: Directory.Data }).catch(() => undefined);
+    } catch {
+      // No old folder, or a file that could not be moved: try again next launch.
+    }
+  })();
+  return migrated;
+}
+
+/** App-private storage (Library/backups) on native, the KV store on web. */
 export function createBackupVault(kv: KeyValueStore): BackupVault {
   if (!Capacitor.isNativePlatform()) return kvVault(kv);
   return {
     where: 'device',
     async list() {
+      await migrateOldBackups();
       try {
-        const r = await Filesystem.readdir({ path: DIR, directory: Directory.Data });
+        const r = await Filesystem.readdir({ path: DIR, directory: VAULT_DIR });
         return r.files
           .filter((f) => f.type !== 'directory' && isAutoBackupName(f.name))
           .map((f) => ({ name: f.name, ...(f.mtime ? { at: Number(f.mtime) } : {}) }));
@@ -144,24 +189,26 @@ export function createBackupVault(kv: KeyValueStore): BackupVault {
       }
     },
     async read(name) {
+      await migrateOldBackups();
       const r = await Filesystem.readFile({
         path: `${DIR}/${name}`,
-        directory: Directory.Data,
+        directory: VAULT_DIR,
         encoding: Encoding.UTF8,
       });
       return typeof r.data === 'string' ? r.data : await r.data.text();
     },
     async write(name, text) {
+      await migrateOldBackups();
       await Filesystem.writeFile({
         path: `${DIR}/${name}`,
         data: text,
-        directory: Directory.Data,
+        directory: VAULT_DIR,
         encoding: Encoding.UTF8,
         recursive: true,
       });
     },
     async remove(name) {
-      await Filesystem.deleteFile({ path: `${DIR}/${name}`, directory: Directory.Data });
+      await Filesystem.deleteFile({ path: `${DIR}/${name}`, directory: VAULT_DIR });
     },
   };
 }

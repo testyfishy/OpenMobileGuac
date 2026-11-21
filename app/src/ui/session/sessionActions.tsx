@@ -9,6 +9,7 @@ import {
   IconKeyboard,
   IconKeySets,
   IconKeys,
+  IconMic,
   IconMultiTouch,
   IconPaste,
   IconPower,
@@ -52,6 +53,11 @@ export interface SessionActionContext {
   readonly keyboardActive: boolean;
   readonly keyBarVisible: boolean;
   readonly audioMuted: boolean;
+  /** AUD-2: "Send microphone" is on (`micLive`: audio is actually being sent). */
+  readonly micOn?: boolean;
+  readonly micLive?: boolean;
+  /** This WebView can capture audio at all. */
+  readonly micAvailable?: boolean;
   readonly viewOnly: boolean;
   readonly showCtrlAltDel: boolean;
   readonly canMinimize: boolean;
@@ -74,6 +80,7 @@ export interface SessionActionContext {
   readonly onClipboard: () => void;
   readonly onFiles: () => void;
   readonly onToggleAudio: () => void;
+  readonly onToggleMic?: () => void;
   readonly onToggleViewOnly: () => void;
   readonly onOptions: () => void;
   readonly onInfo: () => void;
@@ -155,6 +162,11 @@ export function buildSessionActions(c: SessionActionContext): SessionActions {
       label: c.audioMuted ? sessionStrings.toasts.soundOff : short.sound,
       name: c.audioMuted ? t.soundOff : t.soundOn,
       pressed: c.audioMuted,
+    }),
+    mic: a('mic', <IconMic off={!c.micOn} />, c.onToggleMic ?? (() => undefined), {
+      name: c.micOn ? sessionStrings.mic.stop : sessionStrings.mic.send,
+      pressed: c.micOn === true,
+      available: c.micAvailable === true && c.onToggleMic !== undefined,
     }),
     'view-only': a('view-only', <IconEye off={false} />, c.onToggleViewOnly, {
       pressed: c.viewOnly,

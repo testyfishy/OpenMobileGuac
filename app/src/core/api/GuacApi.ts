@@ -15,6 +15,7 @@ import {
 } from '../models/Connection.ts';
 import { ModelParseError, isRecord } from '../models/json.ts';
 import type { ServerProfile } from '../models/ServerProfile.ts';
+import { ssoProvidersFromPatches, type SsoRedirect } from '../sso/sso.ts';
 import { joinUrl, normalizeServerUrl, type ServerUrlCandidate } from '../url/normalizeServerUrl.ts';
 import { GuacApiError, errorFromApiBody, type GuacErrorInfo } from './errors.ts';
 
@@ -217,6 +218,99 @@ export class GuacApi {
     const key = values && typeof values['key'] === 'string' ? values['key'] : null;
     if (!key) throw new GuacApiError({ kind: 'invalid-response', url, detail: 'no share key' });
     return `${session.baseUrl.replace(/\/+$/, '')}/#/?key=${encodeURIComponent(key)}`;
+  }
+
+  /**
+   * SSO providers the server advertises on its login page, from `GET api/patches` (no
+   * token). Each SSO extension contributes an HTML patch linking to `api/ext/<name>/login`
+   * (`guacamole-auth-sso-*` `html/sso-provider-<name>.html`). When a database or LDAP back end
+   * decides the sign-in, this is the only sign of SSO: `POST api/tokens` then lists just
+   * username and password. Resolves `[]` on any failure.
+   */
+  async getSsoProviders(profile: Pick<ServerProfile, 'baseUrl'>): Promise<SsoRedirect[]> {
+    try {
+      const res = await this.send({ method: 'GET', url: joinUrl(profile.baseUrl, 'api/patches') });
+      return res.status === 200 ? ssoProvidersFromPatches(res.body, profile.baseUrl) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Whether the signed-in user may change their own password, as the web client decides it
+   * (`guacSettingsPreferences.js` `canUpdateSelf`): `UPDATE` on their own user, or system
+   * `ADMINISTER`, in `GET api/session/data/{ds}/self/effectivePermissions` of the data source
+   * that authenticated them (`AuthSession.primaryDataSource`). `false` on any error, for an
+   * anonymous session, and for back ends without a user directory (SSO, LDAP: `NOT_FOUND`).
+   */
+  async canChangePassword(session: AuthSession): Promise<boolean> {
+    if (!session.username || !session.primaryDataSource) return false;
+    const url = joinUrl(
+      session.baseUrl,
+      `api/session/data/${encodeURIComponent(session.primaryDataSource)}/self/effectivePermissions`,
+    );
+    try {
+      const res = await this.send({
+        method: 'GET',
+        url,
+        headers: { [TOKEN_HEADER]: session.token },
+      });
+      if (res.status !== 200 || !isRecord(res.body)) return false;
+      const system = res.body['systemPermissions'];
+      if (Array.isArray(system) && system.includes('ADMINISTER')) return true;
+      const users = res.body['userPermissions'];
+      const own = isRecord(users) ? users[session.username] : undefined;
+      return Array.isArray(own) && own.includes('UPDATE');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Changes the signed-in user's own password:
+   * `PUT api/session/data/{ds}/users/{username}/password` with JSON
+   * `{ oldPassword, newPassword }` (`UserResource.updatePassword`, `APIUserPasswordUpdate`;
+   * web client `userService.updateUserPassword`). 204 on success; the session stays valid.
+   *
+   * Errors (checked against a 1.6.0 server):
+   * - Wrong current password: `PERMISSION_DENIED` "Permission denied.", the same answer as
+   *   for an account without `UPDATE` on itself and for an unknown token. If
+   *   `HEAD api/session` says the token is still valid it is reported as
+   *   `invalid-credentials`, else `session-expired`.
+   * - Password policy: `BAD_REQUEST` with `translatableMessage` such as
+   *   `PASSWORD_POLICY.ERROR_TOO_SHORT` `{ LENGTH }` (kept as `server-error`).
+   * Passwords are never logged.
+   */
+  async changePassword(
+    session: AuthSession,
+    oldPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const url = joinUrl(
+      session.baseUrl,
+      `api/session/data/${encodeURIComponent(session.primaryDataSource)}/users/` +
+        `${encodeURIComponent(session.username)}/password`,
+    );
+    const res = await this.send({
+      method: 'PUT',
+      url,
+      headers: { [TOKEN_HEADER]: session.token },
+      body: { kind: 'json', value: { oldPassword, newPassword } },
+    });
+    if (res.status >= 200 && res.status < 300) return;
+    const body = parseApiErrorBody(res.body);
+    if (body?.type === 'PERMISSION_DENIED') {
+      const valid = await this.isSessionValid(session).catch(() => true);
+      const detail = {
+        status: res.status,
+        message: body.message,
+        translatableMessage: body.translatableMessage,
+      };
+      throw new GuacApiError(
+        valid ? { kind: 'invalid-credentials', ...detail } : { kind: 'session-expired', ...detail },
+      );
+    }
+    throw this.errorFor(res, session.baseUrl, true);
   }
 
   /** `HEAD api/session`: whether the token is still valid. Network errors still reject. */

@@ -48,9 +48,18 @@
 	</dict>
 	<key>NSFaceIDUsageDescription</key>
 	<string>OpenMobileGuac uses Face ID, when you turn on the app lock, to unlock the app and your saved server credentials.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>OpenMobileGuac sends your microphone to a remote computer only while you turn on “Send microphone” in a session, for example for calls or dictation on that computer.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OpenMobileGuac connects to the remote desktop servers you add, which are often on your local or private network.</string>
 	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<!-- Files received from remote computers are saved in Documents/Downloads; these two keys
+	     show the app's Documents folder in the Files app (On My iPhone › OpenMobileGuac).
+	     See app/src/ui/session/fileSave.ts. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

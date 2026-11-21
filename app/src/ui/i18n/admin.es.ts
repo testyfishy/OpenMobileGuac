@@ -222,5 +222,17 @@ export const adminEs: AdminStrings = {
     ongoing: 'Sigue conectado',
     duration: (minutes: number) => plural(minutes, '1 minuto', `${minutes} minutos`),
     unavailable: 'El servidor no comparte esta información con esta cuenta.',
+    allTitle: 'Sesiones activas',
+    allButton: 'Sesiones activas en este servidor',
+    allIntro:
+      'Quién está conectado ahora, en todas las conexiones que esta cuenta puede ver. Unirse abre su sesión junto a la tuya; Desconectar la termina.',
+    unknownConnection: 'Conexión desconocida',
+    join: 'Unirse',
+    joinTitle: (user: string, connection: string) =>
+      `¿Unirte a la sesión de ${user} en ${connection}?`,
+    joinBody:
+      'Ves su pantalla y lo que hagas le llega, salvo que la conexión sea de solo lectura. Guacamole avisa al propietario de que alguien se unió. Unirse no cambia ninguno de tus ajustes.',
+    joinedName: (connection: string, user: string) => `${connection} (${user})`,
+    refresh: 'Actualizar',
   },
 };

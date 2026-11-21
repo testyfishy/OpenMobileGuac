@@ -106,6 +106,24 @@ export const en = {
     clearCredentialsBody:
       'The saved password, the session token and any stored two-factor key for this server are deleted from this device. You will be asked to sign in next time.',
     credentialsCleared: 'Saved credentials cleared.',
+    changePassword: {
+      title: 'Account password',
+      open: 'Change password',
+      hint: 'Changes this account’s password on the server.',
+      signInFirst: 'Sign in to this server to change the account password.',
+      notAllowed: 'This server does not let this account change its own password here.',
+      oldPassword: 'Current password',
+      newPassword: 'New password',
+      confirmPassword: 'Confirm new password',
+      submit: 'Change password',
+      busy: 'Changing…',
+      blank: 'Enter a new password.',
+      mismatch: 'The two new passwords do not match.',
+      wrongOld: 'The current password is wrong.',
+      rejectedTitle: 'New password not accepted',
+      done: 'Password changed.',
+      doneSaved: 'Password changed. The saved password on this device was updated.',
+    },
     test: 'Test connection',
     testing: 'Testing…',
     optionsTitle: 'Options for this server',
@@ -232,7 +250,8 @@ export const en = {
       } as Record<string, string>,
       button: 'Continue to sign-in page',
       experimental:
-        'Experimental: tested against the upstream code, not against a live identity provider.',
+        'Experimental: the server side was checked with Keycloak (OpenID Connect) on a test server, but not the sign-in page inside the app on a phone. SAML and CAS only against the upstream code.',
+      choose: 'Sign in with',
       waiting: 'Finish signing in on the page that opened…',
       unavailable:
         'Single sign-on needs the mobile app. In a desktop browser it cannot be completed here.',
@@ -240,6 +259,26 @@ export const en = {
       failed: 'The server did not accept the sign-in result.',
       race: 'The server’s own web page used the one-time sign-in result before the app could. Try again; if it keeps happening, ask your administrator about the app callback (docs/sso.md).',
     },
+    duo: {
+      title: 'Duo verification',
+      body: 'This server asks you to confirm the sign-in with Duo. The Duo page opens inside the app; the app continues when it is done.',
+      button: 'Continue to Duo',
+      waiting: 'Finish the Duo check on the page that opened…',
+      unavailable:
+        'Duo verification needs the mobile app. In a desktop browser it cannot be completed here.',
+      cancelled: 'The Duo check was cancelled.',
+      failedTitle: 'Duo did not confirm the sign-in',
+      failed:
+        'Duo verification was not completed, or the server’s own page used the result first. Try again.',
+      experimental:
+        'Experimental: built from the Guacamole 1.6.0 code, not tested with a real Duo account.',
+    },
+    newPasswordRejected: 'New password not accepted',
+    passwordMismatch: 'The two new passwords do not match.',
+    fieldLabels: {
+      'new-password': 'New password',
+      'confirm-new-password': 'Confirm new password',
+    } as Record<string, string>,
   },
 
   httpWarning: {

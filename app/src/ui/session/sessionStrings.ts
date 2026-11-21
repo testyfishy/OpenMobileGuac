@@ -220,6 +220,7 @@ export const sessionStringsEn = {
       clipboard: 'Clipboard',
       files: 'Files',
       sound: 'Sound',
+      mic: 'Mic',
       'view-only': 'View only',
       options: 'Options',
       info: 'Info',
@@ -243,6 +244,7 @@ export const sessionStringsEn = {
       clipboard: 'Clipboard panel',
       files: 'Files',
       sound: 'Sound on / off',
+      mic: 'Send microphone on / off',
       'view-only': 'View only (no input to the remote)',
       options: 'Session options',
       info: 'Session info',
@@ -297,7 +299,7 @@ export const sessionStringsEn = {
       display: 'How the remote desktop fits this screen.',
       clipboard: 'Copy and paste between this device and the remote.',
       files: 'What happens when the remote sends a file.',
-      sound: 'Remote audio.',
+      sound: 'Remote audio and sending this device’s microphone.',
     },
     toolbarStyle: 'Toolbar style',
     toolbarStyleHint:
@@ -350,6 +352,16 @@ export const sessionStringsEn = {
       accept: 'Always accept',
       decline: 'Always decline',
     },
+    receivedFiles: 'Received files',
+    receivedFilesHint:
+      'Save: written straight to a Downloads folder as they arrive (iPhone and iPad: Files › On My iPhone › OpenMobileGuac › Downloads; Android: Documents › OpenMobileGuac), then you can share them from Files › Transfers. Share: the share sheet opens when the file is complete and no copy is kept. Print jobs always open the share sheet.',
+    receivedFilesOptions: {
+      downloads: 'Save to Downloads',
+      share: 'Share, keep no copy',
+    },
+    microphone: 'Send microphone',
+    microphoneHint:
+      'RDP connections with audio input enabled. Off by default; the system asks for microphone access the first time it is turned on. It stops when the session is hidden or disconnects.',
     keyBarSwipeDismiss: 'Swipe down on the key bar to hide the keyboard',
     keyBarSwipeDismissHint: 'With the keyboard hidden, the swipe hides the key bar.',
     haptics: 'Haptic feedback',
@@ -582,6 +594,10 @@ export const sessionStringsEn = {
     pasteHint: 'Device clipboard to the remote',
     sound: 'Sound',
     soundHint: 'Remote audio',
+    microphone: 'Send microphone',
+    microphoneHint: 'RDP with audio input enabled; asks for access the first time',
+    microphoneLive: 'Live: the remote hears this device',
+    microphoneUnavailable: 'Not available in this WebView',
     optionsHint: 'Pointer, keyboard, toolbar and more',
     toolbarButtons: 'Toolbar buttons',
     toolbarButtonsHint: 'Choose and order the row',
@@ -598,7 +614,8 @@ export const sessionStringsEn = {
     tip: 'Tip: a three-finger double tap also resets the zoom.',
     matchDevice: 'Match device size',
     matchHintVnc: 'Most VNC servers cannot resize; the request may be ignored',
-    matchHint: 'Ask the remote to resize to this screen (RDP with display update, SSH)',
+    matchHint:
+      'Ask the remote to resize when this view changes (rotation, toolbar), as the web app does. Not while the keyboard is up, and never with a fixed Remote resolution or in someone else’s session.',
   },
 
   input: {
@@ -913,6 +930,14 @@ export const sessionStringsEn = {
     shared: 'Shared',
     shareClosed: 'Share sheet closed',
     savedByBrowser: 'Saved by the browser',
+    savedToDownloads: 'Saved to Downloads',
+    savedToDownloadsNamed: (name: string) => `Saved to Downloads: ${name}`,
+    share: 'Share',
+    shareNamed: (name: string) => `Share ${name}`,
+    incomplete:
+      'The download ended before the whole file arrived. The incomplete file was removed.',
+    noSpace:
+      'The file could not be written (is the device full?). The incomplete file was removed.',
     browserBlocked: 'The browser did not allow the download.',
     // Incoming file consent
     incomingTitle: 'Receive a file?',
@@ -1008,6 +1033,31 @@ export const sessionStringsEn = {
       custom: 'Custom',
       customNamed: (name: string) => `Custom (${name})`,
     },
+  },
+
+  viewers: {
+    joined: (name: string) => `${name} joined this session`,
+    left: (name: string) => `${name} left this session`,
+    anonymousJoined: 'Someone joined this session (for example from a share link)',
+    anonymousLeft: 'Someone left this session',
+    anonymous: 'anonymous user',
+    pill: (n: number) => `${n} ${plural(n, 'viewer', 'viewers')}`,
+    list: (names: string) => `Also connected: ${names}`,
+  },
+
+  mic: {
+    toolbar: 'Mic',
+    send: 'Send microphone',
+    stop: 'Stop microphone',
+    starting: 'Starting the microphone…',
+    live: 'Microphone on · tap to stop',
+    on: 'Microphone on',
+    off: 'Microphone off',
+    notAccepted:
+      'This connection does not accept microphone input. An administrator can turn on audio input for it (RDP: “Enable audio input”).',
+    denied: 'Microphone access was refused. You can allow it in the system settings.',
+    unavailable: 'The microphone cannot be used here (no audio input in this WebView).',
+    notConnected: 'Connect first, then turn on the microphone.',
   },
 };
 

@@ -1,5 +1,5 @@
 import { KeychainAccess, SecureStorage } from '@aparajita/capacitor-secure-storage';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 import { FetchHttpClient } from './http/FetchHttpClient.ts';
 import type { HttpClient } from './http/HttpClient.ts';
@@ -11,6 +11,7 @@ import {
 } from './storage/KeyValueStore.ts';
 import { NativeSecureStore } from './storage/NativeSecureStore.ts';
 import { PreferencesKeyValueStore } from './storage/PreferencesKeyValueStore.ts';
+import type { PinnedTlsPlugin } from './tls/plugin.ts';
 import {
   InsecureDevLocalStorageSecureStore,
   MemorySecureStore,
@@ -39,6 +40,19 @@ export function isNativePlatform(overrides: PlatformOverrides = {}): boolean {
  */
 export function createHttpClient(overrides: PlatformOverrides = {}): HttpClient {
   return isNativePlatform(overrides) ? new NativeHttpClient() : new FetchHttpClient();
+}
+
+const pinnedTls = registerPlugin<PinnedTlsPlugin>('PinnedTls');
+
+/**
+ * SRV-8: the app's own `PinnedTls` plugin (app/plugins/omg-pinned-tls), or `undefined` on
+ * the web and in a native build where it is not registered. `undefined` hides per-server
+ * certificate trust and leaves every connection on the system path.
+ */
+export function getPinnedTlsPlugin(overrides: PlatformOverrides = {}): PinnedTlsPlugin | undefined {
+  if (!isNativePlatform(overrides)) return undefined;
+  if (overrides.native === undefined && !Capacitor.isPluginAvailable('PinnedTls')) return undefined;
+  return pinnedTls;
 }
 
 /**

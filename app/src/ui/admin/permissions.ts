@@ -98,6 +98,23 @@ export function canKill(p: PermissionSet, activeId: string): boolean {
   return isAdmin(p) || has(p.activeConnections, activeId, ObjectPermission.DELETE);
 }
 
+/**
+ * Whether to offer the server-wide active sessions list for a data source: system
+ * ADMINISTER, or any permission on an active connection (the web client lists whatever
+ * `GET activeConnections` returns, which the server filters by READ).
+ */
+export function canViewSessions(p: PermissionSet): boolean {
+  return isAdmin(p) || p.activeConnections.size > 0;
+}
+
+/**
+ * Join a running session: only when the server marks it `connectable` (upstream
+ * `guacSettingsSessions.js` `getClientURL` links nothing otherwise).
+ */
+export function canJoin(connectable: boolean | undefined): boolean {
+  return connectable === true;
+}
+
 /** Anything to show in a group's management menu. */
 export function canManageGroup(p: PermissionSet, id: string): boolean {
   return (

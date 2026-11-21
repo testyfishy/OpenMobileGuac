@@ -35,12 +35,14 @@ import { ComboMenu } from './ComboMenu.tsx';
 import { CredentialSheet } from './CredentialSheet.tsx';
 import { FilesSheet } from './FilesSheet.tsx';
 import { ChromeButton } from './ChromeButton.tsx';
-import { CursorArrow, IconEye } from './icons.tsx';
+import { CursorArrow, IconEye, IconMic, IconViewers } from './icons.tsx';
 import { InfoSheet } from './InfoSheet.tsx';
 import { InputMenu } from './InputMenu.tsx';
 import { KeyBar } from './KeyBar.tsx';
 import { IncomingFileSheet } from './IncomingFileSheet.tsx';
 import { KeySetManager, KeySetPicker, type SaveTextFile } from './KeySetManager.tsx';
+import { microphoneAvailable, primeAudioInput } from './microphone.ts';
+import type { StreamRequest } from './fileSave.ts';
 import { keySetName, keySetNameIn } from './keySetNames.ts';
 import { MoreSheet, type TerminalControls } from './MoreSheet.tsx';
 import { ShareSheet, type SessionSharing } from './ShareSheet.tsx';
@@ -139,6 +141,20 @@ export interface SessionScreenProps {
   onEditConnection?: () => void;
   /** "Share this session" (sharing profiles); absent for the demo. */
   sharing?: SessionSharing;
+  /**
+   * Someone else's session: joined from the admin's active sessions, or opened from a share
+   * link. The view is never followed with a resize (it would resize the owner's desktop).
+   */
+  sharedViewer?: boolean;
+  /**
+   * FIL-1: the stream download request for a stream of this tunnel (native: received files
+   * are fetched from it straight to disk, as the web client does). Absent: in band.
+   */
+  streamDownload?: (
+    tunnelUuid: string,
+    streamIndex: number,
+    filename: string,
+  ) => StreamRequest | null;
 }
 
 /** Longest clipboard text typed as keystrokes (each character is two key events). */
@@ -216,6 +232,10 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     },
     [hostChange],
   );
+  const settingsChangeRef = useRef(onSettingsChange);
+  useEffect(() => {
+    settingsChangeRef.current = onSettingsChange;
+  });
   const hostUseDefault = props.onUseDefault;
   const useDefault = useCallback(
     (keys: string[]) => {
@@ -288,6 +308,12 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       onThumbnail: (url) => latest.current.onThumbnail?.(url),
       notify: (text) => setToast({ id: Date.now(), text }),
       hideNativeKeyboard: nativeHideKeyboard,
+      sharedViewer: latest.current.sharedViewer === true,
+      streamDownload: (uuid, index, name) =>
+        latest.current.streamDownload?.(uuid, index, name) ?? null,
+      // The server refused audio input, access was denied or capture is unavailable: turn
+      // "Send microphone" off so it is not retried on every connect.
+      onMicrophoneProblem: () => settingsChangeRef.current({ microphone: false }),
     });
   }, [controller]);
 
@@ -705,6 +731,15 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     onSettingsChange({ audio: next });
     showToast(next === 'muted' ? t.toasts.soundOff : t.toasts.soundOn);
   };
+  // AUD-2: not in the Demo (no server takes audio input) or where the WebView cannot capture.
+  const [micAvailable] = useState(() => !isDemo && microphoneAvailable());
+  const toggleMic = () => {
+    const on = !settings.microphone;
+    // Inside the tap: mobile WebViews start the shared AudioContext only from a gesture.
+    if (on) primeAudioInput();
+    onSettingsChange({ microphone: on });
+    showToast(on ? (connectedNow ? t.mic.starting : t.mic.notConnected) : t.mic.off);
+  };
   const toggleViewOnly = () => {
     const on = !settings.viewOnly;
     onSettingsChange({ viewOnly: on });
@@ -715,6 +750,9 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     keyboardActive,
     keyBarVisible,
     audioMuted: settings.audio !== 'on',
+    micOn: settings.microphone,
+    micLive: snap.microphone === 'live',
+    micAvailable,
     viewOnly: settings.viewOnly,
     showCtrlAltDel,
     canMinimize: onMinimize !== undefined,
@@ -752,6 +790,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     onClipboard: () => setMenu('clipboard'),
     onFiles: () => setMenu('files'),
     onToggleAudio: toggleAudio,
+    onToggleMic: toggleMic,
     onToggleViewOnly: toggleViewOnly,
     onOptions: () => setMenu('input'),
     onInfo: () => setMenu('info'),
@@ -1142,8 +1181,36 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 />
               )}
 
-              {snap.viewOnly || snap.reconnectToApply || snap.quietReconnect ? (
+              {snap.viewOnly ||
+              snap.reconnectToApply ||
+              snap.quietReconnect ||
+              snap.microphone !== 'off' ||
+              snap.viewers.length > 0 ? (
                 <div className="omg-pills">
+                  {snap.microphone !== 'off' ? (
+                    <ChromeButton
+                      className="omg-pill omg-pill--mic"
+                      aria-label={t.mic.stop}
+                      onClick={toggleMic}
+                    >
+                      <IconMic off={false} />{' '}
+                      {snap.microphone === 'live' ? t.mic.live : t.mic.starting}
+                    </ChromeButton>
+                  ) : null}
+                  {snap.viewers.length > 0 ? (
+                    <ChromeButton
+                      className="omg-pill omg-pill--viewers"
+                      onClick={() =>
+                        showToast(
+                          t.viewers.list(
+                            snap.viewers.map((n) => n || t.viewers.anonymous).join(', '),
+                          ),
+                        )
+                      }
+                    >
+                      <IconViewers /> {t.viewers.pill(snap.viewers.length)}
+                    </ChromeButton>
+                  ) : null}
                   {snap.quietReconnect ? (
                     <span className="omg-pill" role="status">
                       {t.screen.resuming}

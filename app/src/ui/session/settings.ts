@@ -32,7 +32,13 @@ import {
 export interface SessionSettings {
   fitMode: FitMode;
   pointerMode: PointerMode;
-  /** DSP-4: ask the server to resize the remote to the device. */
+  /**
+   * DSP-4: follow the view: send the new size when the area the desktop is drawn in changes
+   * (rotation, docked toolbar, split layout), as the Guacamole web client always does. On by
+   * default since 2026-11; a value stored per connection (or a changed app default) is kept.
+   * Never applies to a fixed or custom Remote resolution, and never while the soft keyboard is
+   * up (the keyboard only covers the desktop; see `SessionController.scheduleMatchSize`).
+   */
   matchDeviceSize: boolean;
   /** 0.25..4, 1 = default. */
   pointerSpeed: number;
@@ -79,6 +85,13 @@ export interface SessionSettings {
   keySetSwipe?: boolean;
   /** FIL-1: files (and print jobs) the remote pushes: ask, always accept or always decline. */
   remoteFiles?: RemoteFilesPolicy;
+  /**
+   * FIL-1: where accepted files go. `downloads`: streamed into the app's Downloads folder
+   * (visible in the Files app) and kept; `share`: the share sheet, no copy kept.
+   */
+  receivedFiles?: ReceivedFilesMode;
+  /** AUD-2: send the device microphone (RDP `enable-audio-input`). Off by default. */
+  microphone?: boolean;
   /** Larger, high-contrast cursor overlay. */
   largeCursor?: boolean;
   /** Split layout: display above a trackpad + key bar. `auto` = on a folded (tabletop) device. */
@@ -161,6 +174,8 @@ export type TapDismissMode = 'off' | 'hide-click' | 'hide-only';
 export const TAP_DISMISS_MODES: readonly TapDismissMode[] = ['off', 'hide-click', 'hide-only'];
 export type RemoteFilesPolicy = 'ask' | 'accept' | 'decline';
 export const REMOTE_FILES_POLICIES: readonly RemoteFilesPolicy[] = ['ask', 'accept', 'decline'];
+export type ReceivedFilesMode = 'downloads' | 'share';
+export const RECEIVED_FILES_MODES: readonly ReceivedFilesMode[] = ['downloads', 'share'];
 
 /**
  * Fields still read (for migration and old stored values) but no longer edited as session
@@ -174,7 +189,7 @@ export type ResolvedSessionSettings = Required<SessionSettings>;
 export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   fitMode: 'fit-screen',
   pointerMode: 'direct',
-  matchDeviceSize: false,
+  matchDeviceSize: true,
   pointerSpeed: 1,
   naturalScroll: true,
   haptics: true,
@@ -226,6 +241,8 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   keySet: GENERAL_SET_ID,
   keySetSwipe: false,
   remoteFiles: 'ask',
+  receivedFiles: 'downloads',
+  microphone: false,
 };
 
 export const MIN_POINTER_SPEED = 0.25;
@@ -358,6 +375,8 @@ export function normalizeSessionSettings(
     keySet: isKeySetId(raw['keySet']) ? raw['keySet'] : d.keySet,
     keySetSwipe: bool(raw['keySetSwipe'], d.keySetSwipe),
     remoteFiles: oneOf(raw['remoteFiles'], REMOTE_FILES_POLICIES, d.remoteFiles),
+    receivedFiles: oneOf(raw['receivedFiles'], RECEIVED_FILES_MODES, d.receivedFiles),
+    microphone: bool(raw['microphone'], d.microphone),
   };
 }
 
@@ -411,6 +430,8 @@ export const INPUT_SETTING_KEYS = [
   'keySet',
   'keySetSwipe',
   'remoteFiles',
+  'receivedFiles',
+  'microphone',
 ] as const satisfies readonly (keyof SessionSettings)[];
 
 /**

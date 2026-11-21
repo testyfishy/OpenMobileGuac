@@ -7,8 +7,9 @@ code, the Guacamole manual and selected `apache/guacamole-client` 1.6.0 sources.
 ## How to read this
 
 - **App = Yes** means the code is in the tree and unit-tested. As with every row in
-  `docs/FEATURES.md`, **nothing has run on a phone or against a real Guacamole server yet**.
-  "Yes" is never "verified in the field".
+  `docs/FEATURES.md`, **nothing has run on a phone yet**, and only the rows marked
+  "local 1.6.0 server" (sign-in rows in §1 and §12, 2026-11-20) were run against a real
+  Guacamole server, a throwaway local one. "Yes" is never "verified in the field".
 - **Partial**: some of it is built; the note says what is missing.
 - **No**: not implemented.
 - **Server-side**: guacd or the web application does the work, so any client gets it once the
@@ -36,17 +37,17 @@ Paths are relative to `app/src/`. Upstream references:
 | Several data sources (e.g. database plus LDAP) | Yes | Yes: tree loaded per data source (`GuacApi.getConnectionTree`, `ui/connections/`) | Baseline | — |
 | Generic "additional credentials" form for `INSUFFICIENT_CREDENTIALS` fields (TEXT, PASSWORD, NUMERIC, EMAIL, ENUM, BOOLEAN…) | Yes | Yes: `ui/auth/LoginForm.tsx`; unknown field types fall back to a text field | Baseline | — |
 | TOTP code entry and enrolment (QR code, key) | Yes | Yes: `LoginForm.tsx` (`GUAC_TOTP_CODE`), optional stored seed `core/totp/` | Baseline | — |
-| Server's explanatory text on the extra step (e.g. "password expired", "Duo required", auth-restrict "outside allowed hours") | Yes (translated `translatableMessage`) | Partial: the `message` text is used for errors (`ui/errors/errorMessages.ts`); `translatableMessage` keys are parsed but not translated, and the extra step shows fields without the server's prompt text | Useful | S |
-| Forced password change at login (database extension: password expired / reset) | Yes | Partial (unconfirmed): the new-password and confirm fields arrive as ordinary PASSWORD fields, so the generic form should render them. Not tested, and no explanatory text (row above) | Baseline | S to verify |
-| Duo (1.6.0 uses Duo Universal Prompt: a `REDIRECT` field named `duo_code`; Duo returns `duo_code` **and** `state`) | Yes | **No** (from reading the code; not tested). After the password step, `noteExpected` (`ui/connections/ConnectionsScreen.tsx`) records the `duo_code` redirect, and the extra step hides `REDIRECT` fields (`ui/auth/authFlow.ts` `visibleExtraFields`). `startSso` falls back to that redirect, but the exchange posts only `{ duo_code }` (`{ [paramName]: value }`). Without `state` the server cannot resume the deferred username/password, so sign-in should fail. Duo returns to `duo-redirect-uri`, which the manual says must be the Guacamole web address, so the in-app-browser hand-off would also race the web page, as with SAML | Baseline where Duo is used | M: capture both `duo_code` and `state` from the return URL and post both; test against a real Duo tenant |
-| SSO: OpenID Connect, SAML, CAS (`REDIRECT` field) | Yes | Partial / experimental: in-app browser or system-browser callback (`core/sso/sso.ts`, `ui/auth/ssoFlow.ts`, `docs/sso.md`). Not tested against any identity provider; there is a known race with the server's own page | Baseline where SSO is used | M to harden (needs real IdPs) |
-| Several SSO providers offered at once (1.6.0 lists each once) | Yes | Partial: `findSsoRedirect` takes the first `REDIRECT` field only | Niche | S |
+| Server's explanatory text on the extra step (e.g. "password expired", "Duo required", auth-restrict "outside allowed hours") | Yes (translated `translatableMessage`) | Yes (2026-11-20): the step's prompt and refusals (`BAD_REQUEST` on the extra step) are shown from the server's own `translations/<lang>.json`, with `{VAR}` / plural formatting, else its English `message` (`ui/auth/serverText.ts`, `LoginForm.tsx`). Field labels use `LOGIN.FIELD_HEADER_*`. Checked against a local 1.6.0 server (expired password, password policy, TOTP enrolment) | Useful | — |
+| Forced password change at login (database extension: password expired / reset) | Yes | Yes (2026-11-20, local 1.6.0 server, desktop browser): new/confirm fields, a local mismatch check, policy errors from the server. The server stores the new password before a later step (TOTP) runs, so the app then signs in with the new password and saves it if remembered; before this fix the next step sent the old password and failed (`ui/auth/authFlow.ts`, `AuthService.login`; docs/protocol-notes.md §1.8) | Baseline | — |
+| Duo (1.6.0 uses Duo Universal Prompt: a `REDIRECT` field named `duo_code`; Duo returns `duo_code` **and** `state`) | Yes | Experimental (2026-11-20): the extra step shows "Continue to Duo", the in-app browser waits for a page at the return address with both `duo_code` and `state`, and the app posts both with the username and password (`ConnectionsScreen.tsx` `startDuo`, `core/sso/sso.ts` `findDuoRedirect`, docs/protocol-notes.md §1.7). Unit-tested against the upstream request shapes; never run against Duo. The race with the server's own page (`docs/sso.md`) applies | Baseline where Duo is used | Test with a real Duo tenant; the race needs native navigation interception |
+| SSO: OpenID Connect, SAML, CAS | Yes | Experimental: detected from the `REDIRECT` field **or** the login-page links in `api/patches` (on a database + OpenID server only the links exist; the app previously missed SSO there). OpenID checked end to end against Keycloak 26 and a local 1.6.0 server except the in-app browser step itself (`core/sso/sso.ts`, `ui/auth/ssoFlow.ts`, `docs/sso.md`). The race with the server's own page remains (measured margin about 170 ms in desktop Chromium) | Baseline where SSO is used | M: native navigation interception removes the race; SAML/CAS untested |
+| Several SSO providers offered at once (1.6.0 lists each once) | Yes | Yes: one button per provider from `api/patches` (`ssoProvidersFromPatches`) | Niche | — |
 | HTTP header auth (`guacamole-auth-header`, behind an authenticating reverse proxy) | Yes (the browser carries the proxy's cookies) | No (unconfirmed): requests go through native HTTP with no proxy session cookie. Works only if the proxy can authenticate a non-browser client | Useful for proxy setups | L: needs a web-view login that shares cookies with native HTTP and the WebSocket |
 | Client-certificate / smart-card sign-in (1.6.0 `guacamole-auth-ssl`) | Yes | No | Niche | L: needs native TLS client-certificate support |
 | Encrypted JSON auth (`data=` parameter) | Yes | No: `loginWithParameters` exists (`GuacApi.ts`), but no link format feeds `data` to it | Niche | S |
 | Quick Connect extension (type a URI such as `rdp://user@host:port/?params`; its REST path was not confirmed) | Yes when installed | No. `ui/servers/QuickConnect.tsx` is a different feature (a recents strip) | Useful | S |
 | Share link join (`#/?key=…`) | Yes | Yes: `ui/servers/ShareLinkDialog.tsx` posts `{ key }`; memory-only session, `ui/services/shareSessions.ts` | Baseline | — |
-| Private-CA or self-signed HTTPS | Browser decides | Partial: device-installed CAs only; per-server fingerprint trust is planned (`docs/tls.md`) | Baseline for home servers | M–L: native tunnel bridge |
+| Private-CA or self-signed HTTPS | Browser decides | Yes (untested on device): device-installed CAs, or per-server trust of the certificate after showing its fingerprint, pinned to that address, over a native REST + tunnel path (`docs/tls.md`) | Baseline for home servers | Device test |
 | Auth rate limiting, IP/time restrictions (1.6.0) | Server-side | Server-side; errors shown with the server's message text | — | — |
 
 ## 2. Connection list and groups
@@ -67,7 +68,7 @@ Paths are relative to `app/src/`. Upstream references:
 | --- | --- | --- | --- | --- |
 | Render all drawing instructions (layers, PNG/JPEG/WebP, cursor) | Yes (library) | Yes: same vendored `Client.js`/`Display.js`; the image types advertised as upstream does (`ui/launch/mediaSupport.ts`, `imageSupport.ts`) | Baseline | — |
 | Connect string: `GUAC_WIDTH/HEIGHT/DPI/AUDIO/VIDEO/IMAGE/TIMEZONE` | Yes | Yes: `core/api/tunnel.ts`, `ui/launch/connectData.ts` | Baseline | — |
-| Send a new size when the view changes (RDP `resize-method`, VNC `disable-display-resize` off, SSH/telnet/k8s) | Yes, always (`guacClient.js` `mainElementResized` → `sendSize`) | Partial: built, but opt-in ("Match device size", `matchDeviceSize: false` in `ui/session/settings.ts`): `SessionController.scheduleMatchSize` | Baseline | S: decide the default |
+| Send a new size when the view changes (RDP `resize-method`, VNC `disable-display-resize` off, SSH/telnet/k8s) | Yes, always (`guacClient.js` `mainElementResized` → `sendSize`) | Yes, by default: "Match device size" (`matchDeviceSize: true` in `ui/session/settings.ts`; a stored per-connection "off" is kept), `SessionController.scheduleMatchSize`. Debounced (400 ms, 1.5 s on Low); compared with the last request, not the remote size. Deliberate differences: no resize while the soft keyboard is up (the keyboard only covers the desktop; a change made meanwhile is sent when it closes), never with a fixed or custom Remote resolution, and never in a joined or share-link session (guacd takes `size` from any non-read-only user, `rdp/user.c`, so a viewer would resize the owner's desktop) | Baseline | — |
 | Fit to window, zoom (pinch, +/−) | Yes | Yes: fit modes, pinch, pan (`session/viewport/Viewport.ts`) | Baseline | — |
 | Window title from the server (`name` instruction) | Yes (`onname` → title) | No: `onname` unused; the app shows the connection's own name | Niche | S |
 | Video streams (`video` instruction) | Library only; `VideoPlayer.getSupportedTypes()` returns `[]` in 1.6.0 | Same: advertises what the library reports (none) | Niche | — (no guacd protocol sends video today) |
@@ -108,7 +109,7 @@ Paths are relative to `app/src/`. Upstream references:
 | Filesystem objects (`filesystem`, RDP drive, SFTP): browse, upload, download, folders | Yes | Yes: `ui/session/transfers.ts` (`onfilesystem`, `requestInputStream`, `createOutputStream`), `ui/session/FilesSheet.tsx` | Baseline | — |
 | Upload without a filesystem (`createFileStream`, e.g. SSH upload directory set by `guacctl`) | Yes | Yes: `transfers.ts` falls back to `client.createFileStream` | Useful | — |
 | Server-initiated download (`file` instruction: `guacget`, RDP "Download" folder) | Yes | Yes: `transfers.ts` `onfile`, `ui/session/incomingFiles.ts`, accept/decline policy | Baseline | — |
-| Large files | Downloads go over REST (`GET api/session/tunnels/{uuid}/streams/{index}/{name}`) straight to disk; uploads are POSTed in 4 MiB chunks | Partial: everything goes in-band over the WebSocket; downloads are held in memory before the share sheet (`ui/session/downloadCache.ts`, `fileSave.ts`) | Baseline for big files | M: either stream blobs to a native file, or use the REST stream endpoint through native HTTP (CORS does not apply to it) |
+| Large files | Downloads go over REST (`GET api/session/tunnels/{uuid}/streams/{index}/{name}`) straight to disk; uploads are POSTed in 4 MiB chunks | Downloads: Yes on native. The same stream endpoint, requested through native HTTP (`Filesystem.downloadFile`, no CORS) with the token in the `Guacamole-Token` header, written to a hidden `.omg-…part` file and renamed when complete (`ui/session/fileSave.ts`, `transfers.ts`). Complete only when the in-band `end` arrives too (the response also ends normally on a tunnel close). Falls back to in band (append per ~768 KB, ack after each write) when the request fails before any data, and on the web. Cancel stops acking the server's forced blobs instead of sending an error ack (see `transfers.ts`), so guacd stalls at the next frame and the part file is deleted after the 60 s idle timeout (with a still remote screen the file may finish first; unverified). Servers trusted by fingerprint (SRV-8) get the in-band path: the native download does not use the pinned-TLS plugin. Uploads: still in band (6 KB blobs, one per ack) | Baseline for big files | Uploads: M (REST `PUT` through native HTTP) |
 | Drag and drop / share-sheet "Open in" to upload | Yes (drag and drop) | No share-sheet target (proposed FIL-3); upload is from a file picker | Useful | M: native share extension / intent |
 | Server switches `disable-download`, `disable-upload`, `sftp-*` | Server-side | Server-side | — | — |
 
@@ -117,11 +118,11 @@ Paths are relative to `app/src/`. Upstream references:
 | Feature | Guacamole web client | This app | Importance | Effort / blocker |
 | --- | --- | --- | --- | --- |
 | Audio output (`audio` stream, `AudioPlayer`) | Yes | Yes: `ui/session/audio.ts`, per-session mute; no audio focus or iOS silent-switch handling | Baseline | S for audio focus |
-| Audio input (RDP `enable-audio-input`): on connect the web client calls `createAudioStream('audio/L16;rate=44100,channels=2')` with `Guacamole.AudioRecorder`, and re-opens it when it closes | Yes | **No**: `AudioRecorder` unused (planned AUD-2) | Useful (calls, dictation) | M: microphone permission in both native shells (`RECORD_AUDIO` / `NSMicrophoneUsageDescription`) and `getUserMedia` in the WebView; an in-session mic toggle |
+| Audio input (RDP `enable-audio-input`): on connect the web client calls `createAudioStream('audio/L16;rate=44100,channels=2')` with `Guacamole.AudioRecorder`, and re-opens it when it closes | Yes | Yes, opt-in: "Send microphone" (`microphone: false` by default; More › Sound, toolbar Mic, Settings › Sound), `ui/session/microphone.ts`. Same mimetype and re-open on close; opened only while the option is on, the session is shown and in the foreground. `getUserMedia` (the OS prompt) runs only after guacd accepts the stream (owner + `enable-audio-input`); a refusal turns the option off with an explanation. iOS: `NSMicrophoneUsageDescription`; Android: `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` | Useful (calls, dictation) | — |
 | Named pipes (`pipe` instruction, RDP `static-channels`) | Not handled by the web client | Not handled | Niche | — |
 | Argument values (`argv`): SSH/telnet font, colour scheme | Yes | Yes: `ui/session/argv.ts` | Useful | — |
 | `required` prompt (server asks for username/password/domain) | Yes | Yes: `session/credentials/requiredParams.ts`, `ui/session/CredentialSheet.tsx` | Baseline | — |
-| "User joined / left" notices and user count on shared sessions (`msg`, `onjoin`, `onleave`, 1.5.0+) | Yes | **No**: handlers unused | Useful (privacy: you should know someone is watching) | S |
+| "User joined / left" notices and user count on shared sessions (`msg`, `onjoin`, `onleave`, 1.5.0+) | Yes | Yes: `client.onjoin` / `onleave` (vendored `Client.js` "msg" handler) → toast and an "N viewers" pill with names (`SessionController.ts`). guacd sends these to the owner only (`libguac/client.c` `guac_client_owner_notify_join`), so the count excludes the owner; anonymous (share-link) users have an empty name | Useful (privacy) | — |
 
 ## 8. Printing
 
@@ -141,8 +142,8 @@ Paths are relative to `app/src/`. Upstream references:
 | Create a share link from a sharing profile | Yes | Yes: `GuacApi.ts` (`sharingProfiles`, `sharingCredentials`), `ui/session/ShareSheet.tsx` | Useful | — |
 | WebSocket tunnel | Yes | Yes: `SessionHost.tsx` (`Guacamole.WebSocketTunnel`) | Baseline | — |
 | HTTP tunnel fallback (`ChainedTunnel(WebSocket, HTTP)`) | Yes | No. Blocked: the HTTP tunnel needs CORS, which Guacamole does not send, and the native-HTTP XHR buffers responses (`docs/protocol-notes.md` §3.5) | Useful (proxies that block WebSocket) | L: native tunnel bridge |
-| Admin: view all active sessions, filter, kill | Yes (Settings › Active Sessions) | Partial: per connection only, with Disconnect (`ui/admin/ActivitySheet.tsx`, `GuacAdminApi.getActiveConnections` / `killActiveConnections`). No global list | Useful | S |
-| Admin: join or watch an active session (`GUAC_TYPE=a`) | Yes (1.5.0 release notes) | No: `core/api/tunnel.ts` defines type `'a'`, but nothing launches it | Useful | S |
+| Admin: view all active sessions, filter, kill | Yes (Settings › Active Sessions) | Yes (no filter): header button in the connection list, `ui/admin/SessionsSheet.tsx` (all managed data sources, newest first, user · connection · start · remote host, Disconnect where `canKill`). Offered for system ADMINISTER or any active-connection permission | Useful | — |
+| Admin: join or watch an active session (`GUAC_TYPE=a`) | Yes (`guacSettingsSessions.js` `getClientURL`: `ClientIdentifier.Types.ACTIVE_CONNECTION` with the active id, only when `connectable`) | Yes: Join in the same list (after a confirmation) opens a session with `GUAC_TYPE=a`, `GUAC_ID=<active id>` (`ui/launch/SessionHost.tsx`, `SessionTarget.join`). No settings, thumbnails or recents are stored for it, and it never resizes the remote | Useful | — |
 
 ## 10. Admin
 
@@ -168,7 +169,7 @@ Paths are relative to `app/src/`. Upstream references:
 
 | Feature | Guacamole web client | This app | Importance | Effort / blocker |
 | --- | --- | --- | --- | --- |
-| Change own password (Settings › Preferences, if permitted) | Yes | **No**: no call to the user password endpoint in `core/api/` | Baseline for database-auth users | S: `PUT api/session/data/{ds}/users/{user}/password` with `{ oldPassword, newPassword }` (web client `userService.js`) |
+| Change own password (Settings › Preferences, if permitted) | Yes | Yes (2026-11-20, local 1.6.0 server, desktop browser): Edit server › Account password, shown while signed in and when the account has `UPDATE` on itself or `ADMINISTER` (`GuacApi.canChangePassword`, `changePassword`; `ui/servers/ChangePasswordSection.tsx`). Wrong current password and policy errors are shown; a saved password is replaced | Baseline for database-auth users | — |
 | Display language | Yes (many translations) | Partial: English and Spanish (`ui/i18n/`) | Useful | S per language (translators) |
 | Time zone sent to the remote | Yes (browser zone; a preference can override it (unconfirmed)) | Partial: device zone only (`connectData.ts` `deviceTimezone`), no override | Niche | S |
 | Default input method / mouse emulation | Yes | Yes: Session defaults (`ui/settings/SessionDefaultsEditor.tsx`, `ui/session/settingsSchema.ts`) | Useful | — |
@@ -184,8 +185,8 @@ work and any client benefits. Rows here list only features that need the client.
 | RDP drive redirection (`enable-drive`, `drive-path`, …) | Yes | Yes: filesystem object (§6) | Baseline | — |
 | RDP printing | Yes | Yes (§8) | Useful | — |
 | RDP RemoteApp, gateway, `server-layout`, `timezone`, `console-audio` | Server-side | Server-side; editable in the admin form | — | — |
-| RDP display resize (`resize-method`) | Yes | Partial: opt-in (§3) | Baseline | S |
-| RDP audio input | Yes | No (§7) | Useful | M |
+| RDP display resize (`resize-method`) | Yes | Yes, by default (§3) | Baseline | — |
+| RDP audio input | Yes | Yes, opt-in (§7) | Useful | — |
 | RDP multi-touch (`enable-touch`) | Yes | Yes (§4) | Useful | — |
 | VNC audio (PulseAudio `enable-audio`) | Yes | Yes: ordinary audio stream (§7) | Niche | — |
 | VNC reverse connect, repeater, encodings, quality (1.6.0) | Server-side | Server-side; the app adds quality presets (`ui/admin/presets.ts`) | — | — |
@@ -198,35 +199,35 @@ work and any client benefits. Rows here list only features that need the client.
 Ranked by severity. Lock-outs come first (the user cannot use the server at all), then
 features a normal web-client user would miss.
 
-1. **Duo two-factor.** Read from the code, Duo (Universal Prompt in 1.6.0) cannot complete:
-   the app sends `duo_code` without `state`, so the server cannot resume the first factor.
-   Anyone on a Duo-protected server would be locked out. M; needs a real Duo tenant to test.
-2. **SSO (OpenID, SAML, CAS) is experimental.** It is built, but has never run against an
-   identity provider, and the in-app-browser hand-off can lose a race with the server's own
-   page (`docs/sso.md`). On SSO-only servers this is a lock-out risk. M; needs real
-   identity providers.
-3. **Self-signed HTTPS (already tracked as SRV-8).** A browser user can click through the
-   warning; the app needs a device-installed CA. This is common on home servers. M–L,
-   native.
-4. **Resize follows the view.** The web client always sends the new size. The app does so only
-   with "Match device size", which is off by default. S: a default change, but check RDP
-   reconnect behaviour first.
-5. **Change own password.** The web client offers it under Preferences when permitted. The
-   app has no endpoint call. S.
-6. **Forced password change and server prompt text.** The expired-password fields should
-   render through the generic form, but this is untested. The server's explanatory message
-   (`translatableMessage`) is not shown on the extra step. S.
-7. **Large file downloads.** Downloads are buffered in memory. The web client streams them to
-   disk over the REST stream endpoint. M.
+1. **Duo two-factor (fixed in code 2026-11-20, untested with Duo).** The app now sends
+   `duo_code` and `state` with the username and password (docs/protocol-notes.md §1.7).
+   It still needs a real Duo tenant, and it shares the in-app-browser race below, so a
+   Duo-protected server may still be unusable on some devices. M remaining: Duo test, native
+   navigation interception.
+2. **SSO (OpenID, SAML, CAS) is experimental.** OpenID was checked against Keycloak and a
+   local 1.6.0 server up to the token exchange, and detection now also works when a
+   database back end comes first. The in-app-browser hand-off can still lose a race with the
+   server's own page (`docs/sso.md`); the app-callback hand-off avoids it for OpenID but
+   needs IdP configuration. On SSO-only servers this remains a lock-out risk. M: native
+   navigation interception; SAML/CAS tests.
+3. **Self-signed HTTPS (SRV-8): built, untested on device.** A browser user can click through
+   the warning; the app now shows the certificate's fingerprint and lets the user trust that
+   one certificate for that address (pinned; a changed certificate is blocked). REST and the
+   tunnel then use the app's native `PinnedTls` plugin (docs/tls.md). Remaining: the device
+   checklist in docs/tls.md.
+4. ~~**Resize follows the view.**~~ Done 2026-11: on by default, with the keyboard and
+   fixed-resolution exceptions in §3. Untested on a device.
+5. ~~Change own password~~ and 6. ~~Forced password change and server prompt text~~:
+   done 2026-11-20 and checked against a local 1.6.0 server (rows in §1 and §12).
+7. ~~**Large file downloads.**~~ Done 2026-11 on native (stream endpoint to disk, §6).
+   Untested on a device. Uploads are still in band.
 
 ## Worth adding
 
-1. **Join / leave notices on shared sessions** (`onmsg`/`onjoin`/`onleave`). Tells the owner
-   someone is watching. S.
-2. **RDP microphone** (`AudioRecorder`, `enable-audio-input`). M; needs microphone
-   permissions in both native shells.
-3. **Admin: join an active session (`GUAC_TYPE=a`) and a global active-sessions list.** The
-   API pieces exist. S.
+1. ~~**Join / leave notices on shared sessions**~~ Done 2026-11 (§7).
+2. ~~**RDP microphone**~~ Done 2026-11, opt-in (§7).
+3. ~~**Admin: join an active session and a global active-sessions list.**~~ Done 2026-11
+   (§9).
 4. **Quick Connect extension.** On servers that have it, users type `rdp://…` instead of
    saving a connection. S.
 5. **Share-sheet upload target** (FIL-3). M.
@@ -250,9 +251,9 @@ features a normal web-client user would miss.
 
 ## Could not confirm
 
-- The forced-password-change flow and RADIUS challenge fields through the generic form (read
-  from code only; no server).
-- The Duo verdict comes from reading the code, not a test. Per the manual, `duo-redirect-uri`
+- RADIUS challenge fields through the generic form (read from code only; no server). The
+  forced-password-change flow was checked on 2026-11-20.
+- Duo is built from the code and unit tests, not a test. Per the manual, `duo-redirect-uri`
   must be the Guacamole web address, so it cannot point at the app.
 - These upstream names were recalled rather than fetched in this pass:
   - the Quick Connect REST path;

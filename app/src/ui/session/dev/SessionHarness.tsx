@@ -116,7 +116,8 @@ export function SessionHarness({
         key={run}
         title="Scribble desktop"
         protocol="rdp"
-        isDemo
+        // FeatureTunnel fakes a server with audio input, so the microphone is offered there.
+        isDemo={!features}
         active={active}
         createTunnel={makeTunnel}
         buildConnectData={(size) =>
@@ -181,6 +182,30 @@ export function SessionHarness({
                     onClick={() => (current.current as FeatureTunnel | null)?.playTone()}
                   >
                     Tone
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.button}
+                    onClick={() => (current.current as FeatureTunnel | null)?.userJoined()}
+                  >
+                    Viewer joins
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.button}
+                    onClick={() => (current.current as FeatureTunnel | null)?.userLeft()}
+                  >
+                    Viewer leaves
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.button}
+                    onClick={() => {
+                      const ft = current.current as FeatureTunnel | null;
+                      if (ft) ft.audioInput = !ft.audioInput;
+                    }}
+                  >
+                    Toggle mic accept
                   </button>
                 </>
               )}

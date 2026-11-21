@@ -4,6 +4,7 @@ import {
   STATUS,
   classifyStatus,
   endHeading,
+  isRetryableStatus,
   isSignInFailure,
   reduceSession,
   statusMessage,
@@ -155,5 +156,17 @@ describe('WebSocket blocked before the session started (AUDIT: no HTTP fallback)
     ]);
     expect(m.phase).toMatchObject({ kind: 'error' });
     expect(m.phase.kind === 'error' && m.phase.message).toMatch(/WebSocket/);
+  });
+});
+
+describe('joined session whose active connection is gone (admin Join, GUAC_TYPE=a)', () => {
+  it('RESOURCE_NOT_FOUND is final: no automatic reconnect loop', () => {
+    expect(isRetryableStatus(STATUS.RESOURCE_NOT_FOUND)).toBe(false);
+    const m = run([
+      ...connected,
+      { type: 'error', code: STATUS.RESOURCE_NOT_FOUND },
+      { type: 'closed', intentional: false },
+    ]);
+    expect(m.phase.kind).not.toBe('reconnecting');
   });
 });

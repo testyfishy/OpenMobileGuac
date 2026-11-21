@@ -10,8 +10,10 @@
 import {
   INPUT_RANGES,
   LEGACY_SESSION_KEYS,
+  RECEIVED_FILES_MODES,
   REMOTE_FILES_POLICIES,
   TAP_DISMISS_MODES,
+  type ReceivedFilesMode,
   type RemoteFilesPolicy,
   type TapDismissMode,
   type NumericInputSetting,
@@ -477,6 +479,15 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     hint: () => S().options.remoteFilesHint,
     optionLabel: (v) => S().options.remoteFilesOptions[v as RemoteFilesPolicy] ?? v,
   },
+  {
+    key: 'receivedFiles',
+    section: 'files',
+    control: 'choice',
+    options: RECEIVED_FILES_MODES,
+    label: () => S().options.receivedFiles,
+    hint: () => S().options.receivedFilesHint,
+    optionLabel: (v) => S().options.receivedFilesOptions[v as ReceivedFilesMode] ?? v,
+  },
 
   // ---- Sound
   {
@@ -488,6 +499,12 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     hint: () => S().options.audioHint,
     optionLabel: (v) => S().options.audioOptions[v as AudioMode] ?? v,
   },
+  sw(
+    'microphone',
+    'sound',
+    () => S().options.microphone,
+    () => S().options.microphoneHint,
+  ),
 ];
 
 export function descriptorsIn(section: SettingSection): SettingDescriptor[] {

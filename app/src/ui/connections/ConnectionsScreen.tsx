@@ -3,10 +3,17 @@ import { isGuacApiError, type GuacErrorInfo } from '../../core/api/errors.ts';
 import { FieldType, type FieldDescriptor } from '../../core/models/ApiErrorBody.ts';
 import type { ConnectionTree } from '../../core/models/Connection.ts';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
-import { findSsoRedirect, type SsoRedirect } from '../../core/sso/sso.ts';
+import {
+  findDuoRedirect,
+  findSsoRedirect,
+  type SsoKind,
+  type SsoRedirect,
+} from '../../core/sso/sso.ts';
 import { serializeTotp, totpFromEnrolmentField, type TotpParams } from '../../core/totp/totp.ts';
 import { AdminProvider } from '../admin/AdminProvider.tsx';
 import { AdminAddButton, AdminNotice } from '../admin/EntryPoints.tsx';
+import type { TranslationTable } from '../admin/labels.ts';
+import { loadTranslations } from '../admin/translations.ts';
 import { authFlowReducer, initialAuthFlow, isBusy } from '../auth/authFlow.ts';
 import { HttpWarningDialog } from '../auth/HttpWarningDialog.tsx';
 import { LoginForm } from '../auth/LoginForm.tsx';
@@ -36,6 +43,7 @@ import { DemoConnections } from './DemoConnections.tsx';
 import { SearchBox } from './SearchBox.tsx';
 import { SortMenu } from './SortMenu.tsx';
 import { EmptyState } from '../components/Feedback.tsx';
+import { CertificatePanel } from '../tls/CertificatePanel.tsx';
 
 export function ConnectionsScreen({ serverId }: { serverId: string }) {
   const nav = useNav();
@@ -95,9 +103,14 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   const [treeNonce, setTreeNonce] = useState(1);
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState<ServerOptions>(DEFAULT_SERVER_OPTIONS);
-  const [sso, setSso] = useState<SsoRedirect | undefined>(undefined);
+  // Sign-in providers: a REDIRECT field (the SSO extension decides the sign-in) or the
+  // links of the server's login page (`api/patches`), one entry per kind.
+  const [sso, setSso] = useState<readonly SsoRedirect[]>([]);
   const [ssoBusy, setSsoBusy] = useState(false);
   const [ssoError, setSsoError] = useState<string | undefined>(undefined);
+  const [duoBusy, setDuoBusy] = useState(false);
+  const [duoError, setDuoError] = useState<string | undefined>(undefined);
+  const [serverTable, setServerTable] = useState<TranslationTable | null | undefined>(undefined);
   const [lockedOut, setLockedOut] = useState(false);
   const [biometry, setBiometry] = useState<BiometryAvailability | undefined>(undefined);
   useEffect(() => {
@@ -126,9 +139,11 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   /** Remembers what the server asked for (hints on the server screen) and offers SSO. */
   const noteExpected = useCallback(
     (expected: readonly FieldDescriptor[]) => {
+      // Duo's `duo_code` field is a second step, not a sign-in provider (findSsoRedirect
+      // skips it); the extra step shows it.
       const redirect = findSsoRedirect(expected);
       if (redirect) {
-        setSso(redirect);
+        setSso((prev) => [redirect, ...prev.filter((r) => r.kind !== redirect.kind)]);
         saveOptions({ seenSso: true });
       }
       if (expected.some((f) => f.type === FieldType.GUAC_TOTP_CODE))
@@ -233,8 +248,9 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   // SSO detection: like the web client, ask the server what it expects with no
   // credentials. An SSO extension answers with a REDIRECT field.
   const onCredentialsForm = flow.phase === 'form' && flow.step === 'credentials';
+  const ssoKnown = sso.length > 0;
   useEffect(() => {
-    if (!onCredentialsForm || sso) return undefined;
+    if (!onCredentialsForm || ssoKnown) return undefined;
     let live = true;
     void services.api.loginWithParameters(profile, {}).then(
       // Anonymous access is allowed: do not keep a session the user did not ask for.
@@ -243,10 +259,40 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
         if (live && isGuacApiError(err)) noteExpected(expectedOf(err.info));
       },
     );
+    // With a database or LDAP back end first, the SSO extension sends no REDIRECT field;
+    // the web client then lists it from the login page's patches (verified on 1.6.0).
+    void services.api.getSsoProviders(profile).then((found) => {
+      if (!live || found.length === 0) return;
+      setSso((prev) => [...prev, ...found.filter((f) => !prev.some((p) => p.kind === f.kind))]);
+      saveOptions({ seenSso: true });
+    });
     return () => {
       live = false;
     };
-  }, [onCredentialsForm, sso, services.api, profile, noteExpected]);
+  }, [onCredentialsForm, ssoKnown, services.api, profile, noteExpected, saveOptions]);
+
+  // The server's own texts (prompt of an extra step, policy errors) in the UI language.
+  const wantsServerText =
+    flow.phase === 'form' && (flow.step === 'extra' || flow.serverError !== undefined);
+  useEffect(() => {
+    if (!wantsServerText || serverTable !== undefined) return undefined;
+    let live = true;
+    void loadTranslations(services.admin, profile.baseUrl).then((t) => {
+      if (live) setServerTable(t);
+    });
+    return () => {
+      live = false;
+    };
+  }, [wantsServerText, serverTable, services.admin, profile.baseUrl]);
+
+  // "Change password" elsewhere in the app: the in-memory copy for silent re-login follows.
+  useEffect(
+    () =>
+      auth.onPasswordChange((id, password) => {
+        if (id === profile.id) dispatch({ type: 'password-changed', password });
+      }),
+    [auth, profile.id],
+  );
 
   // SRV-9: stored seed for the TOTP step (behind the biometric gate).
   const seedsAllowed = seedPolicy(services.secretStorage, biometry, app.lock.enabled) === 'allowed';
@@ -267,16 +313,22 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
 
   const authenticated = phase === 'authenticated';
 
-  const startSso = async () => {
+  const startSso = async (kind: SsoKind) => {
     setSsoError(undefined);
     setSsoBusy(true);
     try {
-      // A fresh redirect: OpenID nonces expire and are single-use.
-      let redirect = sso;
-      try {
-        await services.api.loginWithParameters(profile, {});
-      } catch (err) {
-        if (isGuacApiError(err)) redirect = findSsoRedirect(expectedOf(err.info)) ?? redirect;
+      let redirect = sso.find((r) => r.kind === kind);
+      // A REDIRECT field's URL carries a nonce that expires and works once: ask again.
+      // (`api/ext/<x>/login` links make a fresh one on every visit.)
+      if (redirect && !redirect.redirectUrl.includes('/api/ext/')) {
+        try {
+          await services.api.loginWithParameters(profile, {});
+        } catch (err) {
+          if (isGuacApiError(err)) {
+            const fresh = findSsoRedirect(expectedOf(err.info));
+            if (fresh?.kind === kind) redirect = fresh;
+          }
+        }
       }
       if (!redirect) return;
       const outcome = await runSso(redirect, profile.baseUrl, options.ssoMode, services.log);
@@ -286,7 +338,7 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
         return;
       }
       try {
-        await auth.loginWithParameters(profile, { [redirect.paramName]: outcome.value });
+        await auth.loginWithParameters(profile, outcome.values);
         haptic('success');
         dispatch({ type: 'external-ok' });
       } catch (err) {
@@ -299,6 +351,35 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
       }
     } finally {
       setSsoBusy(false);
+    }
+  };
+
+  /**
+   * Duo (guacamole-auth-duo 1.6.0): open the Duo page from the server's `duo_code` field,
+   * then send `duo_code` and `state` with the username and password as the next attempt.
+   * The server resumes the deferred first factor from `state`
+   * (`DuoAuthenticationProvider.updateCredentials`); if `state` was already used or expired,
+   * the resent username and password start a fresh Duo check instead of failing.
+   */
+  const duoRedirect =
+    flow.phase === 'form' && flow.step === 'extra' ? findDuoRedirect(flow.expected) : undefined;
+  const startDuo = async () => {
+    if (!duoRedirect) return;
+    setDuoError(undefined);
+    setDuoBusy(true);
+    try {
+      const outcome = await runSso(duoRedirect, profile.baseUrl, 'webview', services.log);
+      if (!outcome.ok) {
+        setDuoError(
+          outcome.reason === 'cancelled'
+            ? strings.login.duo.cancelled
+            : strings.login.duo.unavailable,
+        );
+        return;
+      }
+      dispatch({ type: 'submit', values: { extra: outcome.values } });
+    } finally {
+      setDuoBusy(false);
     }
   };
 
@@ -396,6 +477,9 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
               <button type="button" className="btn btn-small" onClick={refresh}>
                 {strings.common.retry}
               </button>
+              {tree.error.code === 'tls' ? (
+                <CertificatePanel url={profile.baseUrl} onTrusted={refresh} />
+              ) : null}
             </ErrorBanner>
           ) : null}
           {tree.tree ? (
@@ -418,16 +502,27 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
           onSubmit={(values) => dispatch({ type: 'submit', values })}
           onStartOver={() => dispatch({ type: 'start-over' })}
           sso={
-            sso
+            sso.length > 0
               ? {
-                  kind: sso.kind,
+                  kinds: sso.map((r) => r.kind),
                   available: ssoAvailable(),
                   busy: ssoBusy,
                   error: ssoError,
-                  onStart: () => void startSso(),
+                  onStart: (kind) => void startSso(kind),
                 }
               : undefined
           }
+          duo={
+            duoRedirect
+              ? {
+                  available: ssoAvailable(),
+                  busy: duoBusy,
+                  error: duoError,
+                  onStart: () => void startDuo(),
+                }
+              : undefined
+          }
+          serverTable={serverTable}
           totp={
             totpSeed && options.totpAutofill && seedsAllowed
               ? {
@@ -443,6 +538,10 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
         />
       ) : isBusy(flow) ? (
         <Spinner label={strings.login.restoring} />
+      ) : null}
+      {/* SRV-8: offer to trust a self-signed certificate, or show that it changed. */}
+      {!authenticated && flow.phase === 'form' && flow.error?.code === 'tls' ? (
+        <CertificatePanel url={profile.baseUrl} />
       ) : null}
       {flow.phase === 'confirm-http' ? (
         <HttpWarningDialog
