@@ -4,6 +4,7 @@ import { Preferences } from '@capacitor/preferences';
 import { FetchHttpClient } from './http/FetchHttpClient.ts';
 import type { HttpClient } from './http/HttpClient.ts';
 import { NativeHttpClient } from './http/NativeHttpClient.ts';
+import { PooledNativeHttpClient } from './http/PooledNativeHttpClient.ts';
 import {
   MemoryKeyValueStore,
   WebStorageKeyValueStore,
@@ -28,6 +29,8 @@ export interface PlatformOverrides {
   readonly native?: boolean;
   /** Forces dev mode, for tests. Defaults to `import.meta.env.DEV`. */
   readonly dev?: boolean;
+  /** Forces the platform name, for tests. Defaults to `Capacitor.getPlatform()`. */
+  readonly platform?: string;
 }
 
 export function isNativePlatform(overrides: PlatformOverrides = {}): boolean {
@@ -38,8 +41,20 @@ export function isNativePlatform(overrides: PlatformOverrides = {}): boolean {
  * Native: Capacitor's native HTTP, which is not subject to CORS (SPEC §8.3).
  * Web: `fetch`, which in dev mode is expected to go through the Vite dev proxy.
  */
-export function createHttpClient(overrides: PlatformOverrides = {}): HttpClient {
-  return isNativePlatform(overrides) ? new NativeHttpClient() : new FetchHttpClient();
+export function createHttpClient(
+  overrides: PlatformOverrides = {},
+  pooled?: { readonly plugin: PinnedTlsPlugin; readonly onFallback?: (reason: string) => void },
+): HttpClient {
+  if (!isNativePlatform(overrides)) return new FetchHttpClient();
+  const capacitor = new NativeHttpClient();
+  // iOS: CapacitorHttp's no-redirect mode opens a new URLSession (new TCP + TLS) for every
+  // request; the app's plugin keeps one per server instead (PooledNativeHttpClient). Android's
+  // HttpURLConnection pools connections with redirects off, so it stays on CapacitorHttp.
+  const platform = overrides.platform ?? Capacitor.getPlatform();
+  if (platform === 'ios' && pooled) {
+    return new PooledNativeHttpClient(pooled.plugin, capacitor, pooled.onFallback);
+  }
+  return capacitor;
 }
 
 const pinnedTls = registerPlugin<PinnedTlsPlugin>('PinnedTls');

@@ -31,6 +31,23 @@ export interface HttpRequest {
   readonly body?: HttpBody;
   /** Overall timeout in milliseconds. Implementations default to `DEFAULT_TIMEOUT_MS`. */
   readonly timeoutMs?: number;
+  /**
+   * `background`: a request nothing on screen waits for (badges, permission lookups). It may
+   * wait for a free slot (`RequestCoordinator`) so it never delays sign-in, the connection
+   * list or a tunnel.
+   */
+  readonly priority?: 'background';
+}
+
+/** How a request went out, for the diagnostics log only. */
+export interface HttpConnectionInfo {
+  /** `pooled`: our long-lived native session; `pinned`: the pinned-certificate path. */
+  readonly path: 'pooled' | 'pinned' | 'capacitor' | 'fetch';
+  /** Whether an open connection was reused; undefined when the platform does not say. */
+  readonly reused?: boolean;
+  readonly protocol?: string;
+  readonly connectMs?: number;
+  readonly tlsMs?: number;
 }
 
 export interface HttpResponse {
@@ -42,6 +59,8 @@ export interface HttpResponse {
    * the body is empty (for example 204, or HEAD).
    */
   readonly body: unknown;
+  /** Diagnostics only; never used for decisions. */
+  readonly connection?: HttpConnectionInfo;
 }
 
 export interface HttpClient {

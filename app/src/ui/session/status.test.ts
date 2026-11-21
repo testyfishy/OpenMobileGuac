@@ -6,6 +6,7 @@ import {
   endHeading,
   isRetryableStatus,
   isSignInFailure,
+  phaseChanged,
   reduceSession,
   statusMessage,
   type SessionEvent,
@@ -168,5 +169,44 @@ describe('joined session whose active connection is gone (admin Join, GUAC_TYPE=
       { type: 'closed', intentional: false },
     ]);
     expect(m.phase.kind).not.toBe('reconnecting');
+  });
+});
+
+describe('reconnect bookkeeping (device log: "reconnect attempt 1 of 4" twice)', () => {
+  const lost = [
+    ...connected,
+    { type: 'error', code: STATUS.UPSTREAM_NOT_FOUND, source: 'tunnel' },
+    { type: 'closed', intentional: false },
+  ] as const satisfies SessionEvent[];
+
+  it('a connect held until unlock, then sent, is the same attempt and not a new log line', () => {
+    const scheduled = run([...lost]);
+    expect(scheduled.phase).toMatchObject({ kind: 'reconnecting', attempt: 1 });
+    // The held connect goes out after the unlock: a new phase object, same attempt.
+    const sent = reduceSession(scheduled, { type: 'connect' });
+    expect(sent.phase).toMatchObject({ kind: 'reconnecting', attempt: 1 });
+    expect(sent.attempts).toBe(1);
+    expect(phaseChanged(scheduled.phase, sent.phase)).toBe(false);
+    // Only a second loss counts as the next attempt.
+    const again = run(
+      [
+        { type: 'error', code: STATUS.UPSTREAM_NOT_FOUND, source: 'tunnel' },
+        { type: 'closed', intentional: false },
+      ],
+      sent,
+    );
+    expect(again.phase).toMatchObject({ kind: 'reconnecting', attempt: 2 });
+    expect(phaseChanged(sent.phase, again.phase)).toBe(true);
+  });
+
+  it('logs a change of kind or of the network wait', () => {
+    const scheduled = run([...lost]);
+    const offline = reduceSession(scheduled, { type: 'network', online: false });
+    expect(phaseChanged(scheduled.phase, offline.phase)).toBe(true);
+    const stillOffline = reduceSession(offline, { type: 'network', online: false });
+    expect(phaseChanged(offline.phase, stillOffline.phase)).toBe(false);
+    expect(phaseChanged({ kind: 'connecting' }, { kind: 'connected' })).toBe(true);
+    const same = { kind: 'connected' } as const;
+    expect(phaseChanged(same, same)).toBe(false);
   });
 });

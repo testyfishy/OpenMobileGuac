@@ -267,3 +267,17 @@ export function sinceLabel(ms: number | undefined, now: number, locale?: string)
     ? time
     : `${d.toLocaleDateString(locale, { day: 'numeric', month: 'short' })} ${time}`;
 }
+
+/**
+ * Whether the "In use" badges of a list may be refreshed now: only while that list can be
+ * seen (no session in front, the app in the foreground, its pane not hidden), so badge
+ * lookups never compete with a session, a sign-in or a reconnect. Pure.
+ */
+export function badgeRefreshAllowed(input: {
+  readonly sessionShown: boolean;
+  readonly appActive: boolean;
+  readonly pageHidden: boolean;
+  readonly paneHidden: boolean;
+}): boolean {
+  return !input.sessionShown && input.appActive && !input.pageHidden && !input.paneHidden;
+}

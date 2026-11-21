@@ -588,3 +588,19 @@ describe('GuacAdminApi group writes refused', () => {
     });
   });
 });
+
+describe('GuacAdminApi background option', () => {
+  it('marks every request as background priority, keeping the timeout', async () => {
+    const http = new FakeHttpClient().on('GET', `${DATA}/self/effectivePermissions`, () =>
+      jsonResponse(200, {}),
+    );
+    await new GuacAdminApi(http, { timeoutMs: 1234, background: true })
+      .getEffectivePermissions(session, 'postgresql')
+      .catch(() => undefined);
+    expect(http.requests[0]).toMatchObject({ priority: 'background', timeoutMs: 1234 });
+    await new GuacAdminApi(http)
+      .getEffectivePermissions(session, 'postgresql')
+      .catch(() => undefined);
+    expect(http.requests[1]?.priority).toBeUndefined();
+  });
+});

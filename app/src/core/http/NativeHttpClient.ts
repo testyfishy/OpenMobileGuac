@@ -34,7 +34,10 @@ export interface NativeHttpPlugin {
  *   way.
  * - HTTP error statuses resolve normally. The plugin rejects only when there is no response.
  * - `disableRedirects: true`: Android `CapacitorHttpUrlConnection.setDisableRedirects` and
- *   iOS `CapacitorUrlRequest.getUrlSession` stop following, and the 3xx is returned.
+ *   iOS `CapacitorUrlRequest.getUrlSession` stop following, and the 3xx is returned. On iOS
+ *   that also means a new `URLSession` (and TCP + TLS handshake) for every request, so iOS
+ *   uses `PooledNativeHttpClient` and this class only as its fallback. Android's
+ *   HttpURLConnection keeps its connection pool with redirects off.
  * - `data` is already parsed when the response content type is JSON, and is a string
  *   otherwise.
  *
@@ -84,7 +87,12 @@ export class NativeHttpClient implements HttpClient {
     if (raw === undefined || raw === null || raw === '') body = null;
     else if (typeof raw === 'string') body = decodeTextBody(raw, responseHeaders['content-type']);
     else body = raw;
-    return { status: res.status, headers: responseHeaders, body };
+    return {
+      status: res.status,
+      headers: responseHeaders,
+      body,
+      connection: { path: 'capacitor' },
+    };
   }
 }
 

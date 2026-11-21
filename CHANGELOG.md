@@ -9,6 +9,34 @@ maintainer uses the iOS app daily through TestFlight against a real Guacamole se
 The device checklists in docs/checklists have not been completed, and the Android app has
 not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](docs/FEATURES.md).
 
+## [Unreleased]
+
+### Fixed
+
+- iOS: every REST request (sign-in, connection list, "in use" checks, permissions) opened a
+  new connection with a full TCP and TLS handshake since the redirect hardening in 1.0.0,
+  because CapacitorHttp creates a new URLSession per request when redirects are disabled.
+  REST now goes through the app's own native plugin with one long-lived session per server
+  that keeps connections open and still never follows a redirect. If the native method is
+  missing, the app falls back to the previous behaviour.
+- Pinned (self-signed) servers reuse their connections too, on iOS.
+- Fewer parallel requests: identical requests that run at the same time are sent once,
+  permission and connection lookups are cached for a few seconds, badge and permission
+  lookups wait behind sign-in and the connection list (at most two at a time per server),
+  and the recent-connection badges are not refreshed while a session or another screen
+  covers the list or the app is in the background.
+- Every REST request now has a hard deadline (its timeout plus 3 s), so a request that
+  trickles cannot keep a spinner up indefinitely.
+- A data source that fails to load, or answers more than 4 s after the first one, no longer
+  hides the connections of the others. Its connections from the previous load stay listed,
+  a notice with Retry names it, and a slow one is filled in by itself when it arrives. A
+  "Jump back in" tap waits for that data source instead of saying the connection is gone.
+- Diagnostics: the log no longer repeats "reconnect attempt 1 of 4" when a reconnect held
+  for the app lock goes out. HTTP lines show whether a connection was reused and how many
+  requests were in flight; tunnel lines show the WebSocket close code and reason, the time
+  since the last instruction and whether the app was in the foreground; the report starts
+  with a network summary.
+
 ## [1.0.0] - 2026-11-21
 
 First public version.

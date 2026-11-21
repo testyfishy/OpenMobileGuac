@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { recordCspViolations } from './core/diagnostics/cspViolations.ts';
+import { instrumentWebSockets } from './core/diagnostics/webSocketDiagnostics.ts';
 import { detectImageMimetypes } from './ui/launch/imageSupport.ts';
 import { createAppServices, type AppServiceOverrides } from './ui/services/AppServices.ts';
 // By file path, not through ui/session/index.ts, so the session screen stays code-split.
@@ -56,6 +57,12 @@ async function boot(): Promise<void> {
   void sweepDownloadCache();
   const services = createAppServices(overrides);
   cspViolations.attach(services.log);
+  // DIAG-1: how each tunnel WebSocket ended (code, reason), before any session opens.
+  try {
+    instrumentWebSockets(window, services.log);
+  } catch {
+    // Diagnostics only: never stop the app from starting.
+  }
   // DIAG-1: uncaught errors go to the local log (message only; no stack, no data).
   window.addEventListener('error', (e) => services.log.error('app', e.message || 'error'));
   window.addEventListener('unhandledrejection', (e) =>

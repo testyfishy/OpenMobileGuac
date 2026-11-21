@@ -114,6 +114,7 @@ import {
 import {
   INITIAL_SESSION_MACHINE,
   isRetryableStatus,
+  phaseChanged,
   reduceSession,
   type SessionEvent,
   type SessionMachine,
@@ -348,6 +349,8 @@ export class SessionController {
   private protocol = '';
   /** When the page was last hidden (app in the background), for the resume decision. */
   private hiddenAt: number | null = null;
+  /** When the current tunnel last delivered an instruction (diagnostics). */
+  private lastRxAt = 0;
   /** Until this time, reconnects are immediate and the overlay stays hidden. */
   private quietUntil = 0;
   private resumeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -722,7 +725,9 @@ export class SessionController {
     const prev = this.machine.phase;
     this.machine = reduceSession(this.machine, e);
     const phase = this.machine.phase;
-    if (phase !== prev) this.logPhase(phase);
+    // A new phase object with the same meaning (the held connect after unlock, a network
+    // event while reconnecting) is not logged again: it read as a second reconnect.
+    if (phaseChanged(prev, phase)) this.logPhase(phase);
     if (phase !== prev && phase.kind === 'reconnecting' && e.type === 'closed') {
       if (phase.waitingForNetwork) {
         if (this.retryTimer) clearTimeout(this.retryTimer);
@@ -744,11 +749,14 @@ export class SessionController {
         break;
       case 'reconnecting':
         if (phase.waitingForNetwork) {
-          this.log('warn', `Connection lost; waiting for the network (attempt ${phase.attempt})`);
+          this.log(
+            'warn',
+            `Connection lost; waiting for the network (attempt ${phase.attempt}; ${this.appStateText()})`,
+          );
         } else {
           this.log(
             'warn',
-            `Connection lost; reconnect attempt ${phase.attempt} of ${phase.maxAttempts} in ${phase.delayMs} ms`,
+            `Connection lost; reconnect attempt ${phase.attempt} of ${phase.maxAttempts} in ${this.quiet() && phase.attempt === 1 ? 0 : phase.delayMs} ms (${this.appStateText()})`,
           );
         }
         break;
@@ -836,6 +844,13 @@ export class SessionController {
    * Hidden, or within a quiet window after returning to the app: a network drop is
    * reconnected at once and silently. (A clean close is never retried; see status.ts.)
    */
+  /** "foreground, shown" / "background, hidden" / "foreground, hidden" (DIAG: where the app was). */
+  private appStateText(): string {
+    const app = document.visibilityState === 'hidden' ? 'background' : 'foreground';
+    const online = isOnline() ? '' : ', offline';
+    return `${app}, session ${this.active ? 'shown' : 'hidden'}${online}`;
+  }
+
   private quiet(): boolean {
     return document.visibilityState === 'hidden' || Date.now() < this.quietUntil;
   }
@@ -847,7 +862,7 @@ export class SessionController {
     if (hold) {
       if (!this.gateHeld) {
         this.gateHeld = true;
-        this.log('info', 'Connect held until the app is unlocked');
+        this.log('info', `Connect held until the app is unlocked (${this.appStateText()})`);
         void hold.then(() => {
           this.gateHeld = false;
           if (!this.disposed) this.connect();
@@ -880,7 +895,10 @@ export class SessionController {
 
     tunnel.onerror = (status) => {
       if (!live()) return;
-      this.log('warn', `Tunnel error 0x${status.code.toString(16).padStart(4, '0')}`);
+      this.log(
+        'warn',
+        `Tunnel error 0x${status.code.toString(16).padStart(4, '0')} after ${Date.now() - this.lastRxAt} ms without an instruction (${this.appStateText()})`,
+      );
       this.dispatch({
         type: 'error',
         code: status.code,
@@ -890,7 +908,12 @@ export class SessionController {
     };
     tunnel.onstatechange = (state) => {
       if (!live()) return;
-      if (state === TunnelState.UNSTABLE) this.log('warn', 'Tunnel unstable (no data for a while)');
+      if (state === TunnelState.UNSTABLE) {
+        this.log(
+          'warn',
+          `Tunnel unstable (no instruction for ${Date.now() - this.lastRxAt} ms; ${this.appStateText()})`,
+        );
+      }
       if (state !== TunnelState.CLOSED) return;
       // Not by us and no error first: the server closed the tunnel cleanly (a `disconnect`,
       // or an administrator killing the connection, which closes with SUCCESS and no
@@ -1175,10 +1198,12 @@ export class SessionController {
   private countTraffic(tunnel: TunnelLike, live: () => boolean): void {
     this.stats = emptyStats();
     const stats = this.stats;
+    this.lastRxAt = Date.now();
     const inner = tunnel.oninstruction;
     if (inner) {
       tunnel.oninstruction = (opcode, args) => {
         if (live()) {
+          this.lastRxAt = Date.now();
           stats.rxInstr++;
           stats.rxBytes += instructionLength(opcode, args);
         }

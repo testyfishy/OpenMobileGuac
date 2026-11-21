@@ -370,6 +370,8 @@ export const es: Strings = {
     empty: 'Esta cuenta no tiene conexiones disponibles.',
     noResults: (q: string) => `Ninguna conexión coincide con «${q}».`,
     loadFailed: 'No se pudieron cargar las conexiones',
+    partialLoad: (sources: string) =>
+      `No se pudieron cargar algunas conexiones (${sources}). Desliza hacia abajo o pulsa Reintentar.`,
     inUse: (n: number) =>
       n === 1 ? '1 sesión activa en el servidor' : `${n} sesiones activas en el servidor`,
     inUseShort: 'En uso',
@@ -901,6 +903,7 @@ export const es: Strings = {
     locale: 'Idioma',
     userAgent: 'User agent',
     sessionsTitle: 'Sesiones',
+    network: 'Red',
     sessionsOpen: (n: number) => `${n} ${plural(n, 'abierta', 'abiertas')}`,
     sessionStatsUnavailable:
       'Las estadísticas en directo (fotogramas por segundo, bytes, ida y vuelta) aún no están disponibles desde la pantalla de sesión.',

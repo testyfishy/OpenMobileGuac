@@ -2,8 +2,10 @@ import type { PluginListenerHandle } from '@capacitor/core';
 
 /**
  * The JavaScript face of the app's own native plugin `PinnedTls` (SRV-8, docs/tls.md),
- * source in `app/plugins/omg-pinned-tls`. It is used **only** for servers whose
- * certificate the user pinned; everything else keeps the WebView and `CapacitorHttp`.
+ * source in `app/plugins/omg-pinned-tls`. `request` and the sockets are used **only** for
+ * servers whose certificate the user pinned. `systemRequest` (iOS) carries the other REST
+ * requests with the system's trust, to keep connections alive (`PooledNativeHttpClient`);
+ * the WebView keeps the tunnel to unpinned servers.
  *
  * Native code accepts a TLS connection only when the SHA-256 of the leaf certificate's DER
  * is one of `pins` (host-name and chain checks are replaced by that exact match; JS binds
@@ -29,11 +31,32 @@ export interface NativeTlsRequest {
   readonly pins: readonly string[];
 }
 
-export interface NativeTlsResponse {
+/** Connection facts native code may add to a response (iOS `URLSessionTaskMetrics`). */
+export interface NativeConnectionMetrics {
+  /** The request went over an already open connection (keep-alive). */
+  readonly reused?: boolean;
+  /** `h2`, `http/1.1`, ... */
+  readonly protocol?: string;
+  readonly dnsMs?: number;
+  readonly connectMs?: number;
+  readonly tlsMs?: number;
+}
+
+export interface NativeTlsResponse extends NativeConnectionMetrics {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
   /** Body as UTF-8 text ('' when empty). */
   readonly data: string;
+}
+
+/** `systemRequest`: like `NativeTlsRequest` without pins (the operating system's trust). */
+export interface NativeSystemRequest {
+  readonly url: string;
+  readonly method: string;
+  readonly headers: Readonly<Record<string, string>>;
+  /** Pre-encoded body; its `Content-Type` is in `headers`. */
+  readonly data?: string;
+  readonly timeoutMs: number;
 }
 
 export interface NativeSocketOpen {
@@ -75,6 +98,12 @@ export interface PinnedTlsPlugin {
    */
   inspect(options: { url: string; timeoutMs: number }): Promise<{ der: string }>;
   request(options: NativeTlsRequest): Promise<NativeTlsResponse>;
+  /**
+   * iOS: an http(s) request with the operating system's trust, on one long-lived URLSession
+   * per origin (connections are reused), never following a redirect. Android and native
+   * builds from before 1.0.1 reject with `UNIMPLEMENTED` (Capacitor's code).
+   */
+  systemRequest(options: NativeSystemRequest): Promise<NativeTlsResponse>;
   openSocket(options: NativeSocketOpen): Promise<void>;
   /** Sends each message as its own text frame, in order. */
   send(options: { id: string; messages: readonly string[] }): Promise<void>;

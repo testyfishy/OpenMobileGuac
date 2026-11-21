@@ -261,6 +261,43 @@ describe('GuacApi.getConnectionTree', () => {
     expect(tree.dataSources.map((d) => d.dataSource)).toEqual(['postgresql']);
   });
 
+  it('shows the data sources that loaded when another one fails, and lists it', async () => {
+    const http = new FakeHttpClient()
+      .on('GET', treeUrl('postgresql'), () => jsonResponse(200, treeJson))
+      .on('GET', treeUrl('postgresql-shared'), () => {
+        throw new HttpTransportError('timeout', treeUrl('postgresql-shared'), 'slow');
+      });
+    const tree = await new GuacApi(http).getConnectionTree(session);
+    expect(tree.dataSources.map((d) => d.dataSource)).toEqual(['postgresql']);
+    expect(tree.unavailable).toEqual(['postgresql-shared']);
+  });
+
+  it('does not wait long for a slow data source once one has answered', async () => {
+    const http = new FakeHttpClient()
+      .on('GET', treeUrl('postgresql'), () => jsonResponse(200, treeJson))
+      .on('GET', treeUrl('postgresql-shared'), () => new Promise<never>(() => undefined));
+    const tree = await new GuacApi(http).getConnectionTree(session, { secondaryGraceMs: 10 });
+    expect(tree.dataSources.map((d) => d.dataSource)).toEqual(['postgresql']);
+    expect(tree.unavailable).toEqual(['postgresql-shared']);
+  });
+
+  it('still fails when every data source failed, and on any expired sign-in', async () => {
+    const down = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      () => {
+        throw new HttpTransportError('unreachable', BASE_URL, 'down');
+      },
+    );
+    const info = await errorInfo(new GuacApi(down).getConnectionTree(session));
+    expect(info.kind).toBe('unreachable');
+    const mixed = new FakeHttpClient()
+      .on('GET', treeUrl('postgresql'), () => jsonResponse(200, treeJson))
+      .on('GET', treeUrl('postgresql-shared'), () => jsonResponse(403, permissionDeniedJson));
+    const err = await new GuacApi(mixed).getConnectionTree(session).catch((e: unknown) => e);
+    expect(isGuacApiError(err, 'session-expired')).toBe(true);
+  });
+
   it('reports an expired token (PERMISSION_DENIED) as session-expired', async () => {
     const http = new FakeHttpClient().on(
       'GET',

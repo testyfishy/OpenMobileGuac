@@ -38,6 +38,13 @@ export function useLaunch(): LaunchApi {
 }
 
 /** In a connection screen: open the pending connection once `tree` is loaded. */
+/** Whether a pending launch should wait: its data source is not in this tree (yet). */
+export function launchWaitsForTree(tree: ConnectionTree, dataSource: string | undefined): boolean {
+  const missing = tree.unavailable ?? [];
+  // No data source in the link: any missing one may hold it.
+  return dataSource === undefined ? missing.length > 0 : missing.includes(dataSource);
+}
+
 export function useConsumePendingLaunch(
   serverId: string,
   tree: ConnectionTree | undefined,
@@ -54,8 +61,11 @@ export function useConsumePendingLaunch(
     if (!tree) return;
     const p = launch.peek();
     if (!p || p.serverId !== serverId) return;
-    launch.take(serverId);
     const t = findTarget(tree, p.identifier, p.dataSource, p.type);
+    // Its data source did not load this time (slow or failed): wait for the next tree
+    // instead of saying the connection is gone.
+    if (!t && launchWaitsForTree(tree, p.dataSource)) return;
+    launch.take(serverId);
     if (t) latest.current.onTarget(t, p);
     else latest.current.onMissing();
   }, [tree, serverId, launch, version]);

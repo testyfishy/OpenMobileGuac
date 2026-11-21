@@ -2,12 +2,12 @@
 
 ## Summary
 
-| Server certificate | REST API | Session tunnel | What the user does |
-|---|---|---|---|
-| Publicly trusted, or a CA installed on the device | System path: `CapacitorHttp` (OS trust store) | WebView `WebSocket` | Nothing. Unchanged by SRV-8. |
-| Self-signed or private CA, not installed, **pinned** by the user | Native `PinnedTls` plugin | Native `PinnedTls` WebSocket (`NativeBridgeTunnel`) | Once: compare the fingerprint and tap "Trust this certificate for this server". |
-| Self-signed, not pinned | Fails with a certificate error | Fails | Shown the certificate and offered to pin it (native builds only). |
-| Web / dev build | Browser `fetch` | Browser `WebSocket` | Pinning is hidden; the browser decides. |
+| Server certificate                                               | REST API                                      | Session tunnel                                      | What the user does                                                              |
+| ---------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Publicly trusted, or a CA installed on the device                | System path: `CapacitorHttp` (OS trust store) | WebView `WebSocket`                                 | Nothing. Unchanged by SRV-8.                                                    |
+| Self-signed or private CA, not installed, **pinned** by the user | Native `PinnedTls` plugin                     | Native `PinnedTls` WebSocket (`NativeBridgeTunnel`) | Once: compare the fingerprint and tap "Trust this certificate for this server". |
+| Self-signed, not pinned                                          | Fails with a certificate error                | Fails                                               | Shown the certificate and offered to pin it (native builds only).               |
+| Web / dev build                                                  | Browser `fetch`                               | Browser `WebSocket`                                 | Pinning is hidden; the browser decides.                                         |
 
 The app **never** offers "ignore TLS errors", globally or per server, never trusts a host by
 name alone, and never applies a pin to another scheme, host or port.
@@ -26,7 +26,7 @@ Why the certificate and not its public key (SPKI):
   → SHA-256). Hashing the SPKI on iOS needs per-key-type ASN.1 headers around
   `SecKeyCopyExternalRepresentation`, which could not be tested without a Mac.
 - It is the value users can find and compare.
-- Cost: a renewed certificate is a *changed* certificate even when the key is kept, so the
+- Cost: a renewed certificate is a _changed_ certificate even when the key is kept, so the
   app asks again after every renewal (old vs new is shown). For self-signed home servers,
   which are renewed rarely and usually with a new key, that is acceptable.
 
@@ -50,7 +50,7 @@ Binding rules, all enforced in core and unit-tested (`tlsPinStorage.test.ts`):
   scheme change drops it (moving back does not restore it). A patch cannot set a pin.
 - Pins are per address: `setTlsPinForOrigin` updates every saved profile at that origin, so
   two profiles for one server never disagree. "Forget" removes it from all of them.
-- A certificate trusted while *adding* a server (no profile yet) is held in memory as
+- A certificate trusted while _adding_ a server (no profile yet) is held in memory as
   "pending" for that origin (15 minutes), used by the probe, and saved with the profile.
 
 ### Backups (AUDIT §6 item 1 applied to pins)
@@ -87,21 +87,23 @@ package has a root `Package.swift` whose package and library name equal the CLI'
 
 Methods (`core/tls/plugin.ts`):
 
-| Method | What it does |
-|---|---|
-| `inspect({ url })` | TCP connect + TLS handshake with SNI, records the leaf certificate, then aborts the handshake. **No HTTP request or application data is sent.** Returns base64 DER. |
-| `request({ url, method, headers, data, timeoutMs, pins })` | One HTTPS request, accepted only if the leaf's SHA-256 is in `pins`. Redirects are not followed. |
-| `openSocket({ id, url, protocols, pins })` | A `wss:` WebSocket with subprotocol `guacamole`, same pin rule. |
-| `send({ id, messages })` | One text frame per message, in order. Resolves when the frames are queued/sent (outbound backpressure). |
-| `ack({ id })` | JS processed the last `messages` event. |
-| `closeSocket({ id, code, reason })` | Closes. |
-| event `socket` | `open`, `messages` (a batch of frames), `close` (always last; `error` set for failures such as `PIN_MISMATCH`, never a clean 1000). |
+| Method                                                     | What it does                                                                                                                                                        |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inspect({ url })`                                         | TCP connect + TLS handshake with SNI, records the leaf certificate, then aborts the handshake. **No HTTP request or application data is sent.** Returns base64 DER. |
+| `request({ url, method, headers, data, timeoutMs, pins })` | One HTTPS request, accepted only if the leaf's SHA-256 is in `pins`. Redirects are not followed.                                                                    |
+| `openSocket({ id, url, protocols, pins })`                 | A `wss:` WebSocket with subprotocol `guacamole`, same pin rule.                                                                                                     |
+| `send({ id, messages })`                                   | One text frame per message, in order. Resolves when the frames are queued/sent (outbound backpressure).                                                             |
+| `ack({ id })`                                              | JS processed the last `messages` event.                                                                                                                             |
+| `closeSocket({ id, code, reason })`                        | Closes.                                                                                                                                                             |
+| event `socket`                                             | `open`, `messages` (a batch of frames), `close` (always last; `error` set for failures such as `PIN_MISMATCH`, never a clean 1000).                                 |
 
 Failure codes: `PIN_MISMATCH` (with the presented certificate), `TLS`, `TIMEOUT`,
 `UNREACHABLE`, `BAD_REQUEST`. JS never pattern-matches error text for these.
 
-- **iOS** (`PinnedTlsPlugin.swift`): one `URLSession` per request/socket with a delegate
-  that handles the server-trust challenge: only for the expected host and port, it hashes
+- **iOS** (`PinnedTlsPlugin.swift`): one long-lived `URLSession` per host, port and pin set
+  for REST requests (connections are reused; dropped after any failure), one per socket,
+  each with a delegate that handles the server-trust challenge: only for the expected host
+  and port, it hashes
   the leaf (`SecTrustCopyCertificateChain`, CryptoKit SHA-256) and answers `.useCredential`
   on a match, otherwise cancels. WebSocket: `URLSessionWebSocketTask`, max message 16 MiB.
   The app's `NSAllowsArbitraryLoads` (docs/release.md) is what lets a credential for a

@@ -1,5 +1,9 @@
 import { useMemo, useState, useSyncExternalStore } from 'react';
-import { describeWebView, parseWebView } from '../../core/diagnostics/deviceInfo.ts';
+import {
+  describeNetwork,
+  describeWebView,
+  parseWebView,
+} from '../../core/diagnostics/deviceInfo.ts';
 import {
   LOG_LEVELS,
   filterByLevel,
@@ -54,6 +58,7 @@ export function DiagnosticsScreen() {
       `${d.locale}: ${device.locale}`,
       `${d.userAgent}: ${device.ua}`,
       `${d.sessionsTitle}: ${sessions.state.sessions.length}`,
+      `${d.network}: ${describeNetwork(typeof navigator !== 'undefined' ? navigator : undefined, services.restPath())}`,
       '',
       formatLog(entries, { hideHosts, minLevel: level }),
     ].join('\n');
@@ -95,6 +100,15 @@ export function DiagnosticsScreen() {
             <div>
               <dt>{d.locale}</dt>
               <dd>{device.locale}</dd>
+            </div>
+            <div>
+              <dt>{d.network}</dt>
+              <dd>
+                {describeNetwork(
+                  typeof navigator !== 'undefined' ? navigator : undefined,
+                  services.restPath(),
+                )}
+              </dd>
             </div>
             <div>
               <dt>{d.sessionsTitle}</dt>

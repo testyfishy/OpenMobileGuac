@@ -49,6 +49,8 @@ import { TOKEN_HEADER } from './GuacApi.ts';
 
 export interface GuacAdminApiOptions {
   readonly timeoutMs?: number;
+  /** Marks every request as `background` (badges, permission lookups): `RequestCoordinator`. */
+  readonly background?: boolean;
 }
 
 /** Schema for one data source: everything the editors need to render forms. */
@@ -61,6 +63,7 @@ export interface DataSourceSchema {
 export class GuacAdminApi {
   private readonly http: HttpClient;
   private readonly timeoutMs: number | undefined;
+  private readonly background: boolean;
   /** Schema per `baseUrl|dataSource`. The schema is static per server deployment. */
   private readonly schemaCache = new Map<string, Promise<DataSourceSchema>>();
   /** Server translation tables per `baseUrl|language` (no token involved). */
@@ -69,6 +72,7 @@ export class GuacAdminApi {
   constructor(http: HttpClient, options: GuacAdminApiOptions = {}) {
     this.http = http;
     this.timeoutMs = options.timeoutMs;
+    this.background = options.background === true;
   }
 
   // ---- permissions ------------------------------------------------------------------------
@@ -456,9 +460,11 @@ export class GuacAdminApi {
   private async send(req: HttpRequest): Promise<HttpResponse> {
     let res: HttpResponse;
     try {
-      res = await this.http.request(
-        this.timeoutMs === undefined ? req : { ...req, timeoutMs: this.timeoutMs },
-      );
+      res = await this.http.request({
+        ...req,
+        ...(this.timeoutMs !== undefined ? { timeoutMs: this.timeoutMs } : {}),
+        ...(this.background ? { priority: 'background' as const } : {}),
+      });
     } catch (err) {
       if (err instanceof HttpTransportError) {
         const info: GuacErrorInfo =

@@ -163,6 +163,7 @@ describe('NativeHttpClient', () => {
       status: 200,
       headers: { 'content-type': 'application/json' },
       body: { a: 1 },
+      connection: { path: 'capacitor' },
     });
   });
 

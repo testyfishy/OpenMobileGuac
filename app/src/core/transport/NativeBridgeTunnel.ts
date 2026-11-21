@@ -1,4 +1,5 @@
 import type { PluginListenerHandle } from '@capacitor/core';
+import { logNativeSocketClose } from '../diagnostics/webSocketDiagnostics.ts';
 import type { NativeSocketEvent, PinnedTlsPlugin } from '../tls/plugin.ts';
 import {
   INTERNAL_DATA_OPCODE,
@@ -77,7 +78,10 @@ export class NativeSocketHub {
 
   private dispatch(event: NativeSocketEvent): void {
     const handler = this.handlers.get(event.id);
-    if (event.type === 'close') this.handlers.delete(event.id);
+    if (event.type === 'close') {
+      this.handlers.delete(event.id);
+      logNativeSocketClose(event);
+    }
     try {
       handler?.(event);
     } finally {

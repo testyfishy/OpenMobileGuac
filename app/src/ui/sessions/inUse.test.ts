@@ -8,6 +8,7 @@ import {
 import type { SessionTarget } from '../nav/navigation.ts';
 import type { AskInUse } from '../settings/settingsModel.ts';
 import {
+  badgeRefreshAllowed,
   askInUseToStore,
   decideTap,
   inUseCheckApplies,
@@ -380,5 +381,16 @@ describe('"since" label', () => {
     expect(sinceLabel(before, now, 'en-GB')).toContain('09:05');
     expect(sinceLabel(before, now, 'en-GB')).toContain('19');
     expect(sinceLabel(undefined, now)).toBe('');
+  });
+});
+
+describe('badgeRefreshAllowed', () => {
+  const base = { sessionShown: false, appActive: true, pageHidden: false, paneHidden: false };
+  it('only while the list can be seen', () => {
+    expect(badgeRefreshAllowed(base)).toBe(true);
+    expect(badgeRefreshAllowed({ ...base, sessionShown: true })).toBe(false);
+    expect(badgeRefreshAllowed({ ...base, appActive: false })).toBe(false);
+    expect(badgeRefreshAllowed({ ...base, pageHidden: true })).toBe(false);
+    expect(badgeRefreshAllowed({ ...base, paneHidden: true })).toBe(false);
   });
 });

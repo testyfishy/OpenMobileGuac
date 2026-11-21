@@ -31,6 +31,7 @@ function fakePlugin(presented: { der: string }) {
       }
       return { status: 200, headers: { 'Content-Type': 'application/json' }, data: '{"ok":1}' };
     }),
+    systemRequest: vi.fn(async () => ({ status: 200, headers: {}, data: '' })),
     openSocket: vi.fn(async () => undefined),
     send: vi.fn(async () => undefined),
     ack: vi.fn(async () => undefined),
@@ -256,6 +257,7 @@ describe('PinRoutingHttpClient', () => {
       status: 200,
       headers: { 'content-type': 'application/json' },
       body: { ok: 1 },
+      connection: { path: 'pinned' },
     });
     expect(system.calls).toHaveLength(1);
     expect(s.requests[0]).toEqual({
@@ -307,5 +309,23 @@ describe('first use after a publicly trusted certificate (pre-release review R2)
     await s.store.setSystemTrustSeenForOrigin(HOST, true);
     const seen = await s.tls.check(`${HOST}/guacamole`);
     expect(seen).toMatchObject({ kind: 'first-use', seenWithSystemTrust: true });
+  });
+});
+
+describe('pin lookups for a burst of requests', () => {
+  it('share one read of the profiles', async () => {
+    const s = await setup();
+    await s.store.add({ name: 'A', baseUrl: HOST });
+    const list = vi.spyOn(s.store, 'list');
+    const results = await Promise.all([
+      s.tls.pinsFor(`${HOST}/a`),
+      s.tls.pinsFor(`${HOST}/b`),
+      s.tls.pinsFor(`${HOST}/c`),
+    ]);
+    expect(results).toEqual([[], [], []]);
+    expect(list).toHaveBeenCalledTimes(1);
+    // A later request reads again (sees changes made meanwhile).
+    await s.tls.trust((await s.tls.check(HOST)).presented);
+    expect(await s.tls.pinsFor(`${HOST}/d`)).toEqual([s.shaA]);
   });
 });

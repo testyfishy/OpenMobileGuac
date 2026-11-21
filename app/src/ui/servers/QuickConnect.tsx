@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RecentEntry } from '../../core/storage/ProfileStore.ts';
 import { Icon } from '../components/Icon.tsx';
 import { InUseBadge, OpenBadge } from '../connections/ConnectionBrowser.tsx';
 import { isShareServerId } from '../services/shareSessions.ts';
-import { liveInAppCount, serverOnlyCount } from '../sessions/inUse.ts';
+import { badgeRefreshAllowed, liveInAppCount, serverOnlyCount } from '../sessions/inUse.ts';
 import { IN_USE_CHECK_TIMEOUT_MS } from '../sessions/inUseCheck.ts';
 import { protocolIcon, protocolLabel } from '../connections/treeView.ts';
 import type { SessionTarget } from '../nav/navigation.ts';
@@ -11,6 +11,7 @@ import { DEMO_PROFILE_ID } from '../integration/demoProfile.ts';
 import { useLaunch } from '../launch/LaunchContext.ts';
 import { useNav } from '../nav/NavContext.ts';
 import { useAppSettings, useProfilesVersion, useServices } from '../services/context.ts';
+import { onAppActiveChange } from '../services/native.ts';
 import { findOpenSession } from '../sessions/sessionModel.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { demoVisible } from '../settings/settingsModel.ts';
@@ -89,16 +90,41 @@ export function QuickConnect() {
   ]);
 
   // MUL-5 "In use" badges: only for servers the app is signed in to right now (never a
-  // sign-in just for a badge), shortly after the list or the open sessions change.
+  // sign-in just for a badge), shortly after the list or the open sessions change. Only while
+  // this list can be seen: not while a session or another screen covers it, nor in the
+  // background, so badge lookups never compete with a session or a sign-in. Background
+  // priority (RequestCoordinator): never ahead of a request someone waits for.
+  const sectionRef = useRef<HTMLElement>(null);
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  });
+  const badgeKey = items.map(itemKey).join('|');
+  const stackDepth = nav.state.stack.length;
+  const [appActive, setAppActive] = useState(true);
+  useEffect(() => {
+    const sub = onAppActiveChange(setAppActive);
+    return () => sub.dispose();
+  }, []);
   const [serverCounts, setServerCounts] = useState<ReadonlyMap<string, number>>(new Map());
   // A sign-in elsewhere in the app (or a sign-out) changes which servers can be asked.
   const [signIns, setSignIns] = useState(0);
   useEffect(() => services.auth.onSessionChange(() => setSignIns((n) => n + 1)), [services.auth]);
   useEffect(() => {
+    if (badgeKey === '') return undefined;
+    const allowed = (paneHidden: boolean) =>
+      badgeRefreshAllowed({
+        sessionShown: activeId !== null,
+        appActive,
+        pageHidden: document.visibilityState === 'hidden',
+        paneHidden,
+      });
+    if (!allowed(false)) return undefined;
     let live = true;
     const timer = setTimeout(() => {
+      if (!allowed(sectionRef.current?.closest('[hidden]') != null)) return;
       void Promise.all(
-        items.map(async (i) => {
+        itemsRef.current.map(async (i) => {
           const session =
             i.entry.ref.type === 'c' &&
             i.serverId !== DEMO_PROFILE_ID &&
@@ -107,7 +133,7 @@ export function QuickConnect() {
               : undefined;
           if (!session) return undefined;
           const n = await Promise.race([
-            services.admin
+            services.adminBackground
               .getActiveConnectionCount(session, i.entry.ref.dataSource, i.entry.ref.identifier)
               .catch(() => undefined),
             new Promise<undefined>((r) => setTimeout(() => r(undefined), IN_USE_CHECK_TIMEOUT_MS)),
@@ -122,7 +148,16 @@ export function QuickConnect() {
       live = false;
       clearTimeout(timer);
     };
-  }, [items, services.auth, services.admin, sessionCount, activeId, signIns]);
+  }, [
+    badgeKey,
+    services.auth,
+    services.adminBackground,
+    sessionCount,
+    activeId,
+    signIns,
+    appActive,
+    stackDepth,
+  ]);
 
   if (items.length === 0) return null;
 
@@ -153,7 +188,7 @@ export function QuickConnect() {
   };
 
   return (
-    <section className="list-section quick-connect" aria-labelledby="quick-title">
+    <section ref={sectionRef} className="list-section quick-connect" aria-labelledby="quick-title">
       <h2 id="quick-title" className="section-title">
         <Icon name="clock" size="1rem" /> {strings.servers.recentTitle}
       </h2>

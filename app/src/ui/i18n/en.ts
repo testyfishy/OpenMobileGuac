@@ -369,6 +369,8 @@ export const en = {
     empty: 'No connections are available to this account.',
     noResults: (q: string) => `No connections match “${q}”.`,
     loadFailed: 'Could not load connections',
+    partialLoad: (sources: string) =>
+      `Some connections could not be loaded (${sources}). Pull down or tap Retry to try again.`,
     inUse: (n: number) =>
       n === 1 ? '1 active session on the server' : `${n} active sessions on the server`,
     inUseShort: 'In use',
@@ -884,6 +886,7 @@ export const en = {
     locale: 'Language',
     userAgent: 'User agent',
     sessionsTitle: 'Sessions',
+    network: 'Network',
     sessionsOpen: (n: number) => `${n} open`,
     sessionStatsUnavailable:
       'Live statistics (frame rate, bytes, round trip) are not available from the session screen yet.',

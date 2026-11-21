@@ -4,8 +4,14 @@ import CryptoKit
 import Security
 
 // PinnedTls (SRV-8, docs/tls.md): HTTPS requests and WebSockets that accept exactly one
-// user-pinned certificate. JS side: app/src/core/tls/plugin.ts. Used only for servers the
-// user pinned; every other connection stays on the WebView / CapacitorHttp.
+// user-pinned certificate. JS side: app/src/core/tls/plugin.ts. `request` and `openSocket`
+// are used only for servers the user pinned.
+//
+// `systemRequest` (iOS only): REST requests with the operating system's normal trust, on one
+// long-lived URLSession per origin that never follows a redirect. CapacitorHttp with
+// `disableRedirects` builds a new URLSession for every request, so every call paid a fresh
+// TCP + TLS handshake; this keeps connections alive like URLSession.shared without
+// replaying a token or password to a redirect target (docs/AUDIT.md §7).
 //
 // Only the plugin class may carry an Objective-C name annotation with a parenthesised name:
 // `npx cap sync` registers the first such annotation of every Swift file in this package as
@@ -18,6 +24,7 @@ public class PinnedTlsPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "inspect", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "request", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "systemRequest", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openSocket", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "send", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "ack", returnType: CAPPluginReturnPromise),
@@ -27,6 +34,10 @@ public class PinnedTlsPlugin: CAPPlugin, CAPBridgedPlugin {
     /// All socket state lives on this serial queue (also every URLSession's delegate queue).
     let queue = DispatchQueue(label: "io.github.testyfishy.omg.pinnedtls")
     private var sockets: [String: PinnedSocket] = [:]
+    /// Long-lived REST sessions (keep-alive), keyed by trust mode, origin and pin set. Only
+    /// touched on `queue`. A session validated under one pin set never serves another one,
+    /// nor system trust.
+    private var restSessions: [String: RestSession] = [:]
 
     // MARK: - inspect
 
@@ -67,6 +78,99 @@ public class PinnedTlsPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("An https URL and pins are required", Failure.badRequest)
             return
         }
+        let request = PinnedTlsPlugin.restRequest(call, url: url)
+        let key = "pin|\(endpoint.host)|\(endpoint.port)|\(pins.sorted().joined(separator: ","))"
+        queue.async {
+            // One session per endpoint + pin set, reused (keep-alive). Every new connection
+            // still passes the pin check in `PinDelegate`.
+            let rest = self.restSession(key) {
+                let delegate = PinDelegate(endpoint: endpoint, pins: pins, inspectOnly: false)
+                return RestSession(session: self.makeSession(delegate: delegate, timeout: PinnedTlsPlugin.sessionTimeout),
+                                   metrics: delegate.metrics, pinDelegate: delegate)
+            }
+            self.run(rest, key: key, request: request, call: call, cookies: false)
+        }
+    }
+
+    // MARK: - systemRequest (iOS: REST with system trust and connection reuse)
+
+    @objc func systemRequest(_ call: CAPPluginCall) {
+        guard let urlString = call.getString("url"),
+              let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              let rawHost = url.host, !rawHost.isEmpty else {
+            call.reject("An http or https URL is required", Failure.badRequest)
+            return
+        }
+        let host = Endpoint.normalize(rawHost)
+        let port = url.port ?? (scheme == "https" ? 443 : 80)
+        let request = PinnedTlsPlugin.restRequest(call, url: url)
+        let key = "sys|\(scheme)|\(host)|\(port)"
+        queue.async {
+            let rest = self.restSession(key) {
+                let delegate = SystemDelegate()
+                return RestSession(session: self.makeSystemSession(delegate: delegate),
+                                   metrics: delegate.metrics, pinDelegate: nil)
+            }
+            self.run(rest, key: key, request: request, call: call, cookies: true)
+        }
+    }
+
+    /// Called on `queue`.
+    private func restSession(_ key: String, make: () -> RestSession) -> RestSession {
+        if let existing = restSessions[key] { return existing }
+        if restSessions.count >= 16 {
+            for (_, old) in restSessions { old.session.finishTasksAndInvalidate() }
+            restSessions.removeAll()
+        }
+        let created = make()
+        restSessions[key] = created
+        return created
+    }
+
+    /// Called on `queue`. A session that failed is dropped (its in-flight tasks finish), so a
+    /// stale connection after a network change, or a pin mismatch, never sticks.
+    private func evict(_ key: String, _ rest: RestSession) {
+        guard let current = restSessions[key], current === rest else { return }
+        restSessions.removeValue(forKey: key)
+        rest.session.finishTasksAndInvalidate()
+    }
+
+    /// Called on `queue`.
+    private func run(_ rest: RestSession, key: String, request: URLRequest, call: CAPPluginCall, cookies: Bool) {
+        let ref = TaskRef()
+        let task = rest.session.dataTask(with: request) { data, response, error in
+            // On the session's delegate queue, whose underlying queue is `queue`.
+            let metrics = rest.metrics.take(ref.id)
+            guard error == nil, let http = response as? HTTPURLResponse else {
+                self.evict(key, rest)
+                if let delegate = rest.pinDelegate {
+                    PinnedTlsPlugin.reject(call, error: error, delegate: delegate)
+                } else {
+                    let code = Failure.classifyUrlError(error)
+                    call.reject(error?.localizedDescription ?? code, code, error, [:])
+                }
+                return
+            }
+            if cookies {
+                // What CapacitorHttp does with a response's cookies (shared store, then the WebView).
+                HttpRequestHandler.setCookiesFromResponse(http, self.bridge?.config)
+            }
+            var headers: [String: String] = [:]
+            for (key, value) in http.allHeaderFields {
+                if let k = key as? String { headers[k] = "\(value)" }
+            }
+            let text = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
+            var result: [String: Any] = ["status": http.statusCode, "headers": headers, "data": text]
+            for (k, v) in metrics { result[k] = v }
+            call.resolve(result)
+        }
+        ref.id = task.taskIdentifier
+        task.resume()
+    }
+
+    /// The URLRequest for `request` / `systemRequest`: method, headers, body, timeout, no cache.
+    static func restRequest(_ call: CAPPluginCall, url: URL) -> URLRequest {
         let timeout = PinnedTlsPlugin.timeout(call, 15_000)
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.httpMethod = (call.getString("method") ?? "GET").uppercased()
@@ -78,23 +182,11 @@ public class PinnedTlsPlugin: CAPPlugin, CAPBridgedPlugin {
         if let data = call.getString("data"), request.httpMethod != "GET", request.httpMethod != "HEAD" {
             request.httpBody = Data(data.utf8)
         }
-        let delegate = PinDelegate(endpoint: endpoint, pins: pins, inspectOnly: false)
-        let session = makeSession(delegate: delegate, timeout: timeout)
-        let task = session.dataTask(with: request) { data, response, error in
-            session.finishTasksAndInvalidate()
-            guard error == nil, let http = response as? HTTPURLResponse else {
-                PinnedTlsPlugin.reject(call, error: error, delegate: delegate)
-                return
-            }
-            var headers: [String: String] = [:]
-            for (key, value) in http.allHeaderFields {
-                if let k = key as? String { headers[k] = "\(value)" }
-            }
-            let text = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
-            call.resolve(["status": http.statusCode, "headers": headers, "data": text])
-        }
-        task.resume()
+        return request
     }
+
+    /// Idle timeout of a shared REST session; each request carries its own (shorter) one.
+    static let sessionTimeout: TimeInterval = 120
 
     // MARK: - sockets
 
@@ -182,6 +274,19 @@ public class PinnedTlsPlugin: CAPPlugin, CAPBridgedPlugin {
         return URLSession(configuration: config, delegate: delegate, delegateQueue: delegateQueue)
     }
 
+    /// Like CapacitorHttp's session (default configuration, shared cookie store), minus the
+    /// URL cache, and with a delegate that refuses every redirect.
+    private func makeSystemSession(delegate: SystemDelegate) -> URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = PinnedTlsPlugin.sessionTimeout
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let delegateQueue = OperationQueue()
+        delegateQueue.underlyingQueue = queue
+        delegateQueue.maxConcurrentOperationCount = 1
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: delegateQueue)
+    }
+
     static func timeout(_ call: CAPPluginCall, _ defaultMs: Int) -> TimeInterval {
         let ms = min(max(call.getInt("timeoutMs") ?? defaultMs, 1_000), 120_000)
         return TimeInterval(ms) / 1000
@@ -255,6 +360,11 @@ enum Failure {
 
     static func classify(_ error: Error?, delegate: PinDelegate) -> String {
         if delegate.mismatch { return pinMismatch }
+        return classifyUrlError(error)
+    }
+
+    /// The code for a URLError, without any pin state (system trust).
+    static func classifyUrlError(_ error: Error?) -> String {
         guard let urlError = error as? URLError else { return unreachable }
         switch urlError.code {
         case .timedOut:
@@ -279,6 +389,8 @@ final class PinDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate, U
     /// The server presented a certificate that is not pinned.
     private(set) var mismatch = false
     weak var socket: PinnedSocket?
+    /// Connection metrics of REST tasks (diagnostics only).
+    let metrics = TaskMetrics()
 
     init(endpoint: Endpoint, pins: Set<String>, inspectOnly: Bool) {
         self.endpoint = endpoint
@@ -314,6 +426,10 @@ final class PinDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate, U
         completionHandler(nil)
     }
 
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        self.metrics.record(task.taskIdentifier, metrics)
+    }
+
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         socket?.opened(protocol: `protocol`)
     }
@@ -335,6 +451,67 @@ final class PinDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate, U
         } else {
             socket.finish(code: 1006, reason: "", error: Failure.unreachable)
         }
+    }
+}
+
+/// Session delegate for `systemRequest`: the operating system's trust (no challenge
+/// handler, so the default evaluation applies) and no redirects.
+final class SystemDelegate: NSObject, URLSessionTaskDelegate {
+    let metrics = TaskMetrics()
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        self.metrics.record(task.taskIdentifier, metrics)
+    }
+}
+
+/// A long-lived REST session and what its delegate collects.
+final class RestSession {
+    let session: URLSession
+    let metrics: TaskMetrics
+    /// Set for pinned sessions (failure classification, presented certificate).
+    let pinDelegate: PinDelegate?
+
+    init(session: URLSession, metrics: TaskMetrics, pinDelegate: PinDelegate?) {
+        self.session = session
+        self.metrics = metrics
+        self.pinDelegate = pinDelegate
+    }
+}
+
+/// The identifier of a task, set right after it is created (read in its completion handler).
+final class TaskRef {
+    var id: Int = -1
+}
+
+/// Per-task connection facts for the diagnostics log: whether the connection was reused,
+/// the protocol, and DNS / connect / TLS times. Best effort; only touched on the plugin queue.
+final class TaskMetrics {
+    private var byTask: [Int: [String: Any]] = [:]
+
+    func record(_ id: Int, _ metrics: URLSessionTaskMetrics) {
+        guard let t = metrics.transactionMetrics.last else { return }
+        var out: [String: Any] = ["reused": t.isReusedConnection]
+        if let proto = t.networkProtocolName { out["protocol"] = proto }
+        if let ms = TaskMetrics.ms(t.domainLookupStartDate, t.domainLookupEndDate) { out["dnsMs"] = ms }
+        if let ms = TaskMetrics.ms(t.connectStartDate, t.connectEndDate) { out["connectMs"] = ms }
+        if let ms = TaskMetrics.ms(t.secureConnectionStartDate, t.secureConnectionEndDate) { out["tlsMs"] = ms }
+        // Metrics that arrive after their task completed are never taken: keep this bounded.
+        if byTask.count > 64 { byTask.removeAll() }
+        byTask[id] = out
+    }
+
+    func take(_ id: Int) -> [String: Any] {
+        return byTask.removeValue(forKey: id) ?? [:]
+    }
+
+    private static func ms(_ start: Date?, _ end: Date?) -> Int? {
+        guard let s = start, let e = end else { return nil }
+        return Int((e.timeIntervalSince(s) * 1000).rounded())
     }
 }
 

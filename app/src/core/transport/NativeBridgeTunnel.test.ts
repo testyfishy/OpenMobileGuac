@@ -34,6 +34,7 @@ function fakeBridge() {
   const plugin: PinnedTlsPlugin = {
     inspect: async () => ({ der: '' }),
     request: async () => ({ status: 200, headers: {}, data: '' }),
+    systemRequest: async () => ({ status: 200, headers: {}, data: '' }),
     openSocket: vi.fn(async (o: NativeSocketOpen) => {
       opened.push(o);
     }),

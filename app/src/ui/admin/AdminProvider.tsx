@@ -31,28 +31,34 @@ const AdminLayer = lazy(() => import('./AdminLayer.tsx').then((m) => ({ default:
 export function AdminProvider({
   session,
   tree,
+  reloadKey = 0,
   onChanged,
   children,
 }: {
   session: AuthSession | undefined;
   tree: ConnectionTree | undefined;
+  /** Changes on a loud refresh (the user asked): permissions are read again. */
+  reloadKey?: number;
   onChanged: () => void;
   children: ReactNode;
 }) {
-  const { admin: api } = useServices();
+  const { admin: api, adminBackground } = useServices();
   const [perms, setPerms] = useState<ReadonlyMap<string, PermissionSet>>(new Map());
   const [denied, setDenied] = useState<ReadonlySet<string>>(new Set());
   const [notice, setNotice] = useState(false);
   const [action, setAction] = useState<AdminAction | null>(null);
 
-  // Reload permissions whenever the tree is (re)loaded; a refresh also clears any 403 state.
+  // Load permissions once per sign-in and set of data sources, and again on a loud refresh
+  // (which also clears any 403 state). Not on the quiet reload after returning from a session:
+  // that only updates the "In use" badges. As a background request, it never delays the list.
+  const sourcesKey = tree ? JSON.stringify(tree.dataSources.map((d) => d.dataSource)) : undefined;
   useEffect(() => {
-    if (!session || !tree) return undefined;
+    if (!session || sourcesKey === undefined) return undefined;
     let live = true;
-    const sources = tree.dataSources.map((d) => d.dataSource);
+    const sources = JSON.parse(sourcesKey) as string[];
     void Promise.all(
       sources.map((ds) =>
-        api.getEffectivePermissions(session, ds).then(
+        adminBackground.getEffectivePermissions(session, ds).then(
           (p) => [ds, withoutRootUpdate(p)] as const,
           // Not supported, refused or unreachable: no management in that data source.
           () => undefined,
@@ -69,7 +75,7 @@ export function AdminProvider({
     return () => {
       live = false;
     };
-  }, [api, session, tree]);
+  }, [adminBackground, session, sourcesKey, reloadKey]);
 
   const markDenied = useCallback((ds: string) => {
     setDenied((d) => new Set([...d, ds]));

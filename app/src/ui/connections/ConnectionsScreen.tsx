@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { isGuacApiError, type GuacErrorInfo } from '../../core/api/errors.ts';
 import { FieldType, type FieldDescriptor } from '../../core/models/ApiErrorBody.ts';
-import type { ConnectionTree } from '../../core/models/Connection.ts';
+import { keepUnavailable, quietMerge, type ConnectionTree } from '../../core/models/Connection.ts';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import {
   findDuoRedirect,
@@ -18,7 +18,7 @@ import { authFlowReducer, initialAuthFlow, isBusy } from '../auth/authFlow.ts';
 import { HttpWarningDialog } from '../auth/HttpWarningDialog.tsx';
 import { LoginForm } from '../auth/LoginForm.tsx';
 import { runSso, ssoAvailable } from '../auth/ssoFlow.ts';
-import { ErrorBanner, Spinner } from '../components/Feedback.tsx';
+import { ErrorBanner, InfoBanner, Spinner } from '../components/Feedback.tsx';
 import { IconButton, Screen } from '../components/Screen.tsx';
 import { PullToRefresh } from '../components/PullToRefresh.tsx';
 import { describeError, type UiError } from '../errors/errorMessages.ts';
@@ -77,6 +77,12 @@ export function ConnectionsScreen({ serverId }: { serverId: string }) {
   );
 }
 
+/**
+ * Once one data source has answered, how long the list waits for the others before it shows
+ * (the late ones are named in a notice with Retry).
+ */
+const SECONDARY_GRACE_MS = 4000;
+
 /** The last tree load. `nonce` identifies the request it answers; a newer request = loading. */
 interface TreeState {
   readonly nonce: number;
@@ -101,6 +107,8 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   const [flow, dispatch] = useReducer(authFlowReducer, undefined, initialAuthFlow);
   const [tree, setTree] = useState<TreeState>({ nonce: 0 });
   const [treeNonce, setTreeNonce] = useState(1);
+  /** Bumped for a quiet tree reload (no spinner): after a session, or for a late data source. */
+  const [quietNonce, setQuietNonce] = useState(0);
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState<ServerOptions>(DEFAULT_SERVER_OPTIONS);
   // Sign-in providers: a REDIRECT field (the SSO extension decides the sign-in) or the
@@ -407,9 +415,13 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
     if (!session) return undefined;
     let live = true;
     const nonce = treeNonce;
-    services.api.getConnectionTree(session).then(
+    services.api.getConnectionTree(session, { secondaryGraceMs: SECONDARY_GRACE_MS }).then(
       (result) => {
-        if (live) setTree({ nonce, tree: result });
+        if (!live) return;
+        setTree((t) => ({ nonce, tree: keepUnavailable(t.tree, result) }));
+        // A data source that was only slow: one quiet reload picks it up (the coordinator
+        // shares the request still in flight) and clears the notice when it arrives.
+        if (result.unavailable && result.unavailable.length > 0) setQuietNonce((n) => n + 1);
       },
       (err: unknown) => {
         if (!live) return;
@@ -434,7 +446,6 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   // gone on the server. No spinner, and a failure keeps the list as it was.
   const shownId = sessions.state.activeId;
   const openCount = sessions.state.sessions.length;
-  const [quietNonce, setQuietNonce] = useState(0);
   const firstSessionsChange = useRef(true);
   useEffect(() => {
     if (firstSessionsChange.current) {
@@ -451,9 +462,13 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
     if (!session) return undefined;
     let live = true;
     const nonce = treeNonce;
+    // Quiet: nobody waits on it, so it waits for every data source.
     services.api.getConnectionTree(session).then(
       (result) => {
-        if (live) setTree((t) => (t.nonce === nonce && t.tree ? { ...t, tree: result } : t));
+        if (live)
+          setTree((t) =>
+            t.nonce === nonce && t.tree ? { ...t, tree: quietMerge(t.tree, result) } : t,
+          );
       },
       () => undefined,
     );
@@ -534,6 +549,14 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
               ) : null}
             </ErrorBanner>
           ) : null}
+          {tree.tree?.unavailable && tree.tree.unavailable.length > 0 && !loadingTree ? (
+            <InfoBanner tone="warning">
+              <p>{strings.connections.partialLoad(tree.tree.unavailable.join(', '))}</p>
+              <button type="button" className="btn btn-small" onClick={refresh}>
+                {strings.common.retry}
+              </button>
+            </InfoBanner>
+          ) : null}
           {tree.tree ? (
             <ConnectionsPanel
               serverId={profile.id}
@@ -610,7 +633,7 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   );
   // Connection management (ui/admin): offered only where the account has the permissions.
   return (
-    <AdminProvider session={session} tree={tree.tree} onChanged={refresh}>
+    <AdminProvider session={session} tree={tree.tree} reloadKey={treeNonce} onChanged={refresh}>
       {screen}
     </AdminProvider>
   );

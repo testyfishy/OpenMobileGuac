@@ -256,7 +256,7 @@ export class AuthService {
       const session = await this.api.resumeSession(profile, token);
       this.sessions.set(profile.id, session);
       this.log?.info('auth', 'stored session resumed');
-      await this.noteSystemTrust(profile);
+      void this.noteSystemTrust(profile);
       this.emit(profile.id);
       return session;
     } catch (err) {
@@ -297,7 +297,7 @@ export class AuthService {
       }
       throw err;
     }
-    await this.noteSystemTrust(profile);
+    void this.noteSystemTrust(profile);
     await this.adopt(profile.id, session);
     if (!this.virtualPasswords.has(profile.id)) {
       if (req.remember) {
@@ -326,7 +326,7 @@ export class AuthService {
   ): Promise<AuthSession> {
     await this.ready();
     const session = await this.api.loginWithParameters(profile, parameters);
-    await this.noteSystemTrust(profile);
+    void this.noteSystemTrust(profile);
     await this.adopt(profile.id, session);
     return session;
   }
@@ -616,7 +616,9 @@ export class AuthService {
   /**
    * A sign-in over https with the operating system's trust (no pin for that address) worked:
    * remember it per address, so a self-signed certificate there later gets the stronger
-   * warning (`ServerProfile.systemTrustSeen`). Best effort.
+   * warning (`ServerProfile.systemTrustSeen`). Best effort, and not awaited by sign-in: the
+   * profile write is queued synchronously (so later reads see it) but the sign-in does not
+   * wait behind other profile writes.
    */
   private async noteSystemTrust(profile: Pick<ServerProfile, 'id' | 'baseUrl'>): Promise<void> {
     const origin = pinOrigin(profile.baseUrl);

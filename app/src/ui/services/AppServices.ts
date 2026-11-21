@@ -2,6 +2,8 @@ import { GuacAdminApi } from '../../core/api/GuacAdminApi.ts';
 import { GuacApi } from '../../core/api/GuacApi.ts';
 import { Logger } from '../../core/diagnostics/log.ts';
 import { LoggingHttpClient } from '../../core/diagnostics/LoggingHttpClient.ts';
+import { RequestCoordinator } from '../../core/http/RequestCoordinator.ts';
+import { PooledNativeHttpClient } from '../../core/http/PooledNativeHttpClient.ts';
 import { LockService } from '../lock/LockService.ts';
 import type { HttpClient } from '../../core/http/HttpClient.ts';
 import {
@@ -41,6 +43,8 @@ export interface AppServices {
   readonly probeApi: GuacApi;
   /** Connection management (docs/protocol-notes.md §8). */
   readonly admin: GuacAdminApi;
+  /** The same, for requests nothing on screen waits for (`priority: background`). */
+  readonly adminBackground: GuacAdminApi;
   readonly auth: AuthService;
   readonly settings: SettingsStore;
   readonly devServer: DevServer | undefined;
@@ -56,6 +60,8 @@ export interface AppServices {
   readonly backgroundClock: BackgroundClock;
   /** SRV-11: remembered answers to the remote computer's sign-in prompt. */
   readonly connectionSecrets: ConnectionSecrets;
+  /** How REST requests go out right now, for the diagnostics report. */
+  readonly restPath: () => string;
 }
 
 /**
@@ -110,12 +116,31 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
   void profiles.purgeLegacyThumbnails();
   // SRV-8: a server with a trusted (pinned) certificate uses the native TLS path; every
   // other request goes to the system client unchanged (docs/tls.md).
-  const tls = new TlsTrustService({ plugin: getPinnedTlsPlugin(), store: profiles });
+  const pinnedTls = getPinnedTlsPlugin();
+  const tls = new TlsTrustService({ plugin: pinnedTls, store: profiles });
   void tls.refresh().catch(() => undefined);
-  const http = new LoggingHttpClient(overrides.http ?? tls.wrapHttpClient(createHttpClient()), log);
+  // iOS: REST on one long-lived native session per server (connection reuse), falling back
+  // to CapacitorHttp when the native method is missing.
+  const system = createHttpClient(
+    {},
+    pinnedTls
+      ? {
+          plugin: pinnedTls,
+          onFallback: (why) =>
+            log.warn('http', `native connection pool unavailable (${why}): using CapacitorHttp`),
+        }
+      : undefined,
+  );
+  // Coordinator outside the logger: the log shows each request that reached the network.
+  const http = new RequestCoordinator(
+    new LoggingHttpClient(overrides.http ?? tls.wrapHttpClient(system), log),
+    { log },
+  );
   const api = new GuacApi(http, { timeoutMs: 20_000 });
   const probeApi = new GuacApi(http, { timeoutMs: 6_000 });
   const admin = new GuacAdminApi(http, { timeoutMs: 20_000 });
+  // Badges and permission lookups: never ahead of sign-in, the list or a tunnel.
+  const adminBackground = new GuacAdminApi(http, { timeoutMs: 20_000, background: true });
   const auth = new AuthService(api, secure, profiles, log, kv);
   // SRV-8 (review R2): a sign-in counts as "seen with system trust" only without a pin.
   auth.setPinnedCheck((url) => tls.pinFor(url) !== undefined);
@@ -154,6 +179,7 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
     api,
     probeApi,
     admin,
+    adminBackground,
     auth,
     settings,
     devServer,
@@ -163,5 +189,15 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
     tls,
     backgroundClock,
     connectionSecrets,
+    restPath: () =>
+      overrides.http
+        ? 'test client'
+        : system instanceof PooledNativeHttpClient
+          ? system.pooled
+            ? 'native connection pool (keep-alive)'
+            : 'CapacitorHttp (native pool unavailable)'
+          : native
+            ? 'CapacitorHttp'
+            : 'fetch',
   };
 }

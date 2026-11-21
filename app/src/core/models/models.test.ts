@@ -8,7 +8,14 @@ import {
 } from '../testing/fixtures.ts';
 import { parseApiErrorBody } from './ApiErrorBody.ts';
 import { parseAuthSession } from './AuthSession.ts';
-import { flattenConnections, parseConnection, parseConnectionGroup } from './Connection.ts';
+import {
+  flattenConnections,
+  keepUnavailable,
+  quietMerge,
+  parseConnection,
+  parseConnectionGroup,
+  type DataSourceTree,
+} from './Connection.ts';
 import { ModelParseError } from './json.ts';
 import { parseServerProfile } from './ServerProfile.ts';
 
@@ -226,5 +233,58 @@ describe('parseServerProfile', () => {
     expect(() => parseServerProfile({ ...valid, baseUrl: 'javascript:alert(1)' })).toThrow(/http/);
     expect(() => parseServerProfile({ ...valid, baseUrl: 'not a url' })).toThrow(/valid URL/);
     expect(() => parseServerProfile({ ...valid, id: '' })).toThrow(/id/);
+  });
+});
+
+describe('keepUnavailable', () => {
+  const ds = (name: string, marker: string): DataSourceTree => ({
+    dataSource: name,
+    root: {
+      identifier: 'ROOT',
+      name: marker,
+      dataSource: name,
+      type: 'ORGANIZATIONAL',
+      childConnections: [],
+      childGroups: [],
+      attributes: {},
+    } as unknown as DataSourceTree['root'],
+  });
+
+  it('keeps the previous tree of a data source that could not be loaded', () => {
+    const prev = { dataSources: [ds('a', 'old a'), ds('b', 'old b')] };
+    const next = { dataSources: [ds('a', 'new a')], unavailable: ['b'] };
+    const merged = keepUnavailable(prev, next);
+    expect(merged.dataSources.map((d) => [d.dataSource, d.root.name])).toEqual([
+      ['a', 'new a'],
+      ['b', 'old b'],
+    ]);
+    expect(merged.unavailable).toEqual(['b']);
+  });
+
+  it('changes nothing for a full load or without a previous tree', () => {
+    const next = { dataSources: [ds('a', 'new')] };
+    expect(keepUnavailable({ dataSources: [ds('a', 'old'), ds('b', 'old')] }, next)).toBe(next);
+    const partial = { dataSources: [ds('b', 'new')], unavailable: ['a'] };
+    expect(keepUnavailable(undefined, partial)).toBe(partial);
+    const order = keepUnavailable({ dataSources: [ds('a', 'old')] }, partial);
+    expect(order.dataSources.map((d) => d.dataSource)).toEqual(['a', 'b']);
+  });
+});
+
+describe('quietMerge', () => {
+  const ds = (name: string): DataSourceTree =>
+    ({ dataSource: name, root: { identifier: 'ROOT' } }) as unknown as DataSourceTree;
+  it('keeps rows but never raises the notice by itself', () => {
+    const prev = { dataSources: [ds('a'), ds('b')] };
+    const quiet = quietMerge(prev, { dataSources: [ds('a')], unavailable: ['b'] });
+    expect(quiet.dataSources.map((d) => d.dataSource)).toEqual(['a', 'b']);
+    expect(quiet.unavailable).toBeUndefined();
+  });
+  it('clears the notice once the late data source loads, and keeps it while it is still missing', () => {
+    const prev = { dataSources: [ds('a')], unavailable: ['b'] };
+    expect(quietMerge(prev, { dataSources: [ds('a'), ds('b')] }).unavailable).toBeUndefined();
+    expect(quietMerge(prev, { dataSources: [ds('a')], unavailable: ['b'] }).unavailable).toEqual([
+      'b',
+    ]);
   });
 });

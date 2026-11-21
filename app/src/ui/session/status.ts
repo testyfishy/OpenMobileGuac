@@ -451,3 +451,20 @@ export function tunnelErrorMessage(code: number, serverMessage?: string): string
   if (code === STATUS.UPSTREAM_UNAVAILABLE) return sessionStrings.status.tunnelClosed;
   return statusMessage(code, serverMessage);
 }
+
+/**
+ * Whether a phase change is worth a log line: another kind, or (reconnecting) another attempt
+ * or network wait. A fresh object with the same meaning, as `connect` makes for a held
+ * reconnect once the app is unlocked, is not a new event.
+ */
+export function phaseChanged(prev: SessionPhase, next: SessionPhase): boolean {
+  if (prev === next) return false;
+  if (prev.kind !== next.kind) return true;
+  if (prev.kind === 'reconnecting' && next.kind === 'reconnecting') {
+    return (
+      prev.attempt !== next.attempt ||
+      (prev.waitingForNetwork === true) !== (next.waitingForNetwork === true)
+    );
+  }
+  return true;
+}

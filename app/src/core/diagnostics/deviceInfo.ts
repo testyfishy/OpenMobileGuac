@@ -42,3 +42,33 @@ export function describeWebView(info: WebViewInfo): string {
           : 'Unknown';
   return info.version ? `${name} ${info.version}` : name;
 }
+
+/** The part of `navigator` the network summary reads (Network Information API is optional). */
+export interface NavigatorNetworkLike {
+  readonly onLine?: boolean;
+  readonly connection?: {
+    readonly type?: string;
+    readonly effectiveType?: string;
+    readonly rtt?: number;
+    readonly downlink?: number;
+  };
+}
+
+/**
+ * One line for the top of an exported log: online state, the connection type when the
+ * WebView reports it (Android Chrome does; WKWebView does not), and how REST requests go out.
+ */
+export function describeNetwork(nav: NavigatorNetworkLike | undefined, restPath: string): string {
+  const parts: string[] = [nav?.onLine === false ? 'offline' : 'online'];
+  const c = nav?.connection;
+  if (c && (c.type || c.effectiveType)) {
+    const kind = [c.type, c.effectiveType].filter(Boolean).join('/');
+    const rtt = typeof c.rtt === 'number' ? `, rtt ~${c.rtt} ms` : '';
+    const down = typeof c.downlink === 'number' ? `, ~${c.downlink} Mbit/s` : '';
+    parts.push(`${kind}${rtt}${down}`);
+  } else {
+    parts.push('connection type not reported by this WebView');
+  }
+  parts.push(`REST: ${restPath}`);
+  return parts.join('; ');
+}

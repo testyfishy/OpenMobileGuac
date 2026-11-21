@@ -18,7 +18,7 @@ import { ModelParseError, isRecord } from '../models/json.ts';
 import type { ServerProfile } from '../models/ServerProfile.ts';
 import { ssoProvidersFromPatches, type SsoRedirect } from '../sso/sso.ts';
 import { joinUrl, normalizeServerUrl, type ServerUrlCandidate } from '../url/normalizeServerUrl.ts';
-import { GuacApiError, errorFromApiBody, type GuacErrorInfo } from './errors.ts';
+import { GuacApiError, errorFromApiBody, isGuacApiError, type GuacErrorInfo } from './errors.ts';
 
 /**
  * Client for the Guacamole 1.6.0 REST API. Every endpoint and field here is taken from the
@@ -413,14 +413,77 @@ export class GuacApi {
   /**
    * Gets the tree for every data source in the session, in session order, with
    * `GET api/session/data/{ds}/connectionGroups/ROOT/tree`. Like the web client's
-   * `dataSourceService.apply`, it skips a data source that answers `NOT_FOUND` and fails on
-   * any other error.
+   * `dataSourceService.apply`, it skips a data source that answers `NOT_FOUND`.
+   *
+   * Unlike the web client, one data source that fails (unreachable, timed out, malformed)
+   * does not hide the others: they are returned and the failed ones are listed in
+   * `unavailable`. It still rejects when every data source failed, and whenever one reports
+   * an expired sign-in (`session-expired`).
+   *
+   * `secondaryGraceMs`: once one data source has answered with a tree, the others get this
+   * much longer; any still running then is listed in `unavailable` too, so one slow data
+   * source does not hold up the list (its request keeps running and is simply not waited
+   * for). Without it, every data source is awaited.
    */
-  async getConnectionTree(session: AuthSession): Promise<ConnectionTree> {
-    const results = await Promise.all(
-      session.dataSources.map((ds) => this.getDataSourceTree(session, ds)),
+  async getConnectionTree(
+    session: AuthSession,
+    options: { readonly secondaryGraceMs?: number } = {},
+  ): Promise<ConnectionTree> {
+    const sources = session.dataSources;
+    const settled: (PromiseSettledResult<DataSourceTree | undefined> | undefined)[] = sources.map(
+      () => undefined,
     );
-    return { dataSources: results.filter((r): r is DataSourceTree => r !== undefined) };
+    await new Promise<void>((resolve) => {
+      let pending = sources.length;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (pending === 0) resolve();
+      sources.forEach((ds, i) => {
+        void this.getDataSourceTree(session, ds)
+          .then(
+            (value): PromiseSettledResult<DataSourceTree | undefined> => ({
+              status: 'fulfilled',
+              value,
+            }),
+            (reason: unknown): PromiseSettledResult<DataSourceTree | undefined> => ({
+              status: 'rejected',
+              reason,
+            }),
+          )
+          .then((r) => {
+            settled[i] = r;
+            pending--;
+            if (pending === 0) {
+              clearTimeout(timer);
+              resolve();
+            } else if (
+              r.status === 'fulfilled' &&
+              r.value !== undefined &&
+              options.secondaryGraceMs !== undefined &&
+              timer === undefined
+            ) {
+              timer = setTimeout(resolve, options.secondaryGraceMs);
+            }
+          });
+      });
+    });
+    const dataSources: DataSourceTree[] = [];
+    const unavailable: string[] = [];
+    let firstError: unknown;
+    settled.forEach((r, i) => {
+      if (r === undefined) {
+        unavailable.push(sources[i] ?? '');
+        return;
+      }
+      if (r.status === 'fulfilled') {
+        if (r.value !== undefined) dataSources.push(r.value);
+        return;
+      }
+      if (isGuacApiError(r.reason, 'session-expired')) throw r.reason;
+      firstError ??= r.reason;
+      unavailable.push(sources[i] ?? '');
+    });
+    if (firstError !== undefined && dataSources.length === 0) throw firstError;
+    return unavailable.length > 0 ? { dataSources, unavailable } : { dataSources };
   }
 
   private async getDataSourceTree(

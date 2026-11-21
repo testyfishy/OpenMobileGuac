@@ -133,9 +133,17 @@ export class TlsTrustService {
   /** Fingerprints trusted for `url`'s origin, after refreshing from the profiles. */
   async pinsFor(url: string): Promise<readonly string[]> {
     if (!this.plugin || pinOrigin(url) === undefined) return [];
-    await this.refresh();
+    // Requests that start together share one re-read of the profiles: a burst of REST calls
+    // should not queue a profile read each behind the store's writes. A read that starts
+    // after a change still sees it.
+    this.refreshing ??= this.refresh().finally(() => {
+      this.refreshing = undefined;
+    });
+    await this.refreshing;
     return this.pinsForSync(url);
   }
+
+  private refreshing: Promise<void> | undefined;
 
   /** The trusted certificate for `url`'s origin (saved, or pending for a new server). */
   pinFor(url: string): TlsPin | undefined {

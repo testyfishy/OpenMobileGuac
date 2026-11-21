@@ -9,6 +9,7 @@ import {
   type HttpRequest,
   type HttpResponse,
 } from '../http/HttpClient.ts';
+import { connectionInfo } from '../http/PooledNativeHttpClient.ts';
 import { nativeErrorCode, nativeErrorDer, type PinnedTlsPlugin } from './plugin.ts';
 
 /**
@@ -63,7 +64,12 @@ export async function pinnedRequest(
   }
   const responseHeaders = lowerCaseHeaders(res.headers ?? {});
   const body = decodeTextBody(res.data ?? '', responseHeaders['content-type']);
-  return { status: res.status, headers: responseHeaders, body };
+  return {
+    status: res.status,
+    headers: responseHeaders,
+    body,
+    connection: connectionInfo('pinned', res),
+  };
 }
 
 /** Looks up the pins that apply to a URL (empty: none). */

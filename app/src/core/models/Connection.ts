@@ -66,6 +66,8 @@ export interface DataSourceTree {
 /** The connection tree across all of a session's data sources (SPEC CON-1). */
 export interface ConnectionTree {
   readonly dataSources: readonly DataSourceTree[];
+  /** Data sources that could not be loaded this time (the others are shown). */
+  readonly unavailable?: readonly string[];
 }
 
 /** Guards against pathological or cyclic input. Real trees are far shallower. */
@@ -148,4 +150,47 @@ export function flattenConnections(tree: ConnectionTree): Connection[] {
   };
   tree.dataSources.forEach((ds) => visit(ds.root));
   return out;
+}
+
+/**
+ * A reload in which some data sources were `unavailable` keeps their connections from the
+ * previous tree (the notice still names them), so a slow or flaky data source does not make
+ * its connections disappear after every refresh. Order: as in the previous tree, new data
+ * sources after it.
+ */
+export function keepUnavailable(
+  prev: ConnectionTree | undefined,
+  next: ConnectionTree,
+): ConnectionTree {
+  const missing = next.unavailable ?? [];
+  if (!prev || missing.length === 0) return next;
+  const kept = prev.dataSources.filter(
+    (d) =>
+      missing.includes(d.dataSource) &&
+      !next.dataSources.some((n) => n.dataSource === d.dataSource),
+  );
+  if (kept.length === 0) return next;
+  const order = prev.dataSources.map((d) => d.dataSource);
+  const rank = (d: DataSourceTree, i: number) => {
+    const at = order.indexOf(d.dataSource);
+    return at >= 0 ? at : order.length + i;
+  };
+  const all = [...next.dataSources, ...kept]
+    .map((d, i) => ({ d, r: rank(d, i) }))
+    .sort((a, b) => a.r - b.r)
+    .map((x) => x.d);
+  return { dataSources: all, unavailable: missing };
+}
+
+/**
+ * `keepUnavailable` for a quiet reload (no spinner, after returning from a session): the
+ * notice is not raised by it. Only data sources the previous tree already named stay named,
+ * and they drop out once they load.
+ */
+export function quietMerge(prev: ConnectionTree | undefined, next: ConnectionTree): ConnectionTree {
+  const merged = keepUnavailable(prev, next);
+  const before = prev?.unavailable ?? [];
+  const still = (next.unavailable ?? []).filter((d) => before.includes(d));
+  const { dataSources } = merged;
+  return still.length > 0 ? { dataSources, unavailable: still } : { dataSources };
 }

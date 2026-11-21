@@ -55,8 +55,7 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
       save battery"; Reconnect works. "Never" keeps it connected as long as the OS allows.
 - [ ] Let the server token expire while a session is suspended (or sign out on the server):
       Reconnect signs in silently with the saved password, or asks to sign in again.
-- [ ] On a 1.5.x server (no `HEAD api/session`) **without** a saved password: background
-      > grace period, return, Reconnect: it reconnects with no password prompt (the token is
+- [ ] On a 1.5.x server (no `HEAD api/session`) **without** a saved password: background > grace period, return, Reconnect: it reconnects with no password prompt (the token is
       confirmed with `POST api/tokens`; the log shows `reconnect: ok`).
 - [ ] Settings › "Sign out of servers after …" = 1 min: background 2 min, return: sessions are
       closed and the server asks for the password (with the "Signed out because…" notice) even
@@ -198,6 +197,33 @@ is logged as a `[csp]` warning ("CSP blocked <directive>: <origin or keyword>") 
 
 If a TestFlight or APK build is broken by the policy, rebuild with `OMG_CSP=off npm run
 build` and `npx cap sync` to confirm (docs/BUILDING.md §3.1); do not ship that build.
+
+## Network (REST connection reuse, request volume, tunnel drops)
+
+Settings › General & about › Diagnostics, level **Debug**. The report's first lines include
+`Network: online; …; REST: native connection pool (keep-alive)` on iOS.
+
+- [ ] iPhone, Wi-Fi then mobile data, a server on a non-standard https port: open the server.
+      The `[http]` lines say `pooled`; after the first request to that server most say
+      `reused connection`. **Failure:** `REST: CapacitorHttp (native pool unavailable)` (the
+      native plugin method is missing) or every line `new connection` (no reuse).
+- [ ] Open a server, connect, go back to the server list, connect again. No URL appears
+      twice within a second in `[http]` lines (repeats say `shared with the one in flight` or
+      `answered from cache`); the badge lookups (`connections/{id}`) do not run while a
+      session is in front or the app is in the background.
+- [ ] Server with two data sources where one is slow or broken: the list of the other one
+      shows within about 4 s, with "Some connections could not be loaded (…)" and Retry; a
+      slow one fills in by itself later.
+- [ ] After a minute in the background, open a server: the first `[http]` line does not take
+      much longer than the others (a dead kept-alive connection is replaced, not waited on).
+- [ ] Lock on, session open, switch to another app for 30 s and back: the log shows
+      `Tunnel unstable (no instruction for … ms; background, …)`, a `[tunnel] WebSocket closed:
+  code …` line, **one** `reconnect attempt 1 of 4` line, `Connect held until the app is
+  unlocked`, then after Face ID a single new connect. Note the close code (1006 = network
+      drop; a number as reason = Guacamole status from the server).
+- [ ] Session in front on Wi-Fi for 10 minutes without touching it: no `Tunnel unstable`
+      lines with `foreground, session shown`. If there are, note the ms value and the close
+      code that follows.
 
 ## Re-test after the audit fixes (2026-11-21)
 
