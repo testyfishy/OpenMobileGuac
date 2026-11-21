@@ -1,12 +1,13 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { ChromeButton } from './ChromeButton.tsx';
-import { IconClose } from './icons.tsx';
+import { IconKeyboardHide } from './icons.tsx';
 import { sessionStrings } from './sessionStrings.ts';
 
 export interface TextInputBarProps {
   /** Type the text on the remote. */
   readonly onSend: (text: string, enter: boolean) => void;
-  readonly onClose: () => void;
+  /** Put the on-screen keyboard away (the bar stays; it is turned off in the options). */
+  readonly onHideKeyboard: () => void;
 }
 
 /**
@@ -14,7 +15,8 @@ export interface TextInputBarProps {
  * the keyboard app does inside it (autocorrect, dictation, paste, IME) stays local; only
  * the final text is typed on the remote when the user presses Send (or ⏎ = Send + Enter).
  */
-export function TextInputBar({ onSend, onClose }: TextInputBarProps) {
+export function TextInputBar({ onSend, onHideKeyboard }: TextInputBarProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState('');
   const id = useId();
   const t = sessionStrings.textBar;
@@ -36,6 +38,7 @@ export function TextInputBar({ onSend, onClose }: TextInputBarProps) {
       </label>
       <input
         id={id}
+        ref={inputRef}
         className="omg-input omg-textbar__input"
         value={text}
         placeholder={t.placeholder}
@@ -49,8 +52,16 @@ export function TextInputBar({ onSend, onClose }: TextInputBarProps) {
       <ChromeButton className="omg-btn--ghost" aria-label={t.sendEnter} onClick={() => send(true)}>
         ⏎
       </ChromeButton>
-      <ChromeButton className="omg-btn--icon" aria-label={t.close} onClick={onClose}>
-        <IconClose />
+      <ChromeButton
+        className="omg-btn--icon"
+        aria-label={t.hideKeyboard}
+        title={t.hideKeyboard}
+        onClick={() => {
+          inputRef.current?.blur();
+          onHideKeyboard();
+        }}
+      >
+        <IconKeyboardHide />
       </ChromeButton>
     </form>
   );

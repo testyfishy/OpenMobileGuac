@@ -568,7 +568,7 @@ export const sessionStringsEn = {
     label: 'Text to type on the remote',
     placeholder: 'Type, dictate or paste, then Send',
     sendEnter: 'Send and press Enter',
-    close: 'Close the text input bar',
+    hideKeyboard: 'Hide keyboard',
   },
 
   combos: {

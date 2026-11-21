@@ -761,7 +761,10 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
             if (text !== '') controller.typeText(text);
             if (enter) controller.pressKey('Enter');
           }}
-          onClose={() => onSettingsChange({ textInputBar: false })}
+          onHideKeyboard={() => {
+            controller.hideKeyboard();
+            nativeHideKeyboard();
+          }}
         />
       )}
       {keyBarVisible && (

@@ -574,7 +574,7 @@ export const sessionEs: SessionStrings = {
     label: 'Texto para escribir en el remoto',
     placeholder: 'Escribe, dicta o pega, y luego Enviar',
     sendEnter: 'Enviar y pulsar Intro',
-    close: 'Cerrar la barra de entrada de texto',
+    hideKeyboard: 'Ocultar el teclado',
   },
 
   combos: {
