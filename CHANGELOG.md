@@ -11,6 +11,8 @@ not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](doc
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-21
+
 ### Fixed
 
 - Autocorrect / Capitalise sentences: the hidden field now starts with a line break instead
@@ -187,6 +189,7 @@ First public version.
   planned, but release signing has not run yet, so none is attached to the release.)
 - iOS builds uploaded to TestFlight from `main` by the public workflow.
 
+[1.1.1]: https://github.com/testyfishy/OpenMobileGuac/releases/tag/v1.1.1
 [1.1.0]: https://github.com/testyfishy/OpenMobileGuac/releases/tag/v1.1.0
 [1.0.1]: https://github.com/testyfishy/OpenMobileGuac/releases/tag/v1.0.1
 [1.0.0]: https://github.com/testyfishy/OpenMobileGuac/releases/tag/v1.0.0

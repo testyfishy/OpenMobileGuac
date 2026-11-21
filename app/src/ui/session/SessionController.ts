@@ -2179,7 +2179,10 @@ export class SessionController {
     // The keyboard rewrote text already sent (a correction, a double-space full stop).
     if (update.backspaces > 0 && update.text !== '') this.typing.rewrites++;
     if (update.reset && keepContext) {
-      this.typing.restarts[update.baseline === sentinel ? 'line' : 'trim']++;
+      if (update.baseline !== sentinel) this.typing.restarts.trim++;
+      else if (field.value.length > sentinel.length && field.value.endsWith('\n')) {
+        this.typing.restarts.line++;
+      }
     }
     // A sticky modifier turns the text into a shortcut (Ctrl+A): what the field holds no
     // longer mirrors the remote.
