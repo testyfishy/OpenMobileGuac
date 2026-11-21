@@ -9,7 +9,7 @@ maintainer uses the iOS app daily through TestFlight against a real Guacamole se
 The device checklists in docs/checklists have not been completed, and the Android app has
 not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](docs/FEATURES.md).
 
-## [Unreleased]
+## [1.0.1] - 2026-11-21
 
 ### Fixed
 
@@ -117,4 +117,5 @@ First public version.
   prerelease.
 - iOS builds uploaded to TestFlight from `main` by the public workflow.
 
+[1.0.1]: https://github.com/testyfishy/OpenMobileGuac/releases/tag/v1.0.1
 [1.0.0]: https://github.com/testyfishy/OpenMobileGuac/releases/tag/v1.0.0
