@@ -21,7 +21,7 @@ not edit the same files at once.
 - Do not write Guacamole REST paths, tunnel parameters, or library class/method names from
   memory. Read them from the vendored library or from `apache/guacamole-client` at tag
   `1.6.0` (`gh api repos/apache/guacamole-client/contents/<path>?ref=1.6.0`).
-- No code or assets from PocketGuac (closed source, unlicensed).
+- No code or assets from closed-source apps.
 - `PointerModel`, `KeyModel`, `Viewport`, and the gesture recogniser stay free of DOM and
   Capacitor imports and ship with unit tests.
 - All network access goes through `HttpClient` / `SessionTransport`.

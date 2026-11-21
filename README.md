@@ -11,10 +11,9 @@ official Guacamole JavaScript client library (`guacamole-common-js`, Apache-2.0)
 the protocol and rendering inside the system WebView. See [docs/SPEC.md](docs/SPEC.md)
 for the specification and [docs/PLAN.md](docs/PLAN.md) for the delivery plan.
 
-> **Why this exists.** I respect the developer of
-> [PocketGuac](https://guac.pocketsized.app/). But I use an iPhone, PocketGuac is for
-> Android, and I needed a Guacamole client for iOS, so I made this one myself. All of the
-> source is here if you want to build your own. If you just want to use mine, the iPhone
+> **Why this exists.** There are good Guacamole clients for other platforms, and I respect
+> the people who make them. But I use an iPhone and needed one for iOS, so I made this one
+> myself. All of the source is here if you want to build your own. If you just want to use mine, the iPhone
 > and iPad app is published under my Apple developer account (App Store listing in
 > preparation) and the Android APK is on the
 > [Releases page](https://github.com/testyfishy/OpenMobileGuac/releases/latest). Missing a

@@ -232,7 +232,6 @@ Notes:
   - The bar hides when a hardware keyboard is connected. [TM]
 - **Widgets** (home-screen widgets) were not confirmed for any product, so there is no row.
 - **Blink Shell** documents hardware-key remapping (for example Caps Lock as Esc/Ctrl). [BS]
-- **PocketGuac** is closed source and is used here as a feature reference only.
 
 ### 2.1 Sources
 
@@ -390,7 +389,7 @@ says whether the server and protocol allow the feature.
   trust of one pinned certificate after showing its fingerprint (SRV-8, docs/tls.md).
 - **TOTP seed storage is opt-in and labelled as weakening 2FA** (SRV-9), unlike a silent
   convenience feature.
-- **No code, text or assets from closed-source apps.** PocketGuac and the commercial apps
+- **No code, text or assets from closed-source apps.** The other apps in the comparison
   are feature references only.
 - **Open source and free (GPL-3.0-or-later, with an app-store permission; earlier commits
   Apache-2.0)**, with no paid tier or licence key.
