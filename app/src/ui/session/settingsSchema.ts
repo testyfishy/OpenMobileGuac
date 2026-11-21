@@ -501,6 +501,12 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     () => S().options.sendPastesHint,
   ),
   sw(
+    'pictureInPicture',
+    'display',
+    () => S().options.pictureInPicture,
+    () => S().options.pictureInPictureHint,
+  ),
+  sw(
     'clipboardSendOnConnect',
     'clipboard',
     () => S().options.clipboardSendOnConnect,

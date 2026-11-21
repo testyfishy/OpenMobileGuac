@@ -400,6 +400,9 @@ export const sessionEs: SessionStrings = {
       'El texto copiado en el remoto pasa al portapapeles de este dispositivo',
     clipboardAutoSendOnFocus: 'Enviar el portapapeles del dispositivo al volver a la app',
     clipboardAutoSendOnFocusHint: 'En iOS puede aparecer un aviso de permiso para pegar',
+    pictureInPicture: 'Imagen dentro de imagen (experimental)',
+    pictureInPictureHint:
+      'iPhone y iPad: al salir de la app con una sesión abierta, la pantalla remota se muestra en una pequeña ventana flotante. Solo para ver. Por ahora es una prueba: puede congelarse o cerrarse.',
     sendPastes: 'Al enviar, pegar también',
     sendPastesHint:
       'Enviar pulsa el atajo de pegar del remoto cuando el portapapeles ya está allí: Ctrl+V, o Ctrl+Shift+V en un terminal. Desactivado: Enviar solo pone el texto en el portapapeles remoto. Un remoto Mac necesita ⌘V, que no se pulsa.',
@@ -622,6 +625,8 @@ export const sessionEs: SessionStrings = {
     resetZoom: 'Restablecer el zoom',
     splitLayout: 'Vista dividida',
     splitLayoutHint: 'Pantalla sobre un trackpad',
+    pictureInPictureOpen: 'Abrir imagen dentro de imagen',
+    pictureInPictureOpenHint: 'Una pequeña ventana flotante que sigue al salir de la app',
     immersive: 'Pantalla completa',
     immersiveHint: 'Ocultar las barras del sistema',
     paste: 'Enviar portapapeles',

@@ -75,6 +75,7 @@ import type { SessionActionContext } from './sessionActions.tsx';
 import { normalizeSessionSettings, type SessionSettings } from './settings.ts';
 import { isSignInFailure } from './status.ts';
 import { TextInputBar } from './TextInputBar.tsx';
+import { pipAvailable } from './pipFeed.ts';
 import { StatusOverlay } from './StatusOverlay.tsx';
 import { Toolbar } from './Toolbar.tsx';
 import { ToolbarEditor } from './ToolbarEditor.tsx';
@@ -1157,6 +1158,14 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                         : null
                     }
                     {...(props.sharing ? { onShare: () => setMenu('share') } : {})}
+                    {...(settings.pictureInPicture && pipAvailable()
+                      ? {
+                          onPictureInPicture: () => {
+                            closeMenu();
+                            controller.openPictureInPicture();
+                          },
+                        }
+                      : {})}
                     {...(props.onConnectionSettings
                       ? {
                           onConnectionSettings: () => {

@@ -66,6 +66,8 @@ export interface MoreSheetProps {
   readonly terminal: TerminalControls | null;
   /** "Share this session", when the host supports it (not the demo). */
   readonly onShare?: () => void;
+  /** "Open picture in picture" (experimental, iOS, when the setting is on). */
+  readonly onPictureInPicture?: () => void;
   /** "All settings for this connection" (Settings for it), when the host supports it. */
   readonly onConnectionSettings?: () => void;
   readonly onClose: () => void;
@@ -269,6 +271,14 @@ export function MoreSheet(p: MoreSheetProps) {
         <Row icon={a['zoom-reset'].icon} label={t.resetZoom} onClick={run(a['zoom-reset'])} />
         {tog('split', <IconSplit />, t.splitLayout, t.splitLayoutHint)}
         {tog('immersive', <IconFullscreen />, t.immersive, t.immersiveHint)}
+        {p.onPictureInPicture && (
+          <Row
+            icon={<IconFullscreen />}
+            label={t.pictureInPictureOpen}
+            hint={t.pictureInPictureOpenHint}
+            onClick={p.onPictureInPicture}
+          />
+        )}
         <Row
           icon={a.view.icon}
           label={t.quality(sessionStrings.options.qualityOptions[p.quality])}

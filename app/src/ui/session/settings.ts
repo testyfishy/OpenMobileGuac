@@ -122,6 +122,11 @@ export interface SessionSettings {
    * clipboard is there (Ctrl+V; Ctrl+Shift+V in a terminal). Off: send only.
    */
   sendPastes?: boolean;
+  /**
+   * Experimental (iOS): show the remote display in the system's Picture in Picture window
+   * when leaving the app with a session open.
+   */
+  pictureInPicture?: boolean;
   /** Quality (AUDIT §4.4): what size, DPI and media to request at connect. */
   quality?: Quality;
   /** Remote desktop size to request; `auto` follows the quality. */
@@ -240,6 +245,7 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   audio: 'on',
   clipboardSendOnConnect: false,
   sendPastes: true,
+  pictureInPicture: false,
   quality: 'auto',
   remoteResolution: 'auto',
   remoteWidth: 1280,
@@ -376,6 +382,7 @@ export function normalizeSessionSettings(
     ...audioFields(raw),
     clipboardSendOnConnect: bool(raw['clipboardSendOnConnect'], d.clipboardSendOnConnect),
     sendPastes: bool(raw['sendPastes'], d.sendPastes),
+    pictureInPicture: bool(raw['pictureInPicture'], d.pictureInPicture),
     quality: oneOf(raw['quality'], QUALITIES, d.quality),
     remoteResolution: oneOf(raw['remoteResolution'], REMOTE_RESOLUTIONS, d.remoteResolution),
     remoteWidth: Math.round(clampTo(raw['remoteWidth'], 'remoteWidth')),
@@ -440,6 +447,7 @@ export const INPUT_SETTING_KEYS = [
   'audio',
   'clipboardSendOnConnect',
   'sendPastes',
+  'pictureInPicture',
   'quality',
   'remoteResolution',
   'remoteWidth',

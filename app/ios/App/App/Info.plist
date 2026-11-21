@@ -52,6 +52,13 @@
 	<string>OpenMobileGuac sends your microphone to a remote computer only while you turn on “Send microphone” in a session, for example for calls or dictation on that computer.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OpenMobileGuac connects to the remote desktop servers you add, which are often on your local or private network.</string>
+	<!-- Picture in Picture (experimental, off by default): the system only floats a window for
+	     an app that declares this mode. The app plays no audio in the background by itself.
+	     See app/plugins/omg-pinned-tls/ios/Sources/PinnedTlsPlugin/PipPlugin.swift. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- Files received from remote computers are saved in Documents/Downloads; these two keys

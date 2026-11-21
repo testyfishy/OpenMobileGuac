@@ -18,6 +18,9 @@ not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](doc
   being typed, so it can correct words, turn a double space into a full stop and capitalise
   sentences; corrections reach the remote as Backspaces and retyped text. A click or a key
   bar key starts a fresh sentence.
+- Experimental, iOS, off by default: Settings › Sessions › "Picture in picture". A test of
+  whether the remote screen can stay in the system's floating window after leaving the app;
+  it may freeze or close. The iOS build declares the audio background mode for it.
 - Settings › Connections ("Settings per connection"): every connection known on this device,
   grouped by server, with a one-line summary of what it changes from the defaults. Each one
   opens its own settings on the same pages as the defaults, with every value marked as its

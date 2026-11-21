@@ -8,6 +8,7 @@
  * `getSnapshot` (for `useSyncExternalStore`) and calls the command methods.
  */
 
+import { PipFeed, pipAvailable } from './pipFeed.ts';
 import Guacamole from '../../vendor/guacamole-common-js';
 import { resumeNeedsReconnect } from '../sessions/backgroundPolicy.ts';
 import {
@@ -373,6 +374,7 @@ export class SessionController {
   );
   private readonly argv = new ArgvTracker(() => this.publish());
   /** AUD-2: microphone input, only while "Send microphone" is on and the session is shown. */
+  private pip: PipFeed | null = null;
   private readonly mic = new SessionMicrophone({
     changed: () => this.publish(),
     log: (m) => this.log('info', m),
@@ -604,6 +606,7 @@ export class SessionController {
     this.active = active;
     this.audio.setActive(active);
     this.syncMicrophone();
+    this.syncPip();
     this.log('debug', active ? 'Session shown' : 'Session hidden');
     if (active) {
       this.stable = null;
@@ -1105,6 +1108,7 @@ export class SessionController {
     const tunnel = this.tunnel;
     this.client = null;
     this.tunnel = null;
+    this.syncPip();
     this.generation++;
     if (!client) return;
     this.closingOnPurpose = onPurpose;
@@ -1153,6 +1157,7 @@ export class SessionController {
     const memory = this.opts?.credentialMemory?.() ?? null;
     for (const a of this.answers.connected()) memory?.remember(a.names, a.values);
     this.syncMicrophone();
+    this.syncPip();
     this.stats.connectedAt = Date.now();
     // The first thumbnail comes from the timer below, not from the next `sync`.
     this.lastThumbAt = Date.now();
@@ -1352,7 +1357,41 @@ export class SessionController {
     if (prev.microphone !== next.microphone || prev.viewOnly !== next.viewOnly) {
       this.syncMicrophone();
     }
+    if (prev.pictureInPicture !== next.pictureInPicture) this.syncPip();
     this.publish();
+  }
+
+  /**
+   * Picture in Picture (experimental, iOS): the feed runs while the setting is on and the
+   * session is connected and shown. It keeps running in the background: that is its point.
+   */
+  /** More sheet: open the Picture in Picture window now (a tap). */
+  openPictureInPicture(): void {
+    void this.pip?.open();
+  }
+
+  private syncPip(): void {
+    const want =
+      this.settings.pictureInPicture &&
+      this.active &&
+      !this.disposed &&
+      this.client !== null &&
+      this.machine.phase.kind === 'connected' &&
+      pipAvailable();
+    if (want && !this.pip) {
+      this.pip = new PipFeed(
+        () => {
+          const display = this.client?.getDisplay();
+          if (!display || display.getWidth() <= 0 || display.getHeight() <= 0) return null;
+          return display.flatten();
+        },
+        (message) => this.log('info', message),
+      );
+      void this.pip.start();
+    } else if (!want && this.pip) {
+      this.pip.stop();
+      this.pip = null;
+    }
   }
 
   /**
@@ -2304,6 +2343,7 @@ export class SessionController {
         this.quietUntil = Date.now() + QUIET_RECONNECT_MS;
       }
       this.syncMicrophone();
+      this.syncPip();
     };
     document.addEventListener('visibilitychange', onVisibility);
     this.cleanups.push(() => document.removeEventListener('visibilitychange', onVisibility));

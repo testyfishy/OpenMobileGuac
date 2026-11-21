@@ -242,7 +242,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
       {
         id: 'background',
         title: () => P().groups.background,
-        items: [app('backgroundDisconnect'), app('keepAlive')],
+        items: [app('backgroundDisconnect'), app('keepAlive'), 'pictureInPicture'],
       },
       {
         id: 'clipboard',

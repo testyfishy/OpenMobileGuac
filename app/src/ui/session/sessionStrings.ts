@@ -402,6 +402,9 @@ export const sessionStringsEn = {
     clipboardRemoteToDeviceHint: 'Text copied on the remote is put on this device’s clipboard',
     clipboardAutoSendOnFocus: 'Send the device clipboard when returning to the app',
     clipboardAutoSendOnFocusHint: 'On iOS this can show a paste permission prompt',
+    pictureInPicture: 'Picture in picture (experimental)',
+    pictureInPictureHint:
+      'iPhone and iPad: leaving the app with a session open shows the remote screen in a small floating window. View only. A test for now: it may freeze or close.',
     sendPastes: 'Send also pastes',
     sendPastesHint:
       'Send presses the remote’s paste shortcut once the clipboard is there: Ctrl+V, or Ctrl+Shift+V in a terminal. Off: Send only puts the text on the remote clipboard. A Mac remote needs ⌘V, which is not pressed.',
@@ -621,6 +624,8 @@ export const sessionStringsEn = {
     resetZoom: 'Reset zoom',
     splitLayout: 'Split layout',
     splitLayoutHint: 'Display above a trackpad',
+    pictureInPictureOpen: 'Open picture in picture',
+    pictureInPictureOpenHint: 'A small floating window that stays when you leave the app',
     immersive: 'Full screen',
     immersiveHint: 'Hide the system bars',
     paste: 'Send clipboard',
