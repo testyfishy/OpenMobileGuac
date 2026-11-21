@@ -18,6 +18,23 @@ export interface PendingLaunch {
    * question ("Ask before connecting", MUL-5) for the same tap.
    */
   readonly confirmed?: boolean;
+  /** When it was requested (`Date.now()`); a launch without it never expires. */
+  readonly at?: number;
+}
+
+/**
+ * How long a launch waits for its server's sign-in. A user who left the sign-in form and
+ * opens that server much later only to browse must not get the connection opened for them.
+ */
+export const PENDING_LAUNCH_TTL_MS = 3 * 60_000;
+
+/** `p` with the time of the request, so it expires after `PENDING_LAUNCH_TTL_MS`. */
+export function timedLaunch(p: Omit<PendingLaunch, 'at'>): PendingLaunch {
+  return { ...p, at: Date.now() };
+}
+
+export function launchExpired(p: PendingLaunch, now: number): boolean {
+  return p.at !== undefined && (now - p.at > PENDING_LAUNCH_TTL_MS || now < p.at);
 }
 
 export interface LaunchApi {
@@ -61,6 +78,10 @@ export function useConsumePendingLaunch(
     if (!tree) return;
     const p = launch.peek();
     if (!p || p.serverId !== serverId) return;
+    if (launchExpired(p, Date.now())) {
+      launch.take(serverId);
+      return;
+    }
     const t = findTarget(tree, p.identifier, p.dataSource, p.type);
     // Its data source did not load this time (slow or failed): wait for the next tree
     // instead of saying the connection is gone.

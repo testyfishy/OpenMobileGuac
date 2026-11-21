@@ -236,7 +236,15 @@ function GroupChildren({
                 type="button"
                 className="row-main group-row"
                 aria-expanded={open}
-                aria-label={label}
+                aria-label={[
+                  label,
+                  g.activeConnections > 0 ? strings.connections.inUse(g.activeConnections) : '',
+                  openKeys?.has(`g:${g.dataSource}:${g.identifier}`)
+                    ? strings.connections.openSessionLabel
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(', ')}
                 onClick={() => onToggleGroup(key)}
               >
                 <Icon name={open ? 'chevron-down' : 'chevron-right'} className="group-chevron" />
@@ -401,7 +409,13 @@ function ConnectionRow({
             if (swipe.consumeClick()) return;
             onConnect(connection);
           }}
-          aria-label={c.connect(connection.name)}
+          aria-label={[
+            c.connect(connection.name),
+            open ? c.openSessionLabel : '',
+            inUse > 0 ? c.inUse(inUse) : '',
+          ]
+            .filter(Boolean)
+            .join(', ')}
         >
           {thumbnail ? (
             <img className="row-thumb" src={thumbnail} alt="" width={64} height={40} />

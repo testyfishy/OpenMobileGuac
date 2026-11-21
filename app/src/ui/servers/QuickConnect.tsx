@@ -8,7 +8,7 @@ import { IN_USE_CHECK_TIMEOUT_MS } from '../sessions/inUseCheck.ts';
 import { protocolIcon, protocolLabel } from '../connections/treeView.ts';
 import type { SessionTarget } from '../nav/navigation.ts';
 import { DEMO_PROFILE_ID } from '../integration/demoProfile.ts';
-import { useLaunch } from '../launch/LaunchContext.ts';
+import { timedLaunch, useLaunch } from '../launch/LaunchContext.ts';
 import { useNav } from '../nav/NavContext.ts';
 import { useAppSettings, useProfilesVersion, useServices } from '../services/context.ts';
 import { onAppActiveChange } from '../services/native.ts';
@@ -178,12 +178,14 @@ export function QuickConnect() {
       sessions.open(i.serverId, i.serverName, target);
       return;
     }
-    launch.request({
-      serverId: i.serverId,
-      identifier: i.entry.ref.identifier,
-      dataSource: i.entry.ref.dataSource,
-      type: i.entry.ref.type,
-    });
+    launch.request(
+      timedLaunch({
+        serverId: i.serverId,
+        identifier: i.entry.ref.identifier,
+        dataSource: i.entry.ref.dataSource,
+        type: i.entry.ref.type,
+      }),
+    );
     nav.open({ name: 'connections', serverId: i.serverId });
   };
 

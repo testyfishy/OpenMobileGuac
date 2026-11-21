@@ -34,9 +34,9 @@ import type { BiometryAvailability } from '../services/native.ts';
 import {
   DEFAULT_SERVER_OPTIONS,
   parseServerOptions,
-  serverOptionsToJson,
   type ServerOptions,
 } from '../settings/settingsModel.ts';
+import { patchServerOptions, subscribeServerOptions } from '../servers/serverOptionsStore.ts';
 import { strings } from '../strings.ts';
 import { ConnectionsPanel } from './ConnectionsPanel.tsx';
 import { DemoConnections } from './DemoConnections.tsx';
@@ -44,6 +44,7 @@ import { SearchBox } from './SearchBox.tsx';
 import { SortMenu } from './SortMenu.tsx';
 import { EmptyState } from '../components/Feedback.tsx';
 import { CertificatePanel } from '../tls/CertificatePanel.tsx';
+import { useLaunch } from '../launch/LaunchContext.ts';
 
 export function ConnectionsScreen({ serverId }: { serverId: string }) {
   const nav = useNav();
@@ -101,6 +102,7 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   const nav = useNav();
   const services = useServices();
   const sessions = useSessions();
+  const launch = useLaunch();
   const { settings: app } = useAppSettings();
   const { auth } = services;
   const browser = !services.native;
@@ -134,14 +136,21 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
       setOptions((prev) => {
         const next = { ...prev, ...patch };
         if (JSON.stringify(next) !== JSON.stringify(prev)) {
-          void services.profiles
-            .setOptions(profile.id, serverOptionsToJson(next))
-            .catch(() => undefined);
+          // Only these fields: the server screen may be changing the others meanwhile.
+          void patchServerOptions(services.profiles, profile.id, patch).catch(() => undefined);
         }
         return next;
       });
     },
     [services.profiles, profile.id],
+  );
+  // Changes made on the server screen (wide layout: both are shown at once).
+  useEffect(
+    () =>
+      subscribeServerOptions((id, stored) => {
+        if (id === profile.id) setOptions(stored);
+      }),
+    [profile.id],
   );
 
   /** Remembers what the server asked for (hints on the server screen) and offers SSO. */
@@ -172,6 +181,27 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
         setStartNonce((n) => n + 1);
       }),
     [auth, profile.id],
+  );
+
+  // Signed out by something else while this list stays mounted (the lock screen's reset,
+  // Settings › Sign out of all servers): show the sign-in form, not a list with no session.
+  // A session that is gone while a password is still saved is being renewed (a session's
+  // reconnect, the background sign-out): left to those, as before.
+  /** This screen ends the session itself (expired token, Sign out): not "elsewhere". */
+  const signingOutHere = useRef(false);
+  useEffect(
+    () =>
+      auth.onSessionChange((id) => {
+        if (id !== profile.id || signingOutHere.current || auth.current(id)) return;
+        if (services.devServer?.profile.id === id) return;
+        void auth.hasSavedPassword(profile).then((saved) => {
+          if (saved || auth.current(id)) return;
+          setTree({ nonce: 0 });
+          setTreeNonce((n) => n + 1);
+          dispatch({ type: 'signed-out-elsewhere' });
+        });
+      }),
+    [auth, profile, services.devServer],
   );
 
   // Start: stored token → saved password → form.
@@ -412,7 +442,12 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   useEffect(() => {
     if (!authenticated) return undefined;
     const session = auth.current(profile.id);
-    if (!session) return undefined;
+    // No session for now (a session's reconnect is signing in again, or it was signed out
+    // elsewhere, handled below): load once one is back instead of spinning forever.
+    if (!session)
+      return auth.onSessionChange((id) => {
+        if (id === profile.id && auth.current(id)) setTreeNonce((n) => n + 1);
+      });
     let live = true;
     const nonce = treeNonce;
     services.api.getConnectionTree(session, { secondaryGraceMs: SECONDARY_GRACE_MS }).then(
@@ -428,7 +463,13 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
         if (isGuacApiError(err, 'session-expired')) {
           setTree({ nonce });
           setTreeNonce((n) => n + 1);
-          void auth.forgetToken(profile.id).then(() => dispatch({ type: 'session-expired' }));
+          // This screen handles it (silent sign-in again with a saved password), not the
+          // "signed out elsewhere" listener.
+          signingOutHere.current = true;
+          void auth.forgetToken(profile.id).then(() => {
+            signingOutHere.current = false;
+            dispatch({ type: 'session-expired' });
+          });
           return;
         }
         setTree((t) => ({ nonce, tree: t.tree, error: describeError(err, { browser }) }));
@@ -481,7 +522,12 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
 
   const onLogout = async () => {
     sessions.closeServer(profile.id);
-    await auth.logout(profile.id);
+    signingOutHere.current = true;
+    try {
+      await auth.logout(profile.id);
+    } finally {
+      signingOutHere.current = false;
+    }
     setTree({ nonce: 0 });
     setTreeNonce((n) => n + 1);
     dispatch({ type: 'logout' });
@@ -498,10 +544,18 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
   const loadingTree = authenticated && tree.nonce !== treeNonce;
   const canStoreSeed = seedsAllowed;
 
+  // Leaving before the tree loaded drops a connection waiting to open here (Jump back in,
+  // an app link): it must not open by itself at a later visit. Not on unmount: opening the
+  // same server again replaces this screen right after the request.
+  const onBack = () => {
+    if (launch.peek()?.serverId === profile.id) launch.take(profile.id);
+    nav.back();
+  };
+
   const screen = (
     <Screen
       title={title}
-      onBack={nav.back}
+      onBack={onBack}
       actions={
         authenticated ? (
           <>

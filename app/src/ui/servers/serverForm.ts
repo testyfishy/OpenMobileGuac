@@ -60,6 +60,28 @@ export function urlUnchanged(typed: string, savedBaseUrl: string): boolean {
   return n.ok && n.candidates.length === 1 && n.candidates[0]?.baseUrl === savedBaseUrl;
 }
 
+/**
+ * What saving an edited server does to its stored sign-in. A new address drops every
+ * secret (`moved`). Another username on the same address (`account`) ends the old
+ * account's session and token, so the list does not stay signed in as the old user, and
+ * drops its saved password unless a new one was typed.
+ */
+export type SignInChange = 'none' | 'moved' | 'account';
+
+export function signInChangeOf(
+  saved: { readonly username: string },
+  moved: boolean,
+  username: string,
+): SignInChange {
+  if (moved) return 'moved';
+  return username.trim() !== saved.username.trim() ? 'account' : 'none';
+}
+
+/** Whether the server list shows its reorder arrows: only while there is something to order. */
+export function reorderMode(reordering: boolean, savedCount: number | undefined): boolean {
+  return reordering && (savedCount ?? 0) >= 2;
+}
+
 /** The host to show in the http warning. */
 export function hostOf(baseUrl: string): string {
   try {

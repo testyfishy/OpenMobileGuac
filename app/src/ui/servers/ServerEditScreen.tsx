@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import { GuacApiError } from '../../core/api/errors.ts';
 import { sameServerEndpoint, serverHostLabel } from '../../core/url/normalizeServerUrl.ts';
@@ -15,6 +15,7 @@ import {
   emptyServerForm,
   hasErrors,
   isInsecureUrl,
+  signInChangeOf,
   suggestName,
   urlUnchanged,
   validateServerForm,
@@ -77,6 +78,13 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
   >();
   const sessions = useSessions();
   const toast = useToast();
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!profile?.rememberPassword) return;
@@ -119,6 +127,8 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
       // The probe is unauthenticated (no credential is sent) and decides the real address.
       if (urlChanged)
         baseUrl = (await services.probeApi.probe(withName.url, { allowHttp })).baseUrl;
+      // Back during "Checking server…" abandons the form: nothing is saved.
+      if (!alive.current) return;
       if (profile && !sameServerEndpoint(profile.baseUrl, baseUrl)) {
         // Saved secrets belong to the old address: ask first, showing old → new.
         setPendingMove({ values: withName, baseUrl });
@@ -142,12 +152,20 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
       rememberPassword: withName.rememberPassword,
     };
     const moved = profile !== undefined && !sameServerEndpoint(profile.baseUrl, baseUrl);
-    if (profile && moved) {
+    const change = profile ? signInChangeOf(profile, moved, fields.username) : 'none';
+    if (profile && change === 'moved') {
       // Sign out on the old host and drop its token, password and TOTP seed *before* the
       // profile points anywhere else, so none of them can reach the new host.
       sessions.closeServer(profile.id);
       await services.auth.reset(profile.id);
       await services.settings.setHttpWarningDismissed(profile.id, false);
+    } else if (profile && change === 'account') {
+      // Another account: the old one's session and token must not answer for it, nor its
+      // saved password be sent as the new one's. (The TOTP seed is kept: it may be the
+      // only copy.)
+      sessions.closeServer(profile.id);
+      await services.auth.logout(profile.id);
+      if (!withName.password) await services.auth.savePassword(profile.id, null);
     }
     const saved = profile
       ? await services.profiles.update(profile.id, fields)
@@ -161,7 +179,8 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
       await services.auth.savePassword(saved.id, withName.password);
     }
     bump();
-    nav.open({ name: 'connections', serverId: saved.id });
+    // Left with Back while this ran: the save stands, but do not jump to it.
+    if (alive.current) nav.open({ name: 'connections', serverId: saved.id });
   };
 
   const confirmMove = async () => {
@@ -208,6 +227,10 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
   };
 
   const addressEdited = profile !== undefined && !urlUnchanged(values.url, profile.baseUrl);
+  // Delete and Clear credentials close these too: their dialogs say so.
+  const openHere = profile
+    ? sessions.state.sessions.filter((s) => s.serverId === profile.id).length
+    : 0;
   const typedInsecure = /^\s*http:\/\//i.test(values.url) || (editing && isInsecureUrl(values.url));
 
   return (
@@ -371,6 +394,7 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
           }
         >
           <p>{f.clearCredentialsBody}</p>
+          {openHere > 0 ? <p>{strings.settings.signOutSessions(openHere)}</p> : null}
         </Dialog>
       ) : null}
       {confirmDelete && profile ? (
@@ -390,6 +414,7 @@ function ServerForm({ profile }: { profile: ServerProfile | undefined }) {
           }
         >
           <p>{f.deleteBody}</p>
+          {openHere > 0 ? <p>{strings.settings.signOutSessions(openHere)}</p> : null}
         </Dialog>
       ) : null}
     </Screen>

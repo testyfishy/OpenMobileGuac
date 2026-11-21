@@ -151,6 +151,18 @@ describe('authFlowReducer', () => {
     expect(s.values.password).toBe('');
   });
 
+  it('a sign-out elsewhere ends only a signed-in list, without the in-memory password', () => {
+    let s = run([start({ savedPassword: 'pw' })]);
+    // Still signing in: left alone.
+    expect(authFlowReducer(s, { type: 'signed-out-elsewhere' })).toBe(s);
+    s = authFlowReducer(s, { type: 'login-ok', seq: s.seq });
+    const out = authFlowReducer(s, { type: 'signed-out-elsewhere' });
+    expect(out).toMatchObject({ phase: 'form', step: 'credentials', passwordIsSaved: false });
+    expect(out.values.password).toBe('');
+    // An expiry this screen handles itself still signs in again silently.
+    expect(authFlowReducer(s, { type: 'session-expired' }).phase).toBe('signing-in');
+  });
+
   it('start over leaves the extra step', () => {
     let s = run([start(), { type: 'submit', values: { password: 'pw' } }]);
     s = authFlowReducer(s, { type: 'login-failed', seq: s.seq, error: totp });

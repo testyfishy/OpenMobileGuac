@@ -198,6 +198,7 @@ function AutoSection({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | undefined>();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [confirmRemovePass, setConfirmRemovePass] = useState(false);
 
   const [now, setNow] = useState(() => Date.now());
 
@@ -358,18 +359,42 @@ function AutoSection({
             <button
               type="button"
               className="btn btn-danger-ghost"
-              onClick={() =>
-                void setBackupPassphrase(services, null).then(() => {
-                  setMessage({ ok: true, text: b.passRemoved });
-                  void refresh();
-                })
-              }
+              onClick={() => setConfirmRemovePass(true)}
             >
               {b.removePass}
             </button>
           ) : null}
         </div>
       )}
+      {confirmRemovePass ? (
+        <Dialog
+          title={b.removePassTitle}
+          tone="danger"
+          onCancel={() => setConfirmRemovePass(false)}
+          actions={
+            <>
+              <button type="button" className="btn" onClick={() => setConfirmRemovePass(false)}>
+                {strings.common.cancel}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  setConfirmRemovePass(false);
+                  void setBackupPassphrase(services, null).then(() => {
+                    setMessage({ ok: true, text: b.passRemoved });
+                    void refresh();
+                  });
+                }}
+              >
+                {b.removePass}
+              </button>
+            </>
+          }
+        >
+          <p>{b.removePassBody}</p>
+        </Dialog>
+      ) : null}
 
       <button
         type="button"
@@ -528,6 +553,8 @@ function ImportSection({
     setConfirmReplace(false);
     setBusy(true);
     setError(undefined);
+    // Once the stored servers start changing, the list must reload whatever happens next.
+    let touched = false;
     try {
       let secrets: BackupSecrets | undefined;
       if (backup.secrets && pass) {
@@ -539,15 +566,21 @@ function ImportSection({
         }
       }
       const existing = await services.profiles.list();
-      // The decrypted part vouches for trusted certificates (pre-release review R6).
-      const plan = planRestore(
-        existing,
-        backup,
-        mode,
-        () => globalThis.crypto.randomUUID(),
-        secrets,
-      );
-      for (const id of plan.removeIds) sessions.closeServer(id);
+      let plan: ReturnType<typeof planRestore>;
+      try {
+        // The decrypted part vouches for trusted certificates (pre-release review R6).
+        plan = planRestore(existing, backup, mode, () => globalThis.crypto.randomUUID(), secrets);
+      } catch {
+        setError(b.errors['shape']);
+        return;
+      }
+      // Removed servers are signed out like a deleted one: the live session in memory and
+      // the session on the server end too, not only their tunnels.
+      const removed = existing.filter((p) => plan.removeIds.includes(p.id));
+      for (const p of removed) sessions.closeServer(p.id);
+      touched = true;
+      await services.auth.signOutLocally(removed);
+      for (const p of removed) await services.settings.setHttpWarningDismissed(p.id, false);
       await services.profiles.applyRestore(plan.entries, plan.removeIds);
       const unsealed = secrets ? countUnsealedSecrets(secrets) : 0;
       if (secrets) {
@@ -564,7 +597,6 @@ function ImportSection({
         settingsReset = r.securityReset;
         update(r.settings);
       }
-      bump();
       services.log.info(
         'backup',
         `restored (${plan.added} added, ${plan.updated} updated, ${plan.removed} removed, ${plan.addressChanged} address changed, ${plan.pinsDropped} pins not restored, ${unsealed} unsealed secrets skipped)`,
@@ -582,8 +614,11 @@ function ImportSection({
       setPass('');
       if (fileInput.current) fileInput.current.value = '';
     } catch {
-      setError(b.errors['shape']);
+      // The file was read and planned fine: this failed on the device, not in the file.
+      haptic('error');
+      setError(strings.errors.unknown.title);
     } finally {
+      if (touched) bump();
       setBusy(false);
     }
   };

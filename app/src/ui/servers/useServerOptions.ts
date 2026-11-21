@@ -5,11 +5,8 @@ import {
   publishSettingsChange,
   subscribeSettingsChanges,
 } from '../settings/connectionSettingsBus.ts';
-import {
-  parseServerOptions,
-  serverOptionsToJson,
-  type ServerOptions,
-} from '../settings/settingsModel.ts';
+import { parseServerOptions, type ServerOptions } from '../settings/settingsModel.ts';
+import { patchServerOptions, subscribeServerOptions } from './serverOptionsStore.ts';
 
 /**
  * Per-server options (stored as `ProfileStore` options) loaded once and saved on change.
@@ -37,14 +34,26 @@ export function useServerOptions(profileId: string) {
       live = false;
     };
   }, [profiles, profileId, reloads]);
+  // Sibling copies (the options and TOTP sections, the connection list) follow each write.
+  useEffect(
+    () =>
+      subscribeServerOptions((id, stored) => {
+        if (id === profileId) setOptions(stored);
+      }),
+    [profileId],
+  );
   const save = (patch: Partial<ServerOptions>) => {
     if (!options) return;
-    const next = { ...options, ...patch };
-    setOptions(next);
-    void profiles.setOptions(profileId, serverOptionsToJson(next)).then(() => {
-      // Open sessions of this server follow its session defaults.
-      if (patch.sessionDefaults !== undefined) publishSettingsChange(profileId, undefined, origin);
-    });
+    setOptions({ ...options, ...patch });
+    void patchServerOptions(profiles, profileId, patch).then(
+      () => {
+        // Open sessions of this server follow its session defaults (only those: any other
+        // change would needlessly reset their in-session values).
+        if (patch.sessionDefaults !== undefined)
+          publishSettingsChange(profileId, undefined, origin);
+      },
+      () => setReloads((n) => n + 1),
+    );
   };
   return { options, save };
 }

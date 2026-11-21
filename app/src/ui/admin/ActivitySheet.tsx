@@ -87,7 +87,7 @@ export function ActivitySheet({
 
   return (
     <Sheet title={s.title(name)} onClose={onClose}>
-      {error ? <ErrorBanner error={error} /> : null}
+      {error && !confirm ? <ErrorBanner error={error} /> : null}
       <h3 className="subsection-title">{s.active}</h3>
       {active === undefined ? <Spinner label={adminStrings.loading} /> : null}
       {active === 'unavailable' ? <p className="muted">{s.unavailable}</p> : null}
@@ -111,7 +111,10 @@ export function ActivitySheet({
                 <button
                   type="button"
                   className="btn btn-small btn-danger-ghost"
-                  onClick={() => setConfirm(x)}
+                  onClick={() => {
+                    setError(undefined);
+                    setConfirm(x);
+                  }}
                 >
                   {s.disconnect}
                 </button>
@@ -171,6 +174,8 @@ export function ActivitySheet({
           }
         >
           <p>{s.disconnectBody}</p>
+          {/* In the dialog: behind its backdrop the reason would not be seen. */}
+          {error ? <ErrorBanner error={error} /> : null}
         </Dialog>
       ) : null}
     </Sheet>

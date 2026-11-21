@@ -110,7 +110,7 @@ export function SessionsSheet({ onClose }: { onClose: () => void }) {
   return (
     <Sheet title={s.allTitle} onClose={onClose}>
       <p className="muted">{s.allIntro}</p>
-      {error ? <ErrorBanner error={error} /> : null}
+      {error && !confirmKill ? <ErrorBanner error={error} /> : null}
       {lists === undefined ? <Spinner label={adminStrings.loading} /> : null}
       {lists === 'unavailable' ? <p className="muted">{s.unavailable}</p> : null}
       {Array.isArray(lists) && rows.length === 0 ? <p className="muted">{s.noActive}</p> : null}
@@ -140,7 +140,10 @@ export function SessionsSheet({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className="btn btn-small btn-danger-ghost"
-                  onClick={() => setConfirmKill(r)}
+                  onClick={() => {
+                    setError(undefined);
+                    setConfirmKill(r);
+                  }}
                 >
                   {s.disconnect}
                 </button>
@@ -201,6 +204,8 @@ export function SessionsSheet({ onClose }: { onClose: () => void }) {
           }
         >
           <p>{s.disconnectBody}</p>
+          {/* In the dialog: behind its backdrop the reason would not be seen. */}
+          {error ? <ErrorBanner error={error} /> : null}
         </Dialog>
       ) : null}
     </Sheet>

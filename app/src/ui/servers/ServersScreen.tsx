@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import { EmptyState } from '../components/Feedback.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -8,11 +8,11 @@ import { selectedServerId } from '../nav/navigation.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
 import { demoVisible } from '../settings/settingsModel.ts';
 import { strings } from '../strings.ts';
-import { systemPrefersDark } from '../theme/applyTheme.ts';
+import { systemPrefersDark, watchSystemTheme } from '../theme/applyTheme.ts';
 import { resolveTheme } from '../theme/theme.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { QuickConnect } from './QuickConnect.tsx';
-import { hostOf, isInsecureUrl } from './serverForm.ts';
+import { hostOf, isInsecureUrl, reorderMode } from './serverForm.ts';
 import { ShareLinkDialog } from './ShareLinkDialog.tsx';
 import { DEMO_SERVER_ID, useSavedProfiles, useShareProfiles } from './useServers.ts';
 
@@ -27,7 +27,9 @@ export function ServersScreen() {
   const shares = useShareProfiles();
   const sessions = useSessions();
   const { settings, update } = useAppSettings();
-  const dark = resolveTheme(settings.theme, systemPrefersDark()) === 'dark';
+  // Follows the system while open (theme "System" at sunset), so the icon and label match.
+  const systemDark = useSyncExternalStore(watchSystemTheme, systemPrefersDark);
+  const dark = resolveTheme(settings.theme, systemDark) === 'dark';
   const showDemo = demoVisible(settings.showDemo, profiles?.length);
   const [reordering, setReordering] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -43,6 +45,9 @@ export function ServersScreen() {
 
   const openServer = (id: string) => nav.open({ name: 'connections', serverId: id });
   const canReorder = (profiles?.length ?? 0) >= 2;
+  // This list stays mounted: servers can be removed elsewhere while reordering is on, and
+  // with fewer than two its Done button is gone.
+  const showReorder = reorderMode(reordering, profiles?.length);
 
   return (
     <Screen
@@ -147,7 +152,7 @@ export function ServersScreen() {
               selected={selected === p.id}
               onOpen={() => openServer(p.id)}
               trailing={
-                reordering ? (
+                showReorder ? (
                   <>
                     <IconButton
                       icon="up"

@@ -13,6 +13,7 @@ import {
   totpAt,
   type TotpParams,
 } from '../../core/totp/totp.ts';
+import { Dialog } from '../components/Dialog.tsx';
 import { InfoBanner } from '../components/Feedback.tsx';
 import { Segmented, TextField, Toggle } from '../components/Form.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -20,9 +21,9 @@ import { useToast } from '../components/toastContext.ts';
 import { useNav } from '../nav/NavContext.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
 import { haptic } from '../services/native.ts';
+import { inheritedValues } from '../settings/connectionLayers.ts';
 import {
   applyClipboardPolicy,
-  clipboardPolicyOf,
   type ClipboardPolicy,
   type ServerOptions,
   type SessionSettingsPatch,
@@ -40,6 +41,7 @@ import {
   type Quality,
 } from '../../session/viewport/remoteSize.ts';
 import { seedPolicy } from './seedPolicy.ts';
+import { serverClipboardPolicy } from './clipboardPolicy.ts';
 import type { BiometryAvailability } from '../services/native.ts';
 
 type Inherit<T extends string> = T | 'inherit';
@@ -47,6 +49,7 @@ type Inherit<T extends string> = T | 'inherit';
 export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
   const services = useServices();
   const { options, save } = useServerOptions(profile.id);
+  const { settings: app } = useAppSettings();
   const nav = useNav();
   const [warn, setWarn] = useState<boolean | undefined>(undefined);
   const f = strings.serverForm;
@@ -63,6 +66,7 @@ export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
   }, [services.settings, profile.id]);
   if (!options) return null;
   const patch = options.sessionDefaults;
+  const clipboard = serverClipboardPolicy(patch, inheritedValues(app.sessionDefaults));
   const setPatch = (p: SessionSettingsPatch) => save({ sessionDefaults: p });
   const setField = <K extends 'fitMode' | 'pointerMode' | 'quality' | 'audio'>(
     key: K,
@@ -123,10 +127,12 @@ export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
           ...AUDIO_MODES.map((v) => ({ value: v, label: so.audioOptions[v] })),
         ]}
       />
-      <Segmented<ClipboardPolicy>
+      <Segmented<ClipboardPolicy | 'custom'>
         label={f.clipboardPolicy}
-        value={clipboardPolicyOf(patch)}
-        onChange={(v) => setPatch(applyClipboardPolicy(patch, v))}
+        value={clipboard}
+        onChange={(v) => {
+          if (v !== 'custom') setPatch(applyClipboardPolicy(patch, v));
+        }}
         options={[
           { value: 'inherit', label: f.inherit },
           { value: 'both', label: f.clipboardBoth },
@@ -134,6 +140,7 @@ export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
           { value: 'off', label: f.clipboardOff },
         ]}
       />
+      {clipboard === 'custom' ? <p className="field-hint">{f.clipboardCustom}</p> : null}
       <div className="link-list">
         <button
           type="button"
@@ -219,6 +226,7 @@ export function TotpSeedSection({ profile }: { profile: ServerProfile }) {
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [preview, setPreview] = useState<TotpParams | undefined>();
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const t = strings.serverForm.totp;
   useEffect(() => {
     let live = true;
@@ -307,9 +315,39 @@ export function TotpSeedSection({ profile }: { profile: ServerProfile }) {
               {t.showCode}
             </button>
           )}
-          <button type="button" className="btn btn-danger-ghost" onClick={() => void remove()}>
+          <button
+            type="button"
+            className="btn btn-danger-ghost"
+            onClick={() => setConfirmRemove(true)}
+          >
             <Icon name="trash" /> {t.remove}
           </button>
+          {confirmRemove ? (
+            <Dialog
+              title={t.removeTitle}
+              tone="danger"
+              onCancel={() => setConfirmRemove(false)}
+              actions={
+                <>
+                  <button type="button" className="btn" onClick={() => setConfirmRemove(false)}>
+                    {strings.common.cancel}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => {
+                      setConfirmRemove(false);
+                      void remove();
+                    }}
+                  >
+                    {strings.common.remove}
+                  </button>
+                </>
+              }
+            >
+              <p>{t.removeBody}</p>
+            </Dialog>
+          ) : null}
         </>
       ) : (
         <>

@@ -113,6 +113,12 @@ export type AuthFlowEvent =
   /** Signed in without the form: single sign-on or a share link (SRV-7, CON-6). */
   | { readonly type: 'external-ok' }
   | { readonly type: 'logout' }
+  /**
+   * The session and saved password were removed elsewhere (the lock screen's reset,
+   * Settings): like `logout`, but only from `authenticated`, so it never interrupts a
+   * sign-in that is already under way.
+   */
+  | { readonly type: 'signed-out-elsewhere' }
   | { readonly type: 'start-over' }
   /** The account password was changed in the app ("Change password"). */
   | { readonly type: 'password-changed'; readonly password: string };
@@ -380,7 +386,9 @@ export function authFlowReducer(state: AuthFlowState, event: AuthFlowEvent): Aut
         needsHttpConfirm: c.needsHttpConfirm,
       };
 
+    case 'signed-out-elsewhere':
     case 'logout':
+      if (event.type === 'signed-out-elsewhere' && state.phase !== 'authenticated') return state;
       return form(
         {
           ...c,
