@@ -29,6 +29,7 @@ public class PipPlugin: CAPPlugin, CAPBridgedPlugin, AVPictureInPictureControlle
         CAPPluginMethod(name: "frame", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "close", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise)
     ]
 
@@ -74,6 +75,10 @@ public class PipPlugin: CAPPlugin, CAPBridgedPlugin, AVPictureInPictureControlle
             if layer.status == .failed {
                 self.lastError = layer.error?.localizedDescription ?? "layer failed"
                 layer.flush()
+            } else if !layer.isReadyForMoreMediaData {
+                // A layer that is not rendering keeps its queue: drop the old frames, never
+                // the newest one, so memory stays bounded and the picture stays current.
+                layer.flush()
             }
             guard let sample = PipPlugin.sampleBuffer(from: image) else {
                 call.resolve(["shown": false])
@@ -106,6 +111,16 @@ public class PipPlugin: CAPPlugin, CAPBridgedPlugin, AVPictureInPictureControlle
         }
     }
 
+    /// Closes the window only: the layer stays, so it can open again (also on leaving the app).
+    @objc func close(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            if let controller = self.controller, controller.isPictureInPictureActive {
+                controller.stopPictureInPicture()
+            }
+            call.resolve()
+        }
+    }
+
     @objc func status(_ call: CAPPluginCall) {
         DispatchQueue.main.async { call.resolve(self.statusObject()) }
     }
@@ -115,9 +130,13 @@ public class PipPlugin: CAPPlugin, CAPBridgedPlugin, AVPictureInPictureControlle
     private func setUp() {
         guard let parent = bridge?.viewController?.view else { return }
         // Picture in Picture needs the playback category. Mixing keeps the user's music going.
+        // A record-capable category ("Send microphone" running) also plays in the background:
+        // leave it, or the microphone input would be cut.
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            if session.category != .playAndRecord {
+                try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            }
             try session.setActive(true)
         } catch {
             lastError = "audio session: \(error.localizedDescription)"
@@ -168,7 +187,8 @@ public class PipPlugin: CAPPlugin, CAPBridgedPlugin, AVPictureInPictureControlle
         displayLayer = nil
         hostView?.removeFromSuperview()
         hostView = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        // The audio session is left active: it is shared with the web view, whose remote
+        // sound and microphone would stop if it were deactivated here.
     }
 
     private func statusObject() -> [String: Any] {

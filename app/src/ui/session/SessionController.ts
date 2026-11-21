@@ -8,7 +8,7 @@
  * `getSnapshot` (for `useSyncExternalStore`) and calls the command methods.
  */
 
-import { PipFeed, pipAvailable } from './pipFeed.ts';
+import { PipFeed, pipAvailable, pipWanted } from './pipFeed.ts';
 import Guacamole from '../../vendor/guacamole-common-js';
 import { resumeNeedsReconnect } from '../sessions/backgroundPolicy.ts';
 import {
@@ -290,6 +290,8 @@ function connectSettingsKey(s: ResolvedSessionSettings): string {
 const QUIET_RECONNECT_MS = 10_000;
 /** After a return to the app, look at the tunnel this much later (longer than UNSTABLE's 1.5 s). */
 const RESUME_CHECK_MS = 2000;
+/** How often `whenTunnelAlive` looks again. */
+const TUNNEL_ALIVE_POLL_MS = 250;
 function devicePixelRatio(): number {
   const r = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
   return Number.isFinite(r) && r > 0 ? r : 1;
@@ -334,6 +336,8 @@ export class SessionController {
   private hardwareKeyboardSeen = false;
   private baseline = initialTextInput();
   private composing = false;
+  /** A flush was asked for during a composition: it runs when the composition ends. */
+  private flushAfterComposition = false;
   private caretTimer: ReturnType<typeof setTimeout> | null = null;
   private cursorHidden = false;
 
@@ -355,6 +359,8 @@ export class SessionController {
   /** Until this time, reconnects are immediate and the overlay stays hidden. */
   private quietUntil = 0;
   private resumeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the resume check last found the tunnel open (its pings answered while back). */
+  private resumeCheckedAt = 0;
   /** `connectSettingsKey` of the settings the current connection was made with. */
   private connectKey: string | null = null;
   /** What the last connect asked for (Session info). */
@@ -581,6 +587,7 @@ export class SessionController {
     this.audio.unlisten();
     for (const c of this.cleanups.splice(0)) c();
     this.disposed = true;
+    this.syncPip();
   }
 
   /**
@@ -731,6 +738,7 @@ export class SessionController {
     // A new phase object with the same meaning (the held connect after unlock, a network
     // event while reconnecting) is not logged again: it read as a second reconnect.
     if (phaseChanged(prev, phase)) this.logPhase(phase);
+    if (phase.kind !== prev.kind) this.syncPip();
     if (phase !== prev && phase.kind === 'reconnecting' && e.type === 'closed') {
       if (phase.waitingForNetwork) {
         if (this.retryTimer) clearTimeout(this.retryTimer);
@@ -833,6 +841,9 @@ export class SessionController {
       this.resumeTimer = null;
       if (this.disposed) return;
       const state = this.tunnel ? this.tunnel.state : TunnelState.CLOSED;
+      if (this.machine.phase.kind === 'connected' && state === TunnelState.OPEN) {
+        this.resumeCheckedAt = Date.now();
+      }
       if (resumeNeedsReconnect(this.machine.phase.kind, state)) {
         this.log(
           'info',
@@ -1109,7 +1120,6 @@ export class SessionController {
     const tunnel = this.tunnel;
     this.client = null;
     this.tunnel = null;
-    this.syncPip();
     this.generation++;
     if (!client) return;
     this.closingOnPurpose = onPurpose;
@@ -1362,23 +1372,26 @@ export class SessionController {
     this.publish();
   }
 
-  /**
-   * Picture in Picture (experimental, iOS): the feed runs while the setting is on and the
-   * session is connected and shown. It keeps running in the background: that is its point.
-   */
   /** More sheet: open the Picture in Picture window now (a tap). */
   openPictureInPicture(): void {
     void this.pip?.open();
   }
 
+  /**
+   * Picture in Picture (experimental, iOS). The feed runs while the setting is on and the
+   * session is open and shown, and keeps running in the background: that is its point. It
+   * also lives through a reconnect (frames pause until the new client draws), so a dropped
+   * tunnel does not close the window. It stops once the session has ended (`pipWanted`).
+   */
   private syncPip(): void {
-    const want =
-      this.settings.pictureInPicture &&
-      this.active &&
-      !this.disposed &&
-      this.client !== null &&
-      this.machine.phase.kind === 'connected' &&
-      pipAvailable();
+    const want = pipWanted({
+      setting: this.settings.pictureInPicture,
+      available: pipAvailable(),
+      active: this.active,
+      disposed: this.disposed,
+      phase: this.machine.phase.kind,
+      everConnected: this.machine.everConnected,
+    });
     if (want && !this.pip) {
       this.pip = new PipFeed(
         () => {
@@ -1387,6 +1400,7 @@ export class SessionController {
           return display.flatten();
         },
         (message) => this.log('info', message),
+        { disposableSource: true },
       );
       void this.pip.start();
     } else if (!want && this.pip) {
@@ -1918,6 +1932,35 @@ export class SessionController {
     return this.machine.phase.kind === 'connected';
   }
 
+  /**
+   * For sends made right after the app comes back (auto-send on focus): resolves true once
+   * the session is connected over a tunnel that has proved alive since the call (no resume
+   * check pending, and an instruction arrived or the resume check found it open; after a
+   * reconnect if the old tunnel died while away), or false after `timeoutMs`. Writing at
+   * once could go into a tunnel guacd already dropped, and be lost. Internal pings never
+   * reach `oninstruction`, hence the resume check as the second proof on an idle desktop.
+   */
+  whenTunnelAlive(timeoutMs = 10_000): Promise<boolean> {
+    const since = Date.now();
+    const alive = () =>
+      this.machine.phase.kind === 'connected' &&
+      this.tunnel !== null &&
+      this.tunnel.state === TunnelState.OPEN &&
+      this.resumeTimer === null &&
+      (this.lastRxAt > since || this.resumeCheckedAt >= since);
+    return new Promise((resolve) => {
+      const timer = setInterval(() => {
+        if (this.disposed || Date.now() - since >= timeoutMs) {
+          clearInterval(timer);
+          resolve(false);
+        } else if (alive()) {
+          clearInterval(timer);
+          resolve(true);
+        }
+      }, TUNNEL_ALIVE_POLL_MS);
+    });
+  }
+
   private applyPointerOutput(out: PointerOutput): void {
     this.sendMouse(out.mouse);
     if (out.viewport.length > 0) {
@@ -2040,6 +2083,7 @@ export class SessionController {
   private resetField(): void {
     const field = this.els?.field;
     if (!field) return;
+    this.flushAfterComposition = false;
     this.baseline = initialTextInput();
     field.value = this.baseline;
     caretToEnd(field);
@@ -2076,16 +2120,23 @@ export class SessionController {
   /**
    * Before anything other than typed text reaches the remote (a key bar key, a click):
    * send the word still held by commit-on-word, and drop the kept sentence, which no
-   * longer matches where the remote caret is.
+   * longer matches where the remote caret is. `keepContext`: only send the held word (a
+   * modifier key alone moves nothing on the remote).
+   * During a composition the field must not be touched: the flush runs when it ends.
    */
-  private flushText(): void {
-    if (this.composing) return;
+  private flushText(keepContext = false): void {
+    if (this.composing) {
+      this.flushAfterComposition = true;
+      return;
+    }
     const field = this.els?.field;
     if (!field) return;
     if (this.settings.textInputMode === 'word' && field.value !== this.baseline) {
       this.processField(false, true);
     }
-    if (this.keepsTypingContext() && field.value !== initialTextInput()) this.resetField();
+    if (!keepContext && this.keepsTypingContext() && field.value !== initialTextInput()) {
+      this.resetField();
+    }
   }
 
   /**
@@ -2259,6 +2310,11 @@ export class SessionController {
     this.on(field, 'compositionend', () => {
       this.composing = false;
       this.processField(false);
+      // A click or key bar key came during the composition: send and reset what it skipped.
+      if (this.flushAfterComposition) {
+        this.flushAfterComposition = false;
+        this.flushText();
+      }
     });
     this.on(field, 'input', (e) => {
       const composing = (e as InputEvent).isComposing || this.composing;
@@ -2400,7 +2456,8 @@ export class SessionController {
       r.events.push(...this.hw.flush());
     }
     if (r.events.length === 0) return;
-    if (type === 'down' && !r.toField) this.flushText();
+    // A modifier alone (Shift for a capital) keeps the sentence the keyboard works with.
+    if (type === 'down' && !r.toField) this.flushText(isModifierKey(e.key));
     this.sendKeyEvents(this.hwOut(r.events));
   }
 

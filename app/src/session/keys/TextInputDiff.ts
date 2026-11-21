@@ -142,9 +142,11 @@ export function diffTextInput(
     .join('');
 
   if (word && !opts.flush && backspaces === 0 && value.startsWith(sentinel)) {
-    const typedLength = b.length - cps(sentinel).length;
+    // What is held beyond what was sent (`a` is a prefix of `b`): with `keepContext` the
+    // field also carries the sentence already sent, which must not count here.
+    const heldLength = b.length - a.length;
     // Pure addition after what was sent, no boundary yet: keep it in the field.
-    if (!BOUNDARY.test(text) && typedLength < opts.maxLength) return hold;
+    if (!BOUNDARY.test(text) && heldLength < opts.maxLength) return hold;
   }
 
   let reset = false;

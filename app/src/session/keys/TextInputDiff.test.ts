@@ -366,4 +366,12 @@ describe('diffTextInput keepContext (autocorrect)', () => {
     expect(updates[0]?.text).toBe('');
     expect(remote).toBe('the. ');
   });
+
+  it('commit on word still holds the current word after a long kept sentence', () => {
+    const sentence = S + 'word '.repeat(14); // 70 code points already sent
+    const opts = { ...keep, commit: 'word' } as const;
+    const u = diffTextInput(sentence, sentence + 'w', false, opts);
+    expect(u).toMatchObject({ text: '', backspaces: 0, baseline: sentence, reset: false });
+    expect(diffTextInput(sentence, sentence + 'we ', false, opts).text).toBe('we ');
+  });
 });
