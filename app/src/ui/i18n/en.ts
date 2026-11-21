@@ -99,13 +99,13 @@ export const en = {
     deleteServer: 'Delete server',
     deleteTitle: (name: string) => `Delete “${name}”?`,
     deleteBody:
-      'The server, its favourites, recents, thumbnails, saved password, two-factor key and settings will be removed from this device.',
+      'The server, its favourites, recents, thumbnails, saved password, two-factor key, remembered connection passwords and settings will be removed from this device.',
     duplicate: 'Duplicate server',
     duplicateName: (name: string) => `${name} (copy)`,
     clearCredentials: 'Clear saved credentials',
     clearCredentialsTitle: 'Clear saved credentials?',
     clearCredentialsBody:
-      'The saved password, the session token and any stored two-factor key for this server are deleted from this device. You will be asked to sign in next time.',
+      'The saved password, the session token, any stored two-factor key and the remembered connection passwords for this server are deleted from this device. You will be asked to sign in next time.',
     credentialsCleared: 'Saved credentials cleared.',
     changePassword: {
       title: 'Account password',
@@ -523,6 +523,21 @@ export const en = {
     lockUnavailableWeb: 'Available in the mobile app only.',
     lockUnavailableDevice: 'Set up a device passcode, Face ID or fingerprint first.',
     lockAfter: 'Lock when the app has been in the background for',
+    rememberConnection: 'Remember connection passwords',
+    rememberConnectionOptions: {
+      never: 'Never',
+      '5m': '5 min',
+      '15m': '15 min',
+      '1h': '1 hour',
+      app: 'Until closed',
+      device: 'On this device',
+    },
+    rememberConnectionHint:
+      'When a remote computer asks for its own user name and password after you choose a connection, the app can answer by itself next time, also when it reconnects after being in the background. Time limits count from the last use. Every choice except “On this device” keeps them in memory only, at most until the app is closed; “On this device” saves them in the keychain / keystore, behind the app lock when it is on. The prompt has a “Remember” box to say no for one connection.',
+    rememberConnectionMemoryOnly:
+      'This build cannot save secrets on the device: “On this device” keeps them in memory until the app closes.',
+    forgetConnectionPasswords: 'Forget remembered connection passwords',
+    connectionPasswordsForgotten: 'Remembered connection passwords forgotten.',
     lockOffWithSeeds:
       'Stored two-factor keys are only used after unlocking. Turning the lock off deletes them from this device.',
     lockOffConfirm: 'Turn off and delete keys',
@@ -581,6 +596,7 @@ export const en = {
       'Saved passwords',
       'Session tokens (each server is also asked to end the session, where it can be reached)',
       'Stored two-factor (TOTP) keys',
+      'Remembered connection passwords',
     ],
     signOutKeeps:
       'Server entries, favourites, recents and all settings are kept. The backup passphrase is kept.',

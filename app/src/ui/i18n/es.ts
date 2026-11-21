@@ -100,13 +100,13 @@ export const es: Strings = {
     deleteServer: 'Eliminar servidor',
     deleteTitle: (name: string) => `¿Eliminar «${name}»?`,
     deleteBody:
-      'Se quitarán de este dispositivo el servidor, sus favoritos, recientes, miniaturas, la contraseña guardada, la clave de doble factor y los ajustes.',
+      'Se quitarán de este dispositivo el servidor, sus favoritos, recientes, miniaturas, la contraseña guardada, la clave de doble factor, las contraseñas de conexión recordadas y los ajustes.',
     duplicate: 'Duplicar servidor',
     duplicateName: (name: string) => `${name} (copia)`,
     clearCredentials: 'Borrar credenciales guardadas',
     clearCredentialsTitle: '¿Borrar las credenciales guardadas?',
     clearCredentialsBody:
-      'Se eliminan de este dispositivo la contraseña guardada, el token de sesión y cualquier clave de doble factor de este servidor. La próxima vez tendrás que iniciar sesión.',
+      'Se eliminan de este dispositivo la contraseña guardada, el token de sesión, cualquier clave de doble factor y las contraseñas de conexión recordadas de este servidor. La próxima vez tendrás que iniciar sesión.',
     credentialsCleared: 'Credenciales guardadas borradas.',
     changePassword: {
       title: 'Contraseña de la cuenta',
@@ -499,6 +499,7 @@ export const es: Strings = {
       'Las contraseñas guardadas',
       'Los tokens de sesión (también se pide a cada servidor que cierre la sesión, si está accesible)',
       'Las claves de doble factor (TOTP) guardadas',
+      'Las contraseñas de conexión recordadas',
     ],
     signOutKeeps:
       'Se conservan los servidores, favoritos, recientes y todos los ajustes. Se conserva la frase de contraseña de las copias.',
@@ -579,6 +580,21 @@ export const es: Strings = {
     lockUnavailableWeb: 'Solo disponible en la app móvil.',
     lockUnavailableDevice: 'Configura antes un código, Face ID o huella en el dispositivo.',
     lockAfter: 'Bloquear cuando la app lleve en segundo plano',
+    rememberConnection: 'Recordar las contraseñas de conexión',
+    rememberConnectionOptions: {
+      never: 'Nunca',
+      '5m': '5 min',
+      '15m': '15 min',
+      '1h': '1 hora',
+      app: 'Hasta cerrar',
+      device: 'En este dispositivo',
+    },
+    rememberConnectionHint:
+      'Cuando un equipo remoto pide su propio usuario y contraseña después de elegir una conexión, la app puede responder sola la próxima vez, también al reconectar después de estar en segundo plano. Los límites de tiempo cuentan desde el último uso. Todas las opciones salvo «En este dispositivo» los guardan solo en memoria, como mucho hasta que se cierra la app; «En este dispositivo» los guarda en el llavero / almacén de claves, detrás del bloqueo de la app si está activado. El aviso tiene una casilla «Recordar» para decir que no en una conexión.',
+    rememberConnectionMemoryOnly:
+      'Esta versión no puede guardar secretos en el dispositivo: «En este dispositivo» los guarda en memoria hasta que se cierra la app.',
+    forgetConnectionPasswords: 'Olvidar las contraseñas de conexión recordadas',
+    connectionPasswordsForgotten: 'Contraseñas de conexión recordadas olvidadas.',
     lockOffWithSeeds:
       'Las claves de doble factor guardadas solo se usan tras desbloquear. Si desactivas el bloqueo, se eliminarán de este dispositivo.',
     lockOffConfirm: 'Desactivar y eliminar claves',

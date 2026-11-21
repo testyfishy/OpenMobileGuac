@@ -1251,6 +1251,73 @@
   justify-content: flex-end;
 }
 
+/*
+ * SRV-11 sign-in prompt: a centred card in the space above the keyboard rather than a
+ * bottom sheet. iOS opens the keyboard only after a tap on the field; the layer then
+ * shrinks to the space above the keyboard (bottom: var(--_kb)) and Sheet's glide moves the
+ * card to the middle of what is left, instead of the sheet jumping from the bottom edge.
+ * The card never grows past the layer: the fields scroll inside it and Continue stays
+ * pinned at its bottom (landscape with the keyboard up leaves little room).
+ */
+.omg-sheet-layer--card {
+  align-items: center;
+  box-sizing: border-box;
+  padding: calc(max(env(safe-area-inset-top, 0px), var(--omg-dock-top, 0px)) + 8px)
+    calc(env(safe-area-inset-right, 0px) + 12px)
+    max(8px, calc(max(env(safe-area-inset-bottom, 0px), var(--omg-dock-bottom, 0px)) - var(--_kb)))
+    calc(env(safe-area-inset-left, 0px) + 12px);
+}
+
+.omg-sheet-layer--card > .omg-sheet {
+  width: min(440px, 100%);
+  max-height: 100%;
+  border-bottom: 1px solid var(--_border);
+  border-radius: calc(var(--_radius) + 6px);
+  padding-bottom: 0;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  animation-name: omg-card-in;
+}
+
+@keyframes omg-card-in {
+  from {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+}
+
+.omg-sheet--card .omg-sheet__body {
+  padding-bottom: 0;
+}
+
+.omg-sheet--card .omg-prompt__actions {
+  position: sticky;
+  bottom: 0;
+  margin: 12px -16px 0;
+  padding: 10px 16px 14px;
+  background: var(--omg-surface, #1c1f26);
+}
+
+.omg-prompt__check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  color: var(--_text);
+  cursor: pointer;
+}
+
+.omg-prompt__check input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--_accent);
+}
+
+.omg-prompt__remember .omg-muted {
+  margin-top: 0;
+}
+
 .omg-textarea {
   display: block;
   width: 100%;

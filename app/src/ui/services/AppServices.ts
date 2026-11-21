@@ -19,6 +19,7 @@ import type { SecureStore } from '../../core/storage/SecureStore.ts';
 import { shouldSignOutAfterBackground } from '../sessions/sessionModel.ts';
 import { AuthService } from './AuthService.ts';
 import { BackgroundClock } from './backgroundClock.ts';
+import { ConnectionSecrets } from './connectionSecrets.ts';
 import { getDevServer, type DevServer } from './devServer.ts';
 import { SettingsStore } from './SettingsStore.ts';
 import { isShareServerId, ShareProfiles } from './shareSessions.ts';
@@ -53,6 +54,8 @@ export interface AppServices {
   readonly tls: TlsTrustService;
   /** When the app went to the background ("Sign out of servers after …"). */
   readonly backgroundClock: BackgroundClock;
+  /** SRV-11: remembered answers to the remote computer's sign-in prompt. */
+  readonly connectionSecrets: ConnectionSecrets;
 }
 
 /**
@@ -126,6 +129,13 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
     lock.ensureUnlocked(strings.lock.credentialReason, strings.lock.cancel),
   );
   auth.setUnlockWaiter(() => lock.whenUnlocked());
+  // SRV-11: device-saved connection passwords pass the same gate as saved passwords; what is
+  // kept in memory for a server is dropped when the app signs out of it.
+  const connectionSecrets = new ConnectionSecrets({
+    secure,
+    mayUseStored: () => auth.mayUseStoredSecret(),
+  });
+  auth.onSignedOut((id) => connectionSecrets.forgetMemory(id));
   log.info('app', `started (${native ? 'native' : 'web'}, secrets: ${secretStorage})`);
   return {
     native,
@@ -145,5 +155,6 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
     lock,
     tls,
     backgroundClock,
+    connectionSecrets,
   };
 }

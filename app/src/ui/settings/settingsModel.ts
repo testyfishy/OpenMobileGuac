@@ -13,6 +13,11 @@ import type { SessionSettings } from '../integration/session.ts';
 import { INPUT_SETTING_KEYS, sanitizeSessionSettingsPatch } from '../session/settings.ts';
 import { parseLanguagePreference, type LanguagePreference } from '../i18n/locale.ts';
 import { parseThemePreference, type ThemePreference } from '../theme/theme.ts';
+import {
+  DEFAULT_REMEMBER_POLICY,
+  parseRememberPolicy,
+  type RememberPolicy,
+} from '../../session/credentials/rememberedParams.ts';
 
 /**
  * Global app settings (SET-1) and the merge of session settings:
@@ -47,6 +52,12 @@ export interface AppSettings {
    * in until the server itself ends the session).
    */
   readonly serverSignOutAfterSeconds: number | null;
+  /**
+   * SRV-11: how long values typed in the remote computer's sign-in prompt are remembered
+   * for that connection. App-wide (a security choice, next to the lock and sign-out
+   * settings); the prompt's own "Remember" box decides per connection.
+   */
+  readonly rememberConnectionPasswords: RememberPolicy;
   /** MUL-1: how many sessions may be open at once. */
   readonly maxSessions: number;
   /** CON-4: keep a small picture of the last screen per connection. */
@@ -94,6 +105,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   lock: { enabled: false, afterSeconds: 60 },
   backgroundDisconnectSeconds: 60,
   serverSignOutAfterSeconds: null,
+  rememberConnectionPasswords: DEFAULT_REMEMBER_POLICY,
   maxSessions: 3,
   thumbnails: true,
   connectionSort: 'server',
@@ -277,6 +289,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
       SERVER_SIGN_OUT_CHOICES,
       d.serverSignOutAfterSeconds as null,
     ),
+    rememberConnectionPasswords: parseRememberPolicy(raw['rememberConnectionPasswords']),
     maxSessions:
       typeof max === 'number' && Number.isInteger(max)
         ? Math.min(MAX_SESSIONS_MAX, Math.max(MAX_SESSIONS_MIN, max))
@@ -302,11 +315,17 @@ export function parseAppSettings(raw: unknown): AppSettings {
 
 /**
  * Settings restored from a backup: everything except what is device-specific (the lock,
- * which needs this device's biometrics, and whether the introduction was seen).
+ * which needs this device's biometrics, whether the introduction was seen, and what this
+ * device may keep of connection passwords).
  */
 export function settingsFromBackup(current: AppSettings, raw: unknown): AppSettings {
   const parsed = parseAppSettings(raw);
-  return { ...parsed, lock: current.lock, onboardingDone: current.onboardingDone };
+  return {
+    ...parsed,
+    lock: current.lock,
+    onboardingDone: current.onboardingDone,
+    rememberConnectionPasswords: current.rememberConnectionPasswords,
+  };
 }
 
 // ---- per-server options (stored by ProfileStore as JSON) --------------------------------

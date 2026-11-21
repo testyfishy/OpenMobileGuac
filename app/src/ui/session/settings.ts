@@ -150,6 +150,8 @@ export interface SessionSettings {
   tapDismissKeyboard?: TapDismissMode;
   /** Swiping down on the extra key bar hides the keyboard (or the key bar). */
   keyBarSwipeDismiss?: boolean;
+  /** A "hide extra keys" button at the right end of the key bar (the toolbar hides it too). */
+  keyBarCollapseButton?: boolean;
 
   // ---- Gesture switches (Settings › Gestures; optional for compatibility, all on by default)
   /** Touch and hold: right click (direct) or drag (trackpad). Off: a hold is a tap. */
@@ -230,6 +232,7 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   toolbarAutoHide: true,
   tapDismissKeyboard: 'off',
   keyBarSwipeDismiss: true,
+  keyBarCollapseButton: false,
   gestureLongPress: true,
   gestureTwoFingerTap: true,
   gestureThreeFingerTap: true,
@@ -364,6 +367,7 @@ export function normalizeSessionSettings(
     toolbarAutoHide: bool(raw['toolbarAutoHide'], d.toolbarAutoHide),
     tapDismissKeyboard: tapDismiss(raw['tapDismissKeyboard']),
     keyBarSwipeDismiss: bool(raw['keyBarSwipeDismiss'], d.keyBarSwipeDismiss),
+    keyBarCollapseButton: bool(raw['keyBarCollapseButton'], d.keyBarCollapseButton),
     gestureLongPress: bool(raw['gestureLongPress'], d.gestureLongPress),
     gestureTwoFingerTap: bool(raw['gestureTwoFingerTap'], d.gestureTwoFingerTap),
     gestureThreeFingerTap: bool(raw['gestureThreeFingerTap'], d.gestureThreeFingerTap),
@@ -419,6 +423,7 @@ export const INPUT_SETTING_KEYS = [
   'toolbarAutoHide',
   'tapDismissKeyboard',
   'keyBarSwipeDismiss',
+  'keyBarCollapseButton',
   'gestureLongPress',
   'gestureTwoFingerTap',
   'gestureThreeFingerTap',

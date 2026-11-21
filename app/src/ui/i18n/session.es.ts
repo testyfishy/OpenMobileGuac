@@ -359,6 +359,9 @@ export const sessionEs: SessionStrings = {
     microphone: 'Enviar micrófono',
     microphoneHint:
       'Conexiones RDP con la entrada de audio activada. Desactivado por defecto; el sistema pide acceso al micrófono la primera vez que se activa. Se detiene cuando la sesión se oculta o se desconecta.',
+    keyBarCollapseButton: 'Botón de ocultar en la barra de teclas',
+    keyBarCollapseButtonHint:
+      'Un botón al final de las teclas extra que las oculta. Desactivado deja más sitio para teclas; el botón de la barra de herramientas sigue mostrando y ocultando las teclas.',
     keyBarSwipeDismiss: 'Deslizar hacia abajo en las teclas extra para ocultar el teclado',
     keyBarSwipeDismissHint: 'Con el teclado oculto, el gesto oculta la barra de teclas.',
     haptics: 'Respuesta háptica',
@@ -885,10 +888,19 @@ export const sessionEs: SessionStrings = {
     title: 'Iniciar sesión en el equipo remoto',
     cancelAndDisconnect: 'Cancelar y desconectar',
     intro: (title: string, count: number) =>
-      `${title} necesita ${plural(count, 'este dato', 'estos datos')} para continuar. Se envían al equipo remoto y no se guardan en este dispositivo.`,
+      `${title} necesita ${plural(count, 'este dato', 'estos datos')} para continuar. Se envían al equipo remoto.`,
     show: (field: string) => `Mostrar ${field}`,
     hide: (field: string) => `Ocultar ${field}`,
     continue: 'Continuar',
+    remember: 'Recordar para esta conexión',
+    rememberFor: {
+      '5m': 'Durante 5 minutos desde el último uso, solo en memoria.',
+      '15m': 'Durante 15 minutos desde el último uso, solo en memoria.',
+      '1h': 'Durante 1 hora desde el último uso, solo en memoria.',
+      app: 'Hasta que se cierre la app, solo en memoria.',
+      device: 'Guardado en este dispositivo, en el llavero / almacén de claves.',
+    },
+    notRemembered: 'No se recuerda: se volverá a pedir la próxima vez.',
   },
 
   files: {

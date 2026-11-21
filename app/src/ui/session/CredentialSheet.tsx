@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import type { RequiredField } from '../../session/credentials/requiredParams.ts';
+import { offersRemember, type RememberPolicy } from '../../session/credentials/rememberedParams.ts';
 import { ChromeButton } from './ChromeButton.tsx';
 import { IconEye } from './icons.tsx';
 import { sessionStrings } from './sessionStrings.ts';
@@ -8,22 +9,37 @@ import { Sheet } from './Sheet.tsx';
 export interface CredentialSheetProps {
   readonly title: string;
   readonly fields: readonly RequiredField[];
-  readonly onSubmit: (values: Record<string, string>) => void;
+  /**
+   * The "Remember connection passwords" setting, or null when nothing can be remembered
+   * here (Demo, a joined or shared session). Null and `never` hide the Remember box.
+   */
+  readonly rememberPolicy?: RememberPolicy | null;
+  /** `remember`: the Remember box was ticked (always false when it is hidden). */
+  readonly onSubmit: (values: Record<string, string>, remember: boolean) => void;
   readonly onCancel: () => void;
 }
 
 /**
  * The server asked for connection parameters (`required`, SRV-11). The values live only in
- * this component's state until Continue; they are never logged or stored.
+ * this component's state until Continue. They are never logged; they are remembered only
+ * when the Remember box (shown by the setting, ticked by default) is left ticked.
  */
-export function CredentialSheet({ title, fields, onSubmit, onCancel }: CredentialSheetProps) {
+export function CredentialSheet({
+  title,
+  fields,
+  rememberPolicy,
+  onSubmit,
+  onCancel,
+}: CredentialSheetProps) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [shown, setShown] = useState<Record<string, boolean>>({});
+  const [remember, setRemember] = useState(true);
   const t = sessionStrings.credentials;
+  const offer = offersRemember(rememberPolicy);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    onSubmit(values);
+    onSubmit(values, offer && remember);
     setValues({});
   };
 
@@ -33,7 +49,8 @@ export function CredentialSheet({ title, fields, onSubmit, onCancel }: Credentia
       onClose={onCancel}
       dismissible={false}
       closeLabel={t.cancelAndDisconnect}
-      className="omg-sheet--prompt"
+      className="omg-sheet--prompt omg-sheet--card"
+      layerClassName="omg-sheet-layer--card"
     >
       <form onSubmit={submit} autoComplete="on">
         <p className="omg-muted omg-prompt__intro">{t.intro(title, fields.length)}</p>
@@ -97,7 +114,24 @@ export function CredentialSheet({ title, fields, onSubmit, onCancel }: Credentia
             </div>
           );
         })}
-        <div className="omg-sheet__actions omg-sheet__actions--end">
+        {offer && (
+          <div className="omg-field omg-prompt__remember">
+            <label className="omg-prompt__check" htmlFor="omg-req-remember">
+              <input
+                id="omg-req-remember"
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                aria-describedby="omg-req-remember-hint"
+              />
+              <span>{t.remember}</span>
+            </label>
+            <p id="omg-req-remember-hint" className="omg-muted">
+              {remember ? t.rememberFor[rememberPolicy] : t.notRemembered}
+            </p>
+          </div>
+        )}
+        <div className="omg-sheet__actions omg-sheet__actions--end omg-prompt__actions">
           <ChromeButton className="omg-btn--ghost" onClick={onCancel}>
             {sessionStrings.common.cancel}
           </ChromeButton>

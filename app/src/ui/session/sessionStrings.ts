@@ -363,6 +363,9 @@ export const sessionStringsEn = {
     microphone: 'Send microphone',
     microphoneHint:
       'RDP connections with audio input enabled. Off by default; the system asks for microphone access the first time it is turned on. It stops when the session is hidden or disconnects.',
+    keyBarCollapseButton: 'Hide button on the key bar',
+    keyBarCollapseButtonHint:
+      'A button at the right end of the extra keys that hides them. Off leaves more room for keys; the toolbar button still shows and hides the key bar.',
     keyBarSwipeDismiss: 'Swipe down on the key bar to hide the keyboard',
     keyBarSwipeDismissHint: 'With the keyboard hidden, the swipe hides the key bar.',
     haptics: 'Haptic feedback',
@@ -879,10 +882,20 @@ export const sessionStringsEn = {
     title: 'Sign in to the remote computer',
     cancelAndDisconnect: 'Cancel and disconnect',
     intro: (title: string, count: number) =>
-      `${title} needs ${plural(count, 'this detail', 'these details')} to continue. They are sent to the remote computer and not saved on this device.`,
+      `${title} needs ${plural(count, 'this detail', 'these details')} to continue. They are sent to the remote computer.`,
     show: (field: string) => `Show ${field}`,
     hide: (field: string) => `Hide ${field}`,
     continue: 'Continue',
+    remember: 'Remember for this connection',
+    /** How long, by the "Remember connection passwords" setting (never shown for "never"). */
+    rememberFor: {
+      '5m': 'For 5 minutes after the last use, in memory only.',
+      '15m': 'For 15 minutes after the last use, in memory only.',
+      '1h': 'For 1 hour after the last use, in memory only.',
+      app: 'Until the app is closed, in memory only.',
+      device: 'Saved on this device, in the keychain / keystore.',
+    },
+    notRemembered: 'Not remembered: you will be asked again next time.',
   },
 
   files: {

@@ -357,6 +357,12 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     optionLabel: (v) => (v === 'word' ? S().input.commitOnWord : S().input.live),
   },
   sw(
+    'keyBarCollapseButton',
+    'keyboard',
+    () => S().options.keyBarCollapseButton,
+    () => S().options.keyBarCollapseButtonHint,
+  ),
+  sw(
     'textInputBar',
     'keyboard',
     () => S().input.textInputBar,

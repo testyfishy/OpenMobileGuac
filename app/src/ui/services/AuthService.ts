@@ -83,6 +83,7 @@ export class AuthService {
   private readonly listeners = new Set<(profileId: string) => void>();
   private readonly passwordListeners = new Set<(profileId: string, password: string) => void>();
   private readonly backgroundSignOutListeners = new Set<(profileId: string) => void>();
+  private readonly signedOutListeners = new Set<(profileId: string) => void>();
   /** Servers signed out after the background time: known answer per id (`kv` is the truth). */
   private readonly passwordRequired = new Map<string, boolean>();
   private readonly kv: KeyValueStore | undefined;
@@ -127,6 +128,36 @@ export class AuthService {
    */
   setUnlockWaiter(wait: () => Promise<void>): void {
     this.unlocked = wait;
+  }
+
+  /**
+   * SRV-6(b) for other secrets stored on the device (SRV-11 remembered connection
+   * passwords): waits like a saved password does (start-up check, app lock), then asks the
+   * credential gate. True = the secret may be used now.
+   */
+  async mayUseStoredSecret(): Promise<boolean> {
+    await this.ready();
+    return this.gate ? this.gate() : true;
+  }
+
+  /**
+   * Called when the app signs out of a server: `logout`, "Clear saved credentials", an
+   * address change or deletion (`reset`), "Sign out of all servers" and the background
+   * sign-out. Used to drop what is remembered in memory for that server.
+   */
+  onSignedOut(fn: (profileId: string) => void): () => void {
+    this.signedOutListeners.add(fn);
+    return () => this.signedOutListeners.delete(fn);
+  }
+
+  private signedOut(profileId: string): void {
+    for (const l of this.signedOutListeners) {
+      try {
+        l(profileId);
+      } catch {
+        // a listener must not stop a sign-out
+      }
+    }
   }
 
   /** Called when a server's session changes (signed in, out, or expired). */
@@ -305,6 +336,7 @@ export class AuthService {
   /** Signs out on the server (best effort) and forgets the token. The saved password stays. */
   async logout(profileId: string): Promise<void> {
     const session = this.sessions.get(profileId);
+    this.signedOut(profileId);
     await this.forgetToken(profileId);
     if (session) await this.api.logout(session).catch(() => undefined);
   }
@@ -407,6 +439,7 @@ export class AuthService {
       const token = live?.token ?? stored;
       if (token) revoke.push(live ?? tokenOnlySession(p.baseUrl, token));
       this.sessions.delete(p.id);
+      this.signedOut(p.id);
       this.transientPasswords.delete(p.id);
       this.lastTotpCounter.delete(p.id);
       for (const key of secretKeys.all(p.id)) {
@@ -469,6 +502,7 @@ export class AuthService {
       await this.secure.remove(secretKeys.authToken(p.id)).catch(() => undefined);
     }
     for (const id of ids) {
+      this.signedOut(id);
       this.transientPasswords.delete(id);
       if (!isShareServerId(id)) await this.setPasswordRequired(id, true);
     }

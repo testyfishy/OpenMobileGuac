@@ -242,6 +242,38 @@ export default function SessionHost({
     [isDemo, services.auth, serverId],
   );
 
+  // SRV-11: remembered answers to the remote computer's own sign-in prompt, bound to this
+  // server (profile id and signed-in address) and this connection. Not for the Demo, a
+  // joined session or a share link (someone else's connection). The policy is read at each
+  // use, so a change in Settings applies to sessions already open.
+  const rememberPolicy = app.rememberConnectionPasswords;
+  const credentialMemory = useMemo(
+    () =>
+      isDemo || joined || isShareServerId(serverId)
+        ? undefined
+        : services.connectionSecrets.bind({
+            profileId: serverId,
+            policy: rememberPolicy,
+            server: () => services.auth.current(serverId)?.baseUrl,
+            connection: {
+              dataSource: target.dataSource,
+              type: target.type,
+              identifier: target.identifier,
+            },
+          }),
+    [
+      isDemo,
+      joined,
+      serverId,
+      services.connectionSecrets,
+      services.auth,
+      target.dataSource,
+      target.type,
+      target.identifier,
+      rememberPolicy,
+    ],
+  );
+
   // CON-4 thumbnails come from the session screen itself (≤ 320 px JPEG).
   // Not for a joined session: that picture is someone else's screen.
   const thumbnailsOn = app.thumbnails && !joined;
@@ -298,6 +330,7 @@ export default function SessionHost({
         {...(sharing ? { sharing } : {})}
         sharedViewer={joined || isShareServerId(serverId)}
         streamDownload={streamDownload}
+        {...(credentialMemory ? { credentialMemory } : {})}
         {...(isDemo ? {} : { onSignInExpired })}
       />
       {confirmExit && active ? (

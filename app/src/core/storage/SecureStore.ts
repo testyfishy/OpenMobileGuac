@@ -23,11 +23,18 @@ export const secretKeys = {
   authToken: (profileId: string): string => `profile/${profileId}/authToken`,
   /** Optional stored TOTP seed (SRV-9), as an `otpauth://totp` URI. */
   totpSeed: (profileId: string): string => `profile/${profileId}/totpSeed`,
+  /**
+   * SRV-11: connection parameters typed in the server's prompt and saved with "Remember
+   * connection passwords: Saved on this device", for every connection of the profile (one
+   * JSON record, see `session/credentials/rememberedParams.ts`). Never backed up.
+   */
+  connectionPasswords: (profileId: string): string => `profile/${profileId}/connectionPasswords`,
   /** Every secret key for a profile, for deletion. */
   all: (profileId: string): string[] => [
     secretKeys.password(profileId),
     secretKeys.authToken(profileId),
     secretKeys.totpSeed(profileId),
+    secretKeys.connectionPasswords(profileId),
   ],
 } as const;
 

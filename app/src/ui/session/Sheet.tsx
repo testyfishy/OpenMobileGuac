@@ -21,6 +21,7 @@ export function Sheet({
   dismissible = true,
   closeLabel = sessionStrings.common.close,
   className,
+  layerClassName,
 }: {
   title: string;
   onClose: () => void;
@@ -29,6 +30,8 @@ export function Sheet({
   dismissible?: boolean;
   closeLabel?: string;
   className?: string;
+  /** Extra class on the layer (e.g. `omg-sheet-layer--card`: a centred card, not a bottom sheet). */
+  layerClassName?: string;
 }) {
   const onBack = useContext(SheetBackContext);
   const swipeSetting = useContext(SheetSwipeContext);
@@ -100,7 +103,7 @@ export function Sheet({
   };
 
   return (
-    <div className="omg-sheet-layer">
+    <div className={layerClassName ? `omg-sheet-layer ${layerClassName}` : 'omg-sheet-layer'}>
       <div
         className="omg-sheet-backdrop"
         onPointerDown={dismissible ? onClose : undefined}

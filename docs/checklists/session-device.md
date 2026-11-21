@@ -249,6 +249,46 @@ only fakes the server side.
       Username where the VNC auth type needs one). SSH without a stored password asks
       inside the terminal instead (guacd 1.6.0 behaviour), and typing there works.
 
+#### Remembered answers ("Remember connection passwords", SRV-11)
+
+- [ ] Default (Until closed): the prompt shows "Remember for this connection", ticked, with
+      "Until the app is closed, in memory only". Continue connects. Disconnect and open the
+      connection again: no prompt. Send the app to the background for 30 s+ (iPhone: the
+      tunnel drops) and come back: it reconnects without a prompt.
+- [ ] Untick Remember, connect, disconnect, reconnect: the prompt appears again.
+- [ ] Type a wrong password with Remember ticked: "Sign-in failed"; Reconnect prompts again
+      (the wrong value was not remembered).
+- [ ] Change the password on the remote computer, then reconnect: the remembered value is
+      tried once, then the prompt appears (no reconnect loop). Note what guacd reports for
+      RDP and for VNC (expected: the prompt, not repeated failures).
+- [ ] 5 min: connect, wait 6 min with the app closed to the background, reopen: prompt.
+      Use the session every few minutes for 10 min: no prompt (time counts from last use).
+- [ ] Until closed: force-quit the app and reopen: prompt (nothing was written to disk).
+- [ ] On this device: connect once, force-quit, reopen and connect: no prompt. With the app
+      lock on, Face ID / fingerprint is asked first (unless just unlocked). Cancel it: the
+      prompt appears instead.
+- [ ] Settings › Security › "Forget remembered connection passwords": the next connect asks.
+      Switching the setting from "On this device" to any other choice deletes the saved
+      values; switching to Never forgets everything.
+- [ ] Server sign-out (server list) forgets the in-memory values of that server; "Clear
+      saved credentials", deleting the server, changing its address and "Sign out of all
+      servers" forget the saved ones too.
+- [ ] Diagnostics log: lines say "Answered 2 requested parameter(s) with remembered
+      values", never a value. A backup file does not contain them (also with a passphrase).
+- [ ] Demo, a joined session and a share link: no Remember box.
+
+#### Prompt layout and keyboard
+
+- [ ] iPhone portrait: the prompt is a centred card, not a bottom sheet. Tap the first
+      field: the keyboard opens and the card glides to the middle of the space above it
+      (no jump). Close the keyboard: it glides back.
+- [ ] iPhone landscape with the keyboard up: the title, the focused field and Continue stay
+      visible; the fields scroll inside the card.
+- [ ] With the key bar set to Shown, or the text bar on, neither appears above the keyboard
+      or under the card while the prompt is open; both come back after Continue.
+- [ ] Android phone and a tablet: same card; the other sheets (More, Files, …) are still
+      bottom sheets.
+
 ### Audio (AUD-1)
 
 - [ ] RDP audio plays (play a sound on the remote). On iOS, audio starts after the first

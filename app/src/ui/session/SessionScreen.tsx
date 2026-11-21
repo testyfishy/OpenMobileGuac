@@ -33,6 +33,7 @@ import type { PointerMode } from '../../session/pointer/PointerModel.ts';
 import { ClipboardSheet } from './ClipboardSheet.tsx';
 import { ComboMenu } from './ComboMenu.tsx';
 import { CredentialSheet } from './CredentialSheet.tsx';
+import type { RememberPolicy } from '../../session/credentials/rememberedParams.ts';
 import { FilesSheet } from './FilesSheet.tsx';
 import { ChromeButton } from './ChromeButton.tsx';
 import { CursorArrow, IconEye, IconMic, IconViewers } from './icons.tsx';
@@ -63,7 +64,11 @@ import {
   type FoldInfo,
   type KeepAwakeState,
 } from './platform.ts';
-import { SessionController, type SessionLogLevel } from './SessionController.ts';
+import {
+  SessionController,
+  type CredentialMemory,
+  type SessionLogLevel,
+} from './SessionController.ts';
 import { sessionStrings } from './sessionStrings.ts';
 import type { SessionActionContext } from './sessionActions.tsx';
 import { normalizeSessionSettings, type SessionSettings } from './settings.ts';
@@ -163,6 +168,12 @@ export interface SessionScreenProps {
     streamIndex: number,
     filename: string,
   ) => StreamRequest | null;
+  /**
+   * SRV-11: remembered answers to the remote computer's sign-in prompt, bound to this
+   * connection, with the "Remember connection passwords" setting for the prompt's Remember
+   * box. Absent: always ask, and the prompt offers no Remember box (Demo, joined sessions).
+   */
+  credentialMemory?: CredentialMemory & { readonly policy: RememberPolicy };
 }
 
 /** Longest clipboard text typed as keystrokes (each character is two key events). */
@@ -324,6 +335,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       sharedViewer: latest.current.sharedViewer === true,
       streamDownload: (uuid, index, name) =>
         latest.current.streamDownload?.(uuid, index, name) ?? null,
+      credentialMemory: () => latest.current.credentialMemory ?? null,
       // The server refused audio input, access was denied or capture is unavailable: turn
       // "Send microphone" off so it is not retried on every connect.
       onMicrophoneProblem: () => settingsChangeRef.current({ microphone: false }),
@@ -438,9 +450,13 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   // ---- Key bar: docked above the keyboard; its height is part of the keyboard inset
   // (except in the split layout, where it sits below the display, not over it).
   const [keyBarMode, setKeyBarMode] = useState<KeyBarMode>('auto');
+  // While the sign-in prompt is open its own field has the keyboard: the key bar and the
+  // text bar (which would ride above the keyboard, under the prompt) stay away.
+  const promptOpen = snap.credentials !== null;
   const keyBarVisible =
-    split || keyBarMode === 'shown' || (keyBarMode === 'auto' && snap.keyboardActive);
-  const textBarVisible = settings.textInputBar;
+    split ||
+    (!promptOpen && (keyBarMode === 'shown' || (keyBarMode === 'auto' && snap.keyboardActive)));
+  const textBarVisible = settings.textInputBar && (split || !promptOpen);
 
   // ---- Toolbar style: floating over the desktop, or docked (space reserved at an edge)
   const keyboardActive = snap.keyboardActive;
@@ -870,7 +886,9 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
           {...(settings.keySetSwipe
             ? { onSwipeSet: (d: -1 | 1) => chooseSet(stepSet(sets, activeSet.id, d).id, true) }
             : {})}
-          onCollapse={split ? undefined : () => setKeyBarMode('hidden')}
+          onCollapse={
+            split || !settings.keyBarCollapseButton ? undefined : () => setKeyBarMode('hidden')
+          }
           keyboardActive={keyboardActive}
           onHideKeyboard={toggleKeyboard}
           {...(settings.keyBarSwipeDismiss
@@ -1186,7 +1204,8 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                 <CredentialSheet
                   title={title}
                   fields={prompt}
-                  onSubmit={(values) => controller.submitCredentials(values)}
+                  rememberPolicy={props.credentialMemory?.policy ?? null}
+                  onSubmit={(values, remember) => controller.submitCredentials(values, remember)}
                   onCancel={() => {
                     // As the web client: disconnect; the overlay then offers Reconnect.
                     controller.cancelCredentials();

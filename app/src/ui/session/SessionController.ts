@@ -93,6 +93,7 @@ import {
   describeRequiredParams,
   type RequiredField,
 } from '../../session/credentials/requiredParams.ts';
+import { RequiredAnswerGuard } from '../../session/credentials/rememberedParams.ts';
 import { ArgvTracker, sendArgumentValues, type MutableArgument } from './argv.ts';
 import { SessionAudio } from './audio.ts';
 import { SessionMicrophone, type MicProblem, type MicState } from './microphone.ts';
@@ -111,6 +112,7 @@ import {
 } from './settings.ts';
 import {
   INITIAL_SESSION_MACHINE,
+  isRetryableStatus,
   reduceSession,
   type SessionEvent,
   type SessionMachine,
@@ -174,6 +176,19 @@ export interface SessionSnapshot {
 
 export type SessionLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+/**
+ * SRV-11: remembered answers to the server's `required` prompt, already bound to this
+ * session's server and connection by the host (values never go to another one).
+ */
+export interface CredentialMemory {
+  /** Values for every requested name, or null (then the prompt is shown). */
+  recall(names: readonly string[]): Promise<Readonly<Record<string, string>> | null>;
+  /** Keep (or refresh the last use of) values that led to a connected session. */
+  remember(names: readonly string[], values: Readonly<Record<string, string>>): void;
+  /** Values that were rejected, or that the user chose not to remember. */
+  forget(names: readonly string[]): void;
+}
+
 export interface SessionControllerOptions {
   readonly createTunnel: () => TunnelLike;
   readonly buildConnectData: (size: ConnectSize) => string;
@@ -213,6 +228,8 @@ export interface SessionControllerOptions {
     streamIndex: number,
     filename: string,
   ) => StreamRequest | null;
+  /** SRV-11: remembered prompt answers; null or absent = always ask. Read at each prompt. */
+  readonly credentialMemory?: () => CredentialMemory | null;
 }
 
 /** The `size` sent at connect, plus whether audio types are advertised (Quality, AUD-1). */
@@ -343,6 +360,8 @@ export class SessionController {
   private rateSamples: { at: number; bytes: number }[] = [];
   /** Fields of an open `required` prompt. */
   private credentials: readonly RequiredField[] | null = null;
+  /** SRV-11: what was answered in this connection attempt, and what to remember or forget. */
+  private readonly answers = new RequiredAnswerGuard();
   private active = true;
   private readonly audio = new SessionAudio(
     (m) => this.log('info', m),
@@ -604,13 +623,25 @@ export class SessionController {
     return ok;
   }
 
-  /** Answer the server's `required` prompt. Values are sent once and not kept. */
-  submitCredentials(values: Readonly<Record<string, string>>): void {
+  /**
+   * Answer the server's `required` prompt. `remember`: the prompt's Remember box was ticked;
+   * the values are then handed to the credential memory once the connection succeeds (and
+   * never otherwise). Unticked: anything remembered for these fields is forgotten.
+   */
+  submitCredentials(values: Readonly<Record<string, string>>, remember = false): void {
     const fields = this.credentials;
     const client = this.client;
     if (!fields || !client) return;
     this.credentials = null;
-    sendArgumentValues(client, argumentValues(fields, values));
+    const sent = argumentValues(fields, values);
+    sendArgumentValues(client, sent);
+    const answer = Object.fromEntries(sent.map((a) => [a.name, a.value]));
+    const forget = this.answers.answeredByUser(
+      sent.map((a) => a.name),
+      answer,
+      remember,
+    );
+    if (forget) this.opts?.credentialMemory?.()?.forget(forget);
     this.log('info', `Sent ${fields.length} requested parameter(s)`);
     this.publish();
   }
@@ -621,6 +652,12 @@ export class SessionController {
     this.credentials = null;
     this.log('info', 'Credential prompt cancelled');
     this.disconnect();
+  }
+
+  private forgetAnswers(list: readonly (readonly string[])[]): void {
+    if (list.length === 0) return;
+    const memory = this.opts?.credentialMemory?.() ?? null;
+    for (const names of list) memory?.forget(names);
   }
 
   private log(level: SessionLogLevel, message: string): void {
@@ -819,6 +856,7 @@ export class SessionController {
     this.teardownClient(true);
     const gen = ++this.generation;
     this.closingOnPurpose = false;
+    this.answers.begin();
     this.dispatch({ type: 'connect' });
 
     const opts = this.opts;
@@ -857,6 +895,13 @@ export class SessionController {
       // instruction). Never auto-reconnected (AUDIT #7).
       const byServer = !this.closingOnPurpose && this.machine.lastError === null;
       const intentional = this.closingOnPurpose || byServer;
+      if (!this.closingOnPurpose) {
+        // SRV-11: remembered values answered this attempt and it ended before the desktop
+        // was shown: forget them, unless the tunnel itself reported a network loss.
+        const err = this.machine.lastError;
+        const networkDrop = err !== null && err.source === 'tunnel' && isRetryableStatus(err.code);
+        this.forgetAnswers(this.answers.ended(networkDrop));
+      }
       this.dispatch({ type: 'closed', intentional, byServer });
       this.releaseInputs();
       this.mic.stop();
@@ -869,6 +914,7 @@ export class SessionController {
     };
     client.onerror = (status) => {
       if (!live()) return;
+      this.forgetAnswers(this.answers.serverError(status.code));
       this.log('warn', `Server error 0x${status.code.toString(16).padStart(4, '0')}`);
       this.dispatch({
         type: 'error',
@@ -890,8 +936,44 @@ export class SessionController {
       if (!live()) return;
       const fields = describeRequiredParams(names);
       this.log('info', `Server requested: ${fields.map((f) => f.name).join(', ')}`);
-      this.credentials = fields.length > 0 ? fields : null;
-      this.publish();
+      if (fields.length === 0) return;
+      const asked = fields.map((f) => f.name);
+      const ask = () => {
+        this.credentials = fields;
+        this.publish();
+      };
+      // SRV-11: answer with remembered values at most once per field and attempt; a second
+      // request for a field already answered means the remembered value was rejected.
+      const step = this.answers.onRequired(asked);
+      if (step.forget.length > 0) {
+        this.log('info', 'Remembered values were not accepted: asking again');
+        this.forgetAnswers(step.forget);
+      }
+      const memory = step.action === 'recall' ? (this.opts?.credentialMemory?.() ?? null) : null;
+      if (!memory) {
+        ask();
+        return;
+      }
+      void memory
+        .recall(asked)
+        .catch(() => null)
+        .then((values) => {
+          if (!live() || this.client !== client) return;
+          if (!values) {
+            ask();
+            return;
+          }
+          const sent = argumentValues(fields, values);
+          sendArgumentValues(client, sent);
+          this.answers.answeredAutomatically(
+            asked,
+            Object.fromEntries(sent.map((a) => [a.name, a.value])),
+          );
+          this.log(
+            'info',
+            `Answered ${fields.length} requested parameter(s) with remembered values`,
+          );
+        });
     };
     client.onsync = () => {
       if (!live()) return;
@@ -1042,6 +1124,9 @@ export class SessionController {
     this.updateCursor();
     this.scheduleMatchSize();
     this.credentials = null;
+    // SRV-11: typed values (Remember ticked) are kept, remembered ones refreshed, only now.
+    const memory = this.opts?.credentialMemory?.() ?? null;
+    for (const a of this.answers.connected()) memory?.remember(a.names, a.values);
     this.syncMicrophone();
     this.stats.connectedAt = Date.now();
     // The first thumbnail comes from the timer below, not from the next `sync`.

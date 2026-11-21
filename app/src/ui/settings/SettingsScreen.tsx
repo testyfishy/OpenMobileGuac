@@ -25,6 +25,10 @@ import { useSessions } from '../sessions/SessionsContext.ts';
 import { SOURCE_URL, strings } from '../strings.ts';
 import type { ThemePreference } from '../theme/theme.ts';
 import {
+  REMEMBER_POLICIES,
+  type RememberPolicy,
+} from '../../session/credentials/rememberedParams.ts';
+import {
   BACKGROUND_DISCONNECT_CHOICES,
   LOCK_AFTER_CHOICES,
   MAX_SESSIONS_MAX,
@@ -201,6 +205,25 @@ export function SettingsScreen() {
 
   const lockAvailable = biometry === 'available';
 
+  // SRV-11: a change of policy also drops what the new one does not allow (see applyPolicy).
+  // Saved servers, plus the dev server (a virtual profile that is not in the list).
+  const secretProfileIds = async () => {
+    const ids = (await services.profiles.list().catch(() => [])).map((p) => p.id);
+    const dev = services.devServer?.profile.id;
+    return dev && !ids.includes(dev) ? [...ids, dev] : ids;
+  };
+  const setRememberPolicy = (policy: RememberPolicy) => {
+    update({ ...settings, rememberConnectionPasswords: policy });
+    void secretProfileIds()
+      .then((ids) => services.connectionSecrets.applyPolicy(policy, ids))
+      .catch(() => undefined);
+  };
+  const forgetConnectionPasswords = async () => {
+    await services.connectionSecrets.forgetAll(await secretProfileIds());
+    services.log.info('auth', 'remembered connection passwords forgotten');
+    toast.show(t.connectionPasswordsForgotten);
+  };
+
   return (
     <Screen title={t.title} onBack={nav.back}>
       <div className="form settings">
@@ -259,6 +282,28 @@ export function SettingsScreen() {
               }))}
             />
           ) : null}
+          <Segmented<RememberPolicy>
+            label={t.rememberConnection}
+            value={settings.rememberConnectionPasswords}
+            onChange={setRememberPolicy}
+            options={REMEMBER_POLICIES.map((p) => ({
+              value: p,
+              label: t.rememberConnectionOptions[p],
+            }))}
+          />
+          <p className="field-hint">{t.rememberConnectionHint}</p>
+          {settings.rememberConnectionPasswords === 'device' &&
+          services.secretStorage === 'memory' ? (
+            <p className="field-hint">{t.rememberConnectionMemoryOnly}</p>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            data-action="forget-connection-passwords"
+            onClick={() => void forgetConnectionPasswords()}
+          >
+            {t.forgetConnectionPasswords}
+          </button>
           <div className="list-setting">
             <span className="toggle-label">
               <span>{t.signOutAll}</span>
