@@ -1995,6 +1995,16 @@ export class SessionController {
       this.tunnel.state === TunnelState.OPEN &&
       this.resumeTimer === null &&
       (this.lastRxAt > since || this.resumeCheckedAt >= since);
+    // The page was never hidden (Control Center, a notification, a system prompt): nothing
+    // froze, so an open tunnel is a live one, also on an idle desktop.
+    if (
+      this.hiddenAt === null &&
+      this.resumeTimer === null &&
+      this.machine.phase.kind === 'connected' &&
+      this.tunnel?.state === TunnelState.OPEN
+    ) {
+      return Promise.resolve(true);
+    }
     return new Promise((resolve) => {
       const timer = setInterval(() => {
         if (this.disposed || Date.now() - since >= timeoutMs) {
