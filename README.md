@@ -11,6 +11,16 @@ official Guacamole JavaScript client library (`guacamole-common-js`, Apache-2.0)
 the protocol and rendering inside the system WebView. See [docs/SPEC.md](docs/SPEC.md)
 for the specification and [docs/PLAN.md](docs/PLAN.md) for the delivery plan.
 
+> **Why this exists.** I respect the developer of
+> [PocketGuac](https://guac.pocketsized.app/). But I use an iPhone, PocketGuac is for
+> Android, and I needed a Guacamole client for iOS, so I made this one myself. All of the
+> source is here if you want to build your own. If you just want to use mine, the iPhone
+> and iPad app is published under my Apple developer account (App Store listing in
+> preparation) and the Android APK is on the
+> [Releases page](https://github.com/testyfishy/OpenMobileGuac/releases/latest). Missing a
+> feature? [Open an issue](https://github.com/testyfishy/OpenMobileGuac/issues) and I will
+> look at adding it.
+
 > **Unofficial.** OpenMobileGuac is an independent project. It is not affiliated with,
 > endorsed by, or sponsored by the Apache Software Foundation or the Apache Guacamole
 > project. "Apache", "Apache Guacamole", and "Guacamole" are trademarks of the Apache
@@ -32,7 +42,7 @@ for the specification and [docs/PLAN.md](docs/PLAN.md) for the delivery plan.
 | Platform | Where | Built by |
 |---|---|---|
 | Source | This repository | — |
-| Android | APK on [GitHub Releases](https://github.com/testyfishy/OpenMobileGuac/releases). Today this is only the rolling debug build on the [`nightly`](https://github.com/testyfishy/OpenMobileGuac/releases/tag/nightly) prerelease. Google Play later | [`.github/workflows/android.yml`](.github/workflows/android.yml) |
+| Android | APK on [GitHub Releases](https://github.com/testyfishy/OpenMobileGuac/releases): the [latest release](https://github.com/testyfishy/OpenMobileGuac/releases/latest), and a rolling debug build on the [`nightly`](https://github.com/testyfishy/OpenMobileGuac/releases/tag/nightly) prerelease. Google Play later | [`.github/workflows/android.yml`](.github/workflows/android.yml) |
 | iOS | App Store and TestFlight, under the maintainer's Apple developer account. Not yet on the App Store | [`.github/workflows/ios.yml`](.github/workflows/ios.yml), on GitHub's macOS runners, from a commit on `main` |
 
 The iOS build is made by the public workflow, and its run log is public. The build number
@@ -68,7 +78,7 @@ Comparison with the Guacamole 1.6.0 web client: [docs/GUACAMOLE-PARITY.md](docs/
 
 ## Status
 
-**Early development, not yet released in any store.**
+**Early releases on GitHub; not yet in any app store.**
 
 What has been checked:
 
@@ -84,17 +94,18 @@ their own Guacamole server (sign-in, VNC sessions, landscape layout, extra keys,
 remembered connection password with Face ID). No results are recorded in the checklists
 yet, and nothing has been run on an Android device. Not yet checked
 systematically on a device: RDP and SSH sessions, OS paste prompts, file transfer,
-keep-awake, self-signed certificates, backups, and everything on Android. Android
-release signing has not run. Testing order:
+keep-awake, self-signed certificates, backups, and everything on Android. Testing order:
 [docs/checklists/README.md](docs/checklists/README.md), then
 [phase0.md](docs/checklists/phase0.md), [session-device.md](docs/checklists/session-device.md)
 and [app-device.md](docs/checklists/app-device.md).
 
 ## Try it
 
-- **Android:** install the debug APK from the rolling
+- **Android:** install the APK from the
+  [latest release](https://github.com/testyfishy/OpenMobileGuac/releases/latest), or the
+  debug APK from the rolling
   [`nightly` prerelease](https://github.com/testyfishy/OpenMobileGuac/releases/tag/nightly),
-  rebuilt on every push to `main`. It is an untested development build.
+  rebuilt on every push to `main`. Neither has been run on an Android device yet.
 - **Any build or the browser:** open **Demo** on the server list, then **Demo desktop**. The
   two fixed-size variants (1024 × 768 and 1920 × 1080) are for trying zoom and pan.
 
