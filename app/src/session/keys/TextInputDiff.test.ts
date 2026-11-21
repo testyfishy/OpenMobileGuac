@@ -292,3 +292,78 @@ describe('caretResync (iOS space-bar cursor, selection changes)', () => {
     expect(caretResync(v, 2, 2, true).restoreCaret).toBe(false);
   });
 });
+
+describe('diffTextInput keepContext (autocorrect)', () => {
+  const keep = { keepContext: true } as const;
+
+  it('keeps the sentence across spaces', () => {
+    const u = diffTextInput(S + 'hi', S + 'hi ', false, keep);
+    expect(u).toEqual({ backspaces: 0, text: ' ', baseline: S + 'hi ', reset: false });
+  });
+
+  it('double space becomes a full stop', () => {
+    const { updates, remote } = session(
+      [
+        [S + 'hello', false],
+        [S + 'hello ', false],
+        [S + 'hello. ', false],
+      ],
+      keep,
+    );
+    expect(updates[2]).toMatchObject({ backspaces: 1, text: '. ', reset: false });
+    expect(remote).toBe('hello. ');
+  });
+
+  it('corrects an earlier word', () => {
+    const { remote } = session(
+      [
+        [S + 'i think teh', false],
+        [S + 'I think the ', false],
+      ],
+      keep,
+    );
+    expect(remote).toBe('I think the ');
+  });
+
+  it('resets on a line break and on a damaged sentinel', () => {
+    expect(diffTextInput(S + 'ls', S + 'ls\n', false, keep)).toMatchObject({
+      baseline: S,
+      reset: true,
+    });
+    expect(diffTextInput(S + 'ab', 'x', false, keep)).toMatchObject({ baseline: S, reset: true });
+  });
+
+  it('trims to the last words at a space once long', () => {
+    const long = 'word '.repeat(13); // 65 code points
+    const u = diffTextInput(S + long.slice(0, -1), S + long, false, keep);
+    expect(u.reset).toBe(true);
+    expect(u.text).toBe(' ');
+    expect(u.baseline.startsWith(S)).toBe(true);
+    const tail = u.baseline.slice(S.length);
+    expect(tail.length).toBeLessThanOrEqual(24);
+    expect(tail.length).toBeGreaterThan(0);
+    expect(long.endsWith(tail)).toBe(true);
+    expect(tail.startsWith('word')).toBe(true);
+  });
+
+  it('does not trim in the middle of a word until twice the limit', () => {
+    const body = 'a'.repeat(70);
+    expect(diffTextInput(S + body, S + body + 'a', false, keep).reset).toBe(false);
+    const huge = 'a'.repeat(127);
+    const u = diffTextInput(S + huge, S + huge + 'a', false, keep);
+    expect(u).toMatchObject({ reset: true, baseline: S, text: 'a' });
+  });
+
+  it('works with commit on word: the corrected word is what gets sent', () => {
+    const { updates, remote } = session(
+      [
+        [S + 'teh', false],
+        [S + 'the ', false],
+        [S + 'the. ', false],
+      ],
+      { ...keep, commit: 'word' },
+    );
+    expect(updates[0]?.text).toBe('');
+    expect(remote).toBe('the. ');
+  });
+});

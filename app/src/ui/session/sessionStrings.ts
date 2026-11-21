@@ -689,6 +689,12 @@ export const sessionStringsEn = {
     commitOnWord: 'Commit on word',
     keyboardTip:
       'If letters arrive wrong with your keyboard app, try Commit on word or the text input bar.',
+    keyboardAutocorrect: 'Autocorrect',
+    keyboardAutocorrectHint:
+      'Your keyboard corrects words and turns a double space into a full stop. Turn it off for passwords, commands and code. Applies the next time the keyboard opens.',
+    keyboardCapitals: 'Capitalise sentences',
+    keyboardCapitalsHint:
+      'Your keyboard starts each sentence with a capital letter. Applies the next time the keyboard opens.',
     textInputBar: 'Text input bar',
     textInputBarHint: 'A visible field above the keyboard: type, dictate or paste, then Send',
     editKeyBar: 'Edit key bar…',

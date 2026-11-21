@@ -2008,23 +2008,44 @@ export class SessionController {
   private processField(composing: boolean, flush = false): void {
     const field = this.els?.field;
     if (!field) return;
+    const keepContext = this.keepsTypingContext();
     const update = diffTextInput(this.baseline, field.value, composing, {
       commit: this.settings.textInputMode,
       flush,
+      keepContext,
     });
+    // A sticky modifier turns the text into a shortcut (Ctrl+A): what the field holds no
+    // longer mirrors the remote.
+    const chord =
+      keepContext &&
+      (update.text !== '' || update.backspaces > 0) &&
+      Object.values(this.keys.modifiers()).some((m) => m !== 'off');
     const events = textInputKeyEvents(update, this.keys);
     this.baseline = update.baseline;
     if (update.reset) field.value = update.baseline;
     if (update.reset || !composing) caretToEnd(field);
     this.sendKeyEvents(events);
+    if (chord && !composing) this.resetField();
   }
 
-  /** Commit-on-word: send the word still held in the field (before other keys / clicks). */
+  /** Autocorrect / sentence capitals: the field keeps the sentence, not just the word. */
+  private keepsTypingContext(): boolean {
+    return this.settings.keyboardAutocorrect || this.settings.keyboardCapitals;
+  }
+
+  /**
+   * Before anything other than typed text reaches the remote (a key bar key, a click):
+   * send the word still held by commit-on-word, and drop the kept sentence, which no
+   * longer matches where the remote caret is.
+   */
   private flushText(): void {
-    if (this.settings.textInputMode !== 'word' || this.composing) return;
+    if (this.composing) return;
     const field = this.els?.field;
-    if (!field || field.value === this.baseline) return;
-    this.processField(false, true);
+    if (!field) return;
+    if (this.settings.textInputMode === 'word' && field.value !== this.baseline) {
+      this.processField(false, true);
+    }
+    if (this.keepsTypingContext() && field.value !== initialTextInput()) this.resetField();
   }
 
   /**

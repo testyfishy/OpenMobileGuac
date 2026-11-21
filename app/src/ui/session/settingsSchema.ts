@@ -358,6 +358,18 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     hint: () => S().input.keyboardTip,
     optionLabel: (v) => (v === 'word' ? S().input.commitOnWord : S().input.live),
   },
+  sw(
+    'keyboardAutocorrect',
+    'keyboard',
+    () => S().input.keyboardAutocorrect,
+    () => S().input.keyboardAutocorrectHint,
+  ),
+  sw(
+    'keyboardCapitals',
+    'keyboard',
+    () => S().input.keyboardCapitals,
+    () => S().input.keyboardCapitalsHint,
+  ),
   {
     key: 'keyBarLandscape',
     section: 'keyboard',

@@ -13,6 +13,11 @@ not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](doc
 
 ### Added
 
+- Settings › Keyboard › Typing: "Autocorrect" and "Capitalise sentences" (both off by
+  default, and settable per connection). With either on, the keyboard app keeps the sentence
+  being typed, so it can correct words, turn a double space into a full stop and capitalise
+  sentences; corrections reach the remote as Backspaces and retyped text. A click or a key
+  bar key starts a fresh sentence.
 - Settings › Connections ("Settings per connection"): every connection known on this device,
   grouped by server, with a one-line summary of what it changes from the defaults. Each one
   opens its own settings on the same pages as the defaults, with every value marked as its

@@ -76,6 +76,10 @@ export interface SessionSettings {
   horizontalScroll?: boolean;
   /** Soft-keyboard text: send live, or hold each word until a boundary (fallback). */
   textInputMode?: 'live' | 'word';
+  /** Let the keyboard app correct words and turn a double space into a full stop. */
+  keyboardAutocorrect?: boolean;
+  /** Let the keyboard app capitalise the start of sentences. */
+  keyboardCapitals?: boolean;
   /** Show the visible "Text input" bar (type / dictate / paste, then Send). */
   textInputBar?: boolean;
   /**
@@ -224,6 +228,8 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   twoFingerDrag: 'scroll',
   horizontalScroll: true,
   textInputMode: 'live',
+  keyboardAutocorrect: false,
+  keyboardCapitals: false,
   textInputBar: false,
   keyBarLayout: null,
   largeCursor: false,
@@ -359,6 +365,8 @@ export function normalizeSessionSettings(
     twoFingerDrag: oneOf(raw['twoFingerDrag'], ['scroll', 'pan'] as const, d.twoFingerDrag),
     horizontalScroll: bool(raw['horizontalScroll'], d.horizontalScroll),
     textInputMode: oneOf(raw['textInputMode'], ['live', 'word'] as const, d.textInputMode),
+    keyboardAutocorrect: bool(raw['keyboardAutocorrect'], d.keyboardAutocorrect),
+    keyboardCapitals: bool(raw['keyboardCapitals'], d.keyboardCapitals),
     textInputBar: bool(raw['textInputBar'], d.textInputBar),
     keyBarLayout: normalizeKeyBarLayout(raw['keyBarLayout']),
     largeCursor: bool(raw['largeCursor'], d.largeCursor),
@@ -420,6 +428,8 @@ export const INPUT_SETTING_KEYS = [
   'twoFingerDrag',
   'horizontalScroll',
   'textInputMode',
+  'keyboardAutocorrect',
+  'keyboardCapitals',
   'textInputBar',
   'keyBarLayout',
   'largeCursor',

@@ -694,6 +694,12 @@ export const sessionEs: SessionStrings = {
     commitOnWord: 'Por palabras',
     keyboardTip:
       'Si las letras llegan mal con tu app de teclado, prueba «Por palabras» o la barra de entrada de texto.',
+    keyboardAutocorrect: 'Autocorrección',
+    keyboardAutocorrectHint:
+      'Tu teclado corrige las palabras y convierte un doble espacio en un punto. Desactívala para contraseñas, comandos y código. Se aplica la próxima vez que se abra el teclado.',
+    keyboardCapitals: 'Mayúsculas al empezar frase',
+    keyboardCapitalsHint:
+      'Tu teclado empieza cada frase con mayúscula. Se aplica la próxima vez que se abra el teclado.',
     textInputBar: 'Barra de entrada de texto',
     textInputBarHint:
       'Un campo visible encima del teclado: escribe, dicta o pega, y luego pulsa Enviar',

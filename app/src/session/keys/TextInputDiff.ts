@@ -63,6 +63,27 @@ export interface TextInputOptions {
   readonly commit: 'live' | 'word';
   /** Send whatever is held (word mode). */
   readonly flush: boolean;
+  /**
+   * Keep what was typed in the field across spaces, so the keyboard app has the sentence
+   * to work with (autocorrect of an earlier word, double space → full stop, sentence
+   * capitals). The field is then reset only on a damaged sentinel or a line break, and at
+   * `maxLength` it is trimmed to its last few words instead of emptied. The host must reset
+   * the field whenever anything else reaches the remote (a click, a key bar key).
+   */
+  readonly keepContext: boolean;
+}
+
+/** Code points of context kept when a `keepContext` field is trimmed. */
+const CONTEXT_TAIL = 24;
+
+/** The last whole words of `body` (at most `CONTEXT_TAIL` code points). */
+function contextTail(body: string): string {
+  const c = cps(body);
+  if (c.length <= CONTEXT_TAIL) return body;
+  const tail = c.slice(-CONTEXT_TAIL);
+  if (/\s/u.test(c[c.length - CONTEXT_TAIL - 1] ?? '')) return tail.join('');
+  const gap = tail.findIndex((ch) => /\s/u.test(ch));
+  return gap < 0 ? '' : tail.slice(gap + 1).join('');
 }
 
 export const DEFAULT_TEXT_INPUT_OPTIONS: TextInputOptions = {
@@ -71,6 +92,7 @@ export const DEFAULT_TEXT_INPUT_OPTIONS: TextInputOptions = {
   composition: 'incremental',
   commit: 'live',
   flush: false,
+  keepContext: false,
 };
 
 /** A word boundary for commit-on-word mode. */
@@ -83,7 +105,10 @@ export interface TextInputUpdate {
   readonly text: string;
   /** Value the remote now mirrors; pass it as `baseline` next time. */
   readonly baseline: string;
-  /** Host should set the field to `baseline` (which is then the sentinel), caret at end. */
+  /**
+   * Host should set the field to `baseline`, caret at end. That is the sentinel, or with
+   * `keepContext` the sentinel followed by the last few words.
+   */
   readonly reset: boolean;
 }
 
@@ -123,14 +148,23 @@ export function diffTextInput(
   }
 
   let reset = false;
+  let next = sentinel;
   if (!composing) {
+    const intact = value.startsWith(sentinel);
+    const body = intact ? value.slice(sentinel.length) : '';
     const typedLength = b.length - cps(sentinel).length;
-    reset =
-      !value.startsWith(sentinel) ||
-      /\s$/u.test(value.slice(sentinel.length)) ||
-      typedLength >= opts.maxLength;
+    const atSpace = /\s$/u.test(body);
+    if (!intact || !opts.keepContext) {
+      reset = !intact || atSpace || typedLength >= opts.maxLength;
+    } else if (/[\n\r]$/u.test(body)) {
+      reset = true;
+    } else if ((typedLength >= opts.maxLength && atSpace) || typedLength >= opts.maxLength * 2) {
+      // Long enough: keep the last few words so the keyboard still has its context.
+      reset = true;
+      next = sentinel + contextTail(body);
+    }
   }
-  return { backspaces, text, baseline: reset ? sentinel : value, reset };
+  return { backspaces, text, baseline: reset ? next : value, reset };
 }
 
 export interface CaretResync {

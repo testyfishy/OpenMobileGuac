@@ -224,7 +224,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
       {
         id: 'typing',
         title: () => P().groups.typing,
-        items: ['textInputMode', 'textInputBar'],
+        items: ['keyboardAutocorrect', 'keyboardCapitals', 'textInputMode', 'textInputBar'],
       },
       { id: 'advanced', title: () => P().advanced, items: ['commandKey'], advanced: true },
     ],

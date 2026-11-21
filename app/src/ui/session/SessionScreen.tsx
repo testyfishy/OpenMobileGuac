@@ -1078,9 +1078,9 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
           className="omg-text-input"
           aria-label={t.screen.keyboardInput}
           autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
+          autoCorrect={settings.keyboardAutocorrect ? 'on' : 'off'}
+          autoCapitalize={settings.keyboardCapitals ? 'sentences' : 'off'}
+          spellCheck={settings.keyboardAutocorrect}
           inputMode="text"
           rows={1}
           tabIndex={active ? undefined : -1}
