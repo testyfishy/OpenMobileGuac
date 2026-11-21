@@ -30,7 +30,6 @@ jobs:
       # their builds sign with a throwaway key the Android Gradle plugin creates.
       HAS_DEBUG_KEYSTORE: ${{ github.event_name != 'pull_request' && secrets.ANDROID_DEBUG_KEYSTORE_BASE64 != '' }}
       HAS_RELEASE_KEYSTORE: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-      IS_PR: ${{ github.event_name == 'pull_request' }}
     defaults:
       run:
         working-directory: app
@@ -60,9 +59,10 @@ jobs:
           npm run build
           npx cap sync android
 
-      # Debug signing. Prefer a stable keystore from secrets; otherwise reuse one cached
-      # from earlier runs; otherwise create one (and cache it). None of this on pull
-      # requests: PR code must not get the key the nightlies are signed with.
+      # Debug signing: the stable keystore from secrets, never on pull requests. Without it
+      # the Android Gradle plugin signs with a throwaway key. The key is deliberately not
+      # kept in the Actions cache: a pull request can edit this file and restore caches
+      # saved on the default branch.
       - name: Restore debug keystore from secret
         if: env.HAS_DEBUG_KEYSTORE == 'true'
         env:
@@ -70,21 +70,6 @@ jobs:
         run: |
           mkdir -p "$HOME/.android"
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
-      - name: Restore cached debug keystore
-        if: env.IS_PR != 'true' && env.HAS_DEBUG_KEYSTORE != 'true'
-        id: keystore-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore-v1
-      - name: Create debug keystore
-        if: env.IS_PR != 'true' && env.HAS_DEBUG_KEYSTORE != 'true' && steps.keystore-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "$HOME/.android"
-          keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" \
-            -storepass android -keypass android -alias androiddebugkey \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Assemble debug APK
         working-directory: app/android

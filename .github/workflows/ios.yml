@@ -39,7 +39,8 @@ jobs:
       # Secrets can't be used directly in `if:`; expose a flag instead. Never on pull
       # requests: no signing secret reaches a job that runs PR code.
       HAS_SIGNING: ${{ github.event_name != 'pull_request' && secrets.APP_STORE_CONNECT_API_KEY_ID != '' && secrets.APP_STORE_CONNECT_API_ISSUER_ID != '' && secrets.APP_STORE_CONNECT_API_KEY_P8 != '' && secrets.APPLE_TEAM_ID != '' }}
-      WANT_UPLOAD: ${{ github.event_name != 'pull_request' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.testflight)) }}
+      # TestFlight builds come only from `main`, so a store build always matches `main`.
+      WANT_UPLOAD: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.testflight)) }}
     defaults:
       run:
         working-directory: app

@@ -59,7 +59,9 @@ Comparison with the Guacamole 1.6.0 web client: [docs/GUACAMOLE-PARITY.md](docs/
   hardware mouse and keyboard, soft-keyboard bridge with key sets, an editable key bar and
   combos, clipboard both ways with a history panel, file transfer and print jobs, audio and
   microphone, a configurable toolbar, keep-awake, automatic reconnect.
+- Settings per connection, with app and server defaults.
 - Several sessions at once, background grace period, English and Spanish, local diagnostics.
+  On iOS, an experimental Picture in Picture window (off by default).
 - A built-in **Demo server** that runs entirely on the device: a simulated desktop with a
   text editor, an input tester and a zoom target, so every control can be tried without a
   server. It contains no personal data and sends nothing over the network.

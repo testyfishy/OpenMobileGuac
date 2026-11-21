@@ -18,6 +18,8 @@ Network: App Transport Security allows arbitrary loads because users connect to 
 
 Microphone: used only when the user turns on "Send microphone" during an RDP session whose server accepts audio input. It is off by default.
 
+Background audio mode: the app declares the "audio" background mode only for an optional, experimental setting, Settings > Sessions > In the background > "Picture in picture (experimental)", which is off by default. With it on, the remote screen is shown in the system Picture in Picture window, which iOS offers only to apps with this mode. The window is view only; while it is open the remote session stays connected, and the window closes when the session ends or the app lock engages. To see it: turn the setting on, open the Demo desktop, then leave the app or tap More > "Open picture in picture". With the setting off, the app does not use the background audio mode. The microphone is never used in the background.
+
 The app is open source: github.com/testyfishy/OpenMobileGuac
 ```
 
@@ -26,6 +28,13 @@ Status of these steps: checked in the source code (`App.tsx` first-run introduct
 walked through on a device. Walk through them on the build you submit and adjust the button
 names if they differ. The Demo row is shown automatically only while no server is saved
 (Settings › About › "Demo server in the list" can force it on), so a fresh install shows it.
+
+The "Background audio mode" paragraph applies only if the build is submitted with the
+`audio` background mode (owner decision in [README.md](README.md)); drop it otherwise. Not
+yet checked on a device: that the Picture in Picture window opens for the Demo desktop
+(the code needs a connected Guacamole client and does not exclude the Demo, which runs one
+over an in-app tunnel). Walk through it on the
+submitted build.
 
 Sign-in information: leave "Sign-in required" off, since the Demo needs no account. If
 Apple asks for a real server anyway, the owner would have to provide a throwaway test server

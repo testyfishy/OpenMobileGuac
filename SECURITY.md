@@ -6,11 +6,12 @@ the code this policy covers.
 
 ## Supported versions
 
-Only the latest release is supported: the newest App Store / TestFlight build, the newest
-APK on GitHub Releases, and the `main` branch. Fixes are not back-ported to older builds.
+Only the latest version is supported: the newest TestFlight (and, once published, App
+Store) build, the debug APK on the rolling `nightly` prerelease on GitHub, and the `main`
+branch. Fixes are not back-ported to older builds. No signed release APK has been
+published yet.
 
-The project is in early development and has not had a formal release yet (see
-[CHANGELOG.md](CHANGELOG.md)).
+The project is young; released versions are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Reporting a vulnerability
 
@@ -65,7 +66,12 @@ Out of scope (please report these upstream instead):
   AES-256-GCM through WebCrypto. Sign-in tokens are never exported.
 - **App lock.** An optional Face ID / Touch ID / fingerprint or device-passcode lock. When
   it is on, saved secrets are used only after unlocking, and the app switcher shows a privacy
-  screen instead of the app's content.
+  screen instead of the app's content. Exception: the experimental Picture in Picture window
+  (iOS, off by default) shows the remote screen, view only, over other apps; it is not
+  covered by the privacy screen and closes when the lock falls due.
+- **Background on iOS.** The iOS app declares the `audio` background mode for Picture in
+  Picture only. While that window is open the session stays connected in the background;
+  otherwise iOS suspends the app and guacd ends the idle session after about 15 s.
 - **TLS.** HTTPS uses the operating system's trust store, including CAs the user installed.
   For self-signed servers, the user can trust one certificate for one server after
   comparing its SHA-256 fingerprint. That pin applies only to that scheme, host and port, and
@@ -78,6 +84,7 @@ Out of scope (please report these upstream instead):
   those servers send it to). It has no analytics or crash-reporting SDKs.
 
 Known weaknesses and their status are listed in the audit: [docs/AUDIT.md](docs/AUDIT.md),
-in particular "3. Security and privacy" and "6. Resolution". Much of the native code (secure
-storage, app lock, pinned TLS) has been compiled in CI but has not been checked on a device
-against the checklists in [docs/checklists/](docs/checklists/README.md).
+in particular "3. Security and privacy" and "6. Resolution". The iOS app is used daily by the
+maintainer through TestFlight, and the Android app is built in CI, but neither has been
+checked against the security items of the device checklists in
+[docs/checklists/](docs/checklists/README.md) (secure storage, app lock, pinned TLS).

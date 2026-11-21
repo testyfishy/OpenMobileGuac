@@ -32,6 +32,7 @@ versions Apache-2.0). You can check every statement here in the source code at
 | Thumbnails: small pictures of the last screen of a session | App cache folder | Can be turned off and deleted in Settings. Not included in system backups |
 | Backups | App storage | Only if you make a backup or turn on automatic backups. A backup holds no passwords unless you set a passphrase; then passwords and TOTP secrets are encrypted with it. Sign-in tokens are never put in a backup |
 | Files you download from a remote computer, and print jobs | Your device's Documents / Downloads area, or a temporary folder | Only when you accept a file. On iOS they appear in the Files app under the app's folder |
+| Picture in picture (iOS, experimental, off by default) | Memory only | With it on, leaving the app shows the remote screen in the system's floating window, which stays visible over other apps. The pictures stay in memory on the device and are sent nowhere. The window is not covered by the app-switcher privacy screen; if the app lock is on, the window closes when the lock falls due |
 | Diagnostics log | Memory only | Recent technical events with passwords removed. It is lost when the app closes, and is never sent anywhere unless you copy or share it |
 
 Keychain items are stored as "this device only" and are not synced to iCloud. On Android,
@@ -62,8 +63,9 @@ the network may be able to read it. The app warns you before it sends a password
 
 ## Clipboard
 
-The app reads your device clipboard only when you tap Paste or a similar action, or when
-you turn on automatic sending of the clipboard when a session opens. Text copied on the
+The app reads your device clipboard only when you tap Send (Send clipboard) or a similar
+action, or when you turn on automatic sending of the clipboard. With "Send also pastes" on
+(the default), Send then presses the remote computer's paste shortcut. Text copied on the
 remote computer is copied to your device clipboard; you can turn that off.
 
 ## Permissions
@@ -80,6 +82,11 @@ The app asks for a permission only when you use the feature that needs it.
 
 The app's Documents folder is visible in the Files app so you can open files you
 downloaded.
+
+The iOS app declares the background audio mode. It is used only for the optional Picture in
+picture setting (see above), because iOS shows that window only for apps with this mode.
+While the window is open, the session keeps running in the background. The microphone is
+never used in the background.
 
 **Android**
 

@@ -23,7 +23,7 @@ Related: [PRIVACY.md](../../PRIVACY.md) (the privacy policy to link), [release.m
 ## How the store builds relate to this repository
 
 - The iOS build is made by `.github/workflows/ios.yml` on GitHub's runners from a commit on
-  `main`, signed with the maintainer's Apple account and uploaded to TestFlight. The build
+  `main` (the workflow uploads to TestFlight only from `main`, also for manual runs), signed with the maintainer's Apple account and uploaded to TestFlight. The build
   number is the workflow run number, so each App Store build can be traced to a public run
   and commit. There is no tag-triggered release workflow yet; for a release, tag the commit
   the submitted build came from.
@@ -64,9 +64,25 @@ Questionnaires
 Before the first release
 
 - [ ] Walk through the Demo steps in review-notes.md on the build being submitted.
-- [x] Version numbers agree: 1.0.0 in `app/package.json`, Android `versionName` and the
-      CHANGELOG; iOS `MARKETING_VERSION` is 1.0.
-- [ ] Set the CHANGELOG date and tag the release commit.
+- [ ] Version numbers agree for the submitted version (1.1.0): `app/package.json`,
+      `app/package-lock.json` (both places), Android `versionName`, iOS `MARKETING_VERSION`
+      (both configurations) and the CHANGELOG heading.
+- [ ] In the CHANGELOG, rename `[Unreleased]` to `[1.1.0] - <date>`, add a new empty
+      `[Unreleased]` above it and a `[1.1.0]` link at the bottom; tag the commit the
+      submitted build came from (`v1.1.0`).
+- [ ] **Decision: submit with or without the `audio` background mode.** Every iOS build
+      declares `UIBackgroundModes: audio`, used only by the experimental, off-by-default
+      Picture in Picture setting. App Review may question it under guideline 2.5.4
+      (background modes only for their intended purpose).
+      - *Option A, leave it out of the store build (lower review risk):* remove
+        `UIBackgroundModes` from the store build only (for example a workflow input that
+        runs `/usr/libexec/PlistBuddy -c "Delete :UIBackgroundModes"` before Archive in
+        `ios.yml`) **and** hide the Picture in Picture setting and the More entry in that
+        build (a code change; without it the setting would do nothing). TestFlight builds
+        can keep both. Drop the reviewer paragraph. Neither part exists yet.
+      - *Option B, submit as is:* keep the reviewer paragraph "Background audio mode" in
+        review-notes.md, and walk through its steps (setting on, Demo desktop, leave the
+        app) on the submitted build. Nothing else to change.
 - [ ] Turn on private vulnerability reporting (repository Settings › Code security), which
       SECURITY.md tells reporters to use. It was off when checked on 2026-11-21.
 - [ ] Check App Store Connect for a privacy-manifest warning (privacy-answers.md).

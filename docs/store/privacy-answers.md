@@ -19,6 +19,9 @@ Checked in the source on 2026-11-21:
   the user opens. Single sign-on and Duo open the identity provider that the user's server
   points to.
 - The developer runs no server and receives nothing.
+- Features added since 1.0.1 send nothing new off the device: per-connection settings are
+  stored locally, and the experimental iOS Picture in Picture window draws frames from memory
+  (nothing is saved or sent).
 - Data stored on the device is listed in [PRIVACY.md](../../PRIVACY.md).
 
 ## App Store: App Privacy

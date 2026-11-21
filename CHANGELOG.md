@@ -4,23 +4,31 @@ All notable changes to Open Mobile Guac (OMG) are listed here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project intends to use
 [Semantic Versioning](https://semver.org/).
 
-How far the first release has been tested: it is unit-tested, CI builds both apps, and the
+How far the releases have been tested: they are unit-tested, CI builds both apps, and the
 maintainer uses the iOS app daily through TestFlight against a real Guacamole server (VNC).
 The device checklists in docs/checklists have not been completed, and the Android app has
 not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## [Unreleased]
 
+Planned as 1.1.0.
+
 ### Added
 
-- Settings › Keyboard › Typing: "Autocorrect" and "Capitalise sentences" (both off by
+- Settings › Keyboard & keys › Typing: "Autocorrect" and "Capitalise sentences" (both off by
   default, and settable per connection). With either on, the keyboard app keeps the sentence
   being typed, so it can correct words, turn a double space into a full stop and capitalise
   sentences; corrections reach the remote as Backspaces and retyped text. A click or a key
   bar key starts a fresh sentence.
-- Experimental, iOS, off by default: Settings › Sessions › "Picture in picture". A test of
-  whether the remote screen can stay in the system's floating window after leaving the app;
-  it may freeze or close. The iOS build declares the audio background mode for it.
+- Picture in Picture (experimental, iOS only, off by default, per connection): Settings ›
+  Sessions › In the background › "Picture in picture". Leaving the app with a session open,
+  or More › "Open picture in picture", shows the remote screen in the system's floating
+  window, view only, updated when the remote display changes (up to 12 frames a second).
+  While the window is open the session keeps running in the background, and the background
+  disconnect and "Sign out of servers after" timers wait until it closes. The app lock is
+  never held off: when it falls due, the window closes. The window is not covered by the
+  app-switcher privacy screen. It may still freeze or close. Every iOS build now declares
+  the audio background mode, which the window requires.
 - Settings › Connections ("Settings per connection"): every connection known on this device,
   grouped by server, with a one-line summary of what it changes from the defaults. Each one
   opens its own settings on the same pages as the defaults, with every value marked as its
@@ -42,6 +50,23 @@ not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](doc
 
 - The "Paste" action is now called "Send" ("Send clipboard" in More), because it sends this
   device's clipboard to the remote.
+- Builds: manual iOS workflow runs upload to TestFlight only from `main`. The Android
+  workflow no longer keeps the nightly debug key in the Actions cache, where pull-request
+  code could restore it; without the `ANDROID_DEBUG_KEYSTORE_BASE64` secret each nightly now
+  has a new signature (docs/release.md, "Debug signing").
+
+### Fixed
+
+- A pinned (self-signed) server never gets a request over system trust when the trusted
+  certificates cannot be read: a known pin still applies, otherwise the request fails as
+  unreachable.
+- A backup whose plain part dropped a certificate pin no longer restores the password or
+  TOTP secret sealed with that pin.
+- A foreground request's deadline now includes the time it waits for a free connection slot.
+- Diagnostics: user and group names in REST paths are replaced with a marker.
+- A malformed percent escape in an `otpauth://` label no longer throws.
+- Android: the session WebSocket answers a Close frame with code 1000 (the server's own code
+  can be one the HTTP library refuses to send).
 
 ## [1.0.1] - 2026-11-21
 
@@ -147,8 +172,8 @@ First public version.
 
 - CI runs typecheck, lint, format check, unit tests and a production build on pushes to `main` and on
   pull requests.
-- Signed Android APK attached to the GitHub release; a debug APK on the rolling `nightly`
-  prerelease.
+- A debug APK on the rolling `nightly` prerelease. (A signed Android release APK was
+  planned, but release signing has not run yet, so none is attached to the release.)
 - iOS builds uploaded to TestFlight from `main` by the public workflow.
 
 [1.0.1]: https://github.com/testyfishy/OpenMobileGuac/releases/tag/v1.0.1

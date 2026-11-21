@@ -8,7 +8,7 @@ SDK. To build on your own machine or with your own accounts, see
 |---|---|---|
 | `ci.yml` (CI) | ubuntu-latest, Node 22 | `npm ci` + `npm run check` in `app/` on pushes to `main` and on every PR. |
 | `android.yml` (Android) | ubuntu-latest, JDK 21, preinstalled Android SDK | Web build, `npx cap sync android`, `./gradlew assembleDebug`. Uploads the APK as a run artifact. On pushes to `main` it also updates the rolling `nightly` prerelease. |
-| `ios.yml` (iOS) | macos-26 (Xcode 26.x) | Web build, `npx cap sync ios`, unsigned Simulator build. On pushes to `main` (or a manual run) **and** when the signing secrets exist, it archives, signs and uploads to TestFlight. |
+| `ios.yml` (iOS) | `xcode-27` image by default (Xcode 27.1); `macos-26` / `macos-26-intel` (Xcode 26.x) selectable | Web build, `npx cap sync ios`, unsigned Simulator build. On pushes to `main` (or a manual run on `main`) **and** when the signing secrets exist, it archives, signs and uploads to TestFlight. A manual run on another branch only builds. |
 
 The Android and iOS workflows skip pushes/PRs that only change Markdown files (macOS
 runners can queue for a long time); run them by hand from the Actions tab if needed.
@@ -40,27 +40,30 @@ Builds from PRs and other branches are only available as a run artifact
 GitHub login to download).
 
 The `versionCode` is the workflow run number, so each nightly installs over the previous one
-**as long as the signing key stays the same** (next section).
+**as long as the signing key stays the same**, which needs the debug keystore secret (next
+section).
 
 ### Debug signing
 
 Android refuses to update an app if the new APK is signed with a different key. The
-workflow keeps the debug key stable like this:
+workflow signs debug builds like this:
 
-1. If the secret `ANDROID_DEBUG_KEYSTORE_BASE64` is set, it uses that keystore.
-2. Otherwise it restores `~/.android/debug.keystore` from the GitHub Actions cache (key
-   `android-debug-keystore-v1`), creating and caching a new one on the first run.
+- If the secret `ANDROID_DEBUG_KEYSTORE_BASE64` is set, it uses that keystore (never on
+  pull requests).
+- Otherwise the Android Gradle plugin signs with a throwaway key made on the runner, so
+  **every nightly has a different signature** and the phone says the update conflicts with
+  the installed app: uninstall the old one first.
 
-Pull-request builds use neither: the Android Gradle plugin signs them with a throwaway key,
-so code in a pull request never sees the nightly key. The build job is read-only; a separate
-`publish` job (pushes to `main` only, `contents: write`) downloads the APK artifact and moves
-the `nightly` tag and release through the GitHub API without checking out the repository
-(AUDIT §7 R5).
+Pull-request builds always get a throwaway key. The secret is not passed to them, and the
+key is not kept in the GitHub Actions cache: a pull request can change the workflow file and
+restore caches saved on `main`, so a cached key would be readable by pull-request code.
+(Until 2026-11-21 the workflow did cache a key under `android-debug-keystore-v1`; delete
+that entry, see below.) The build job is read-only; a separate `publish` job (pushes to
+`main` only, `contents: write`) downloads the APK artifact and moves the `nightly` tag and
+release through the GitHub API without checking out the repository (AUDIT §7 R5).
 
-Option 2 needs no setup, but GitHub evicts caches that go unused for 7 days. After a long
-pause the next build gets a new key and the phone will say the update conflicts with the
-installed app: uninstall the old one first. To make the key permanent, set the secret
-(optional):
+To give the nightlies a stable signature, set the secret (owner, once). Use a **new** key,
+not the one that was in the cache:
 
 1. On the Windows PC (JDK 21 includes `keytool`), in PowerShell:
    ```powershell
@@ -70,8 +73,14 @@ installed app: uninstall the old one first. To make the key permanent, set the s
    [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\debug.keystore")) | gh secret set ANDROID_DEBUG_KEYSTORE_BASE64
    Remove-Item debug.keystore
    ```
-   (The passwords `android` are the standard debug-keystore values; this key is not a
-   release key and does not need to be secret.)
+   (The passwords `android` are the standard debug-keystore values and this is not a
+   release key, but the key itself is what lets an APK install as an update over people's
+   nightlies, so keep it out of the repository, logs and caches.)
+2. Delete the old cached key: `gh cache delete android-debug-keystore-v1`, or Actions →
+   Caches in the web UI. Installed nightlies signed with it need one uninstall before the
+   first nightly signed with the new key.
+3. Optional: Settings → Actions → General → require approval for workflows from fork pull
+   requests.
 
 ### Android release signing (for later, Phase 3)
 
@@ -111,9 +120,14 @@ Why not generate it in CI on every build: a committed project lets us keep hand 
 
 Capacitor 8 requires Xcode 26.0+ and iOS 15+ (capacitorjs.com/docs/ios). On the GitHub
 runner images checked on 2026-11-18, `macos-15`'s default Xcode is 16.4 (too old), while
-`macos-26` defaults to Xcode 26.6. The workflow uses `runs-on: macos-26`, prints
-`xcodebuild -version` and fails if the major version is below 26. If GitHub changes the
-default, select a version with `sudo xcode-select -s /Applications/Xcode_26.x.app`.
+`macos-26` defaults to Xcode 26.6. The workflow now defaults to the `xcode-27` image
+(Xcode 27.1, which Apple requires for apps that fill the iPhone Duo's screens): `runs-on` is
+the manual run's *runner* choice, else the `IOS_RUNNER` repository variable, else
+`xcode-27`. The choices are `xcode-27`, `macos-26` and `macos-26-intel` (both Xcode 26.x).
+It prints `xcodebuild -version` and fails only if the major version is below 26, so a
+`macos-26` run still passes that check with Xcode 26. Unverified here: that a run on
+`xcode-27` has gone green since the switch; check the latest iOS run. If GitHub changes a
+default, select a version with `sudo xcode-select -s /Applications/Xcode_<version>.app`.
 
 GitHub's macOS arm64 runners are sometimes out of capacity; the job then sits in the queue
 and ends "cancelled" with *"The job was not acquired by Runner of type hosted even after
@@ -202,8 +216,9 @@ Get-Content -Raw .\AuthKey_XXXXXXXXXX.p8 | gh secret set APP_STORE_CONNECT_API_K
 
 **6. Trigger a build**
 
-Push to `main`, or GitHub → **Actions** → **iOS** → **Run workflow** (leave "Upload to
-TestFlight" ticked). When the run succeeds, the build appears in App Store Connect →
+Push to `main`, or GitHub → **Actions** → **iOS** → **Run workflow** with the branch set to
+`main` (leave "Upload to TestFlight" ticked; a manual run on any other branch builds but
+never uploads). When the run succeeds, the build appears in App Store Connect →
 your app → **TestFlight** after Apple finishes processing (often 5–30 minutes).
 
 **7. Add yourself as a tester**
@@ -304,9 +319,19 @@ paste:
 Video for the declaration: open a demo or test session, turn the setting on, switch apps,
 show the notification, return to the still-connected session, tap Disconnect all.
 
-iOS: no background mode is added. iOS does not allow keeping a remote desktop connection open
-in the background for this kind of app (adding one would fail App Review), so sessions keep
-the grace-period disconnect and reconnect on return.
+iOS: every iOS build declares the `audio` background mode (`UIBackgroundModes` in
+`Info.plist`), because iOS shows a Picture in Picture window only for apps with that mode.
+It is used only by the experimental, per-connection "Picture in picture" setting (Settings
+› Sessions › In the background; off by default). With it on, leaving the app with a session
+open (or More › "Open picture in picture") shows the remote screen, view only, in the
+system's floating window. While the window is up, the session keeps running in the
+background, and the background disconnect and "Sign out of servers after" timers wait until
+the window closes. The app lock is never held off: when it falls due, the window closes.
+With the setting off the app starts no audio session of its own, and sessions keep the
+grace-period disconnect (in practice guacd's 15 s timeout, AUDIT #8) and reconnect on
+return. App Review may question the mode (guideline 2.5.4): the reviewer note is in
+[store/review-notes.md](store/review-notes.md), and whether to submit with it is an owner
+decision in [store/README.md](store/README.md).
 
 ## App data backup (Android auto-backup off)
 

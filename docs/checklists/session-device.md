@@ -26,8 +26,14 @@ Record failures as `T1.x-fix` tasks with device, OS version, keyboard app and ap
       above them (DSP-5).
 - [ ] Letters, digits and punctuation arrive correctly in a remote text editor, including a
       mixed-case password like `Ab3$xY9!`.
-- [ ] Autocorrect, auto-capitalise and suggestions do not change what reaches the remote
-      (type `teh`, `i`, `hello.` + space: the remote shows exactly that).
+- [ ] With Settings › Keyboard & keys › Typing › "Autocorrect" and "Capitalise sentences"
+      off (the default): autocorrect, auto-capitalise and suggestions do not change what
+      reaches the remote (type `teh`, `i`, `hello.` + space: the remote shows exactly that).
+- [ ] With "Autocorrect" on: `teh` + space becomes `the ` on the remote (sent as Backspaces
+      and the retyped word), and a double space gives a full stop. With "Capitalise
+      sentences" on: the first letter of a sentence is capitalised. A click on the desktop or
+      a key bar key starts a fresh sentence (no correction reaches back across it). Set on one
+      connection only: another connection keeps both off.
 - [ ] Backspace deletes one character; holding Backspace repeats; Backspace in an empty field
       still deletes on the remote.
 - [ ] Enter / Return sends Enter (new line in an editor, submits a form).
@@ -126,9 +132,10 @@ Default: Free side. Phone only (a tablet, portrait and the split layout keep the
 
 - [ ] iOS: no "Allow Paste" prompt appears when connecting, rotating or returning to the app
       (with auto-send off).
-- [ ] Copy a URL on the phone, tap Paste, then Ctrl+V on the remote: the URL arrives (S2).
-      iOS shows the paste prompt only now, after the tap.
-- [ ] Long-press Paste (or Combos > Type clipboard): the text is typed on a connection with
+- [ ] Copy a URL on the phone, focus a field on the remote, tap Send: the URL arrives (S2),
+      pasted once ("Send also pastes" is on by default; with it off, press Ctrl+V on the
+      remote yourself). iOS shows the paste prompt only now, after the tap.
+- [ ] Long-press Send (or Combos > Type clipboard): the text is typed on a connection with
       `disable-paste` set (CLP-3).
 - [ ] Copy text on the remote: it lands on the phone clipboard (toast shown); with "remote to
       device" off it does not.
@@ -455,7 +462,7 @@ only fakes the server side.
 
 ### Toolbar
 
-- [ ] Portrait and landscape: Pointer, Keyboard, Paste, View, More reachable with one thumb;
+- [ ] Portrait and landscape: Pointer, Keyboard, Send, View, More reachable with one thumb;
       the collapsed handle sits on the right edge above the remote taskbar (bottom ~60 px
       stay uncovered).
 - [ ] More > Ctrl+Alt+Del opens the Windows security screen (RDP); not offered on SSH.
@@ -543,12 +550,33 @@ resolution" for each:
 - [ ] Settings › "Disconnect sessions after …" shows the iOS explanation (about 15 s).
 - [ ] Android with "Keep sessions connected in the background" on: background for 2 min;
       the session is still connected on return (not reconnected).
+
+**Picture in Picture (MUL-6, iOS, experimental)** — iPhone and iPad, setting off by default:
+
+- [ ] Setting off (default): leaving the app shows no floating window, and More has no
+      "Open picture in picture"; background behaviour is as above.
+- [ ] Settings › Sessions › In the background › "Picture in picture" on for one connection:
+      leave the app during a session: the remote screen appears in the floating window and
+      follows the remote. Another connection, with the setting off, shows no window.
+- [ ] More › "Open picture in picture" opens the window while the app is in front.
+- [ ] Taps on the window do nothing on the remote (view only).
+- [ ] With "Disconnect sessions after" at 1 min and "Sign out of servers after" at 1 min:
+      keep the window open for 3 min, return: the session is still connected and the server
+      still signed in. Close the window, wait past both times: they apply as usual.
+- [ ] App lock on, "Lock after" 1 min: leave the app with the window open: the window closes
+      when the lock falls due, and the lock screen is shown on return.
+- [ ] Ending the session (from the server or Disconnect) closes the window.
+- [ ] Remote sound while the window is prepared, with the silent switch on: note whether the
+      sound now ignores the switch (AUD-1 says it respects it).
+- [ ] Open the Demo desktop with the setting on and leave the app: the window appears (the
+      App Review note relies on this).
+
 - [ ] Administrator kills the session from Active Sessions: "Session ended", **no**
       automatic reconnect.
 
 **View only, terminal, sharing, waking**
 
-- [ ] View only (More › Input, or the toolbar button): taps, keys, scroll and Paste do
+- [ ] View only (More › Input, or the toolbar button): taps, keys, scroll and Send do
       nothing remotely; the pill at the top turns it off.
 - [ ] SSH: More › Terminal › Font size − / + changes the font; Colours cycles presets;
       with "Pinch to change the terminal font size" on, a pinch changes the font.

@@ -70,7 +70,8 @@ Do each step on each phone. A criterion passes only if every step in it works.
 
 ### 4. Clipboard
 
-- [ ] Copy text on the phone, use the app's paste action: it appears on the remote.
+- [ ] Copy text on the phone, focus a text field on the remote and tap Send: it appears on
+      the remote (Send also presses the remote's paste shortcut by default).
 - [ ] Copy text on the remote: it can be pasted in another phone app.
 
 ### 5. Pinch zoom

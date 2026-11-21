@@ -97,7 +97,7 @@ Paths are relative to `app/src/`. Upstream references:
 | Feature | Guacamole web client | This app | Importance | Effort / blocker |
 | --- | --- | --- | --- | --- |
 | Remote → local text (`clipboard` stream) | Yes | Yes: `SessionController.ts` `onclipboard`, UTF-8 decoded once | Baseline | — |
-| Local → remote text (`createClipboardStream`) | Yes; also pushed automatically on connect | Yes: Paste button, optional auto-send on open (`SessionController.ts`, `ui/session/ClipboardSheet.tsx`) | Baseline | — |
+| Local → remote text (`createClipboardStream`) | Yes; also pushed automatically on connect | Yes: Send button (then the remote's paste shortcut, "Send also pastes", on by default), optional auto-send on open (`SessionController.ts`, `ui/session/ClipboardSheet.tsx`) | Baseline | — |
 | Clipboard hidden until revealed (1.6.0) | Yes | Different: an explicit sheet with this session's history | — | — |
 | Image clipboard | Web client handles non-text data as a Blob; RDP/VNC/SSH in guacd carry text only (unconfirmed for every protocol) | No: only `text/*` accepted | Niche | — (server side limits) |
 | Server limits (`disable-copy`, `disable-paste`, `normalize-clipboard`) | Server-side | Server-side | — | — |

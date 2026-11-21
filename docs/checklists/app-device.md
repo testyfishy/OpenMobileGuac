@@ -80,6 +80,8 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
       closed and the server asks for the password (with the "Signed out because…" notice) even
       though it is saved; after signing in, the saved password is used silently again. Same
       after swiping the app away for 2 min and reopening it. Default "Never": no prompt.
+      (These two timers wait while an iOS Picture in Picture window is open: see the Picture
+      in Picture items in session-device.md. Run them with that setting off.)
 - [ ] Token expiry during a **live** session: on a test server, invalidate the app's token
       (e.g. restart the Guacamole web application, which drops all tokens), then drop the
       connection (airplane mode on/off) so the session reconnects. The
