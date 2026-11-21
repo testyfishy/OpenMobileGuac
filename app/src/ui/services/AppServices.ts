@@ -117,6 +117,8 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
   const probeApi = new GuacApi(http, { timeoutMs: 6_000 });
   const admin = new GuacAdminApi(http, { timeoutMs: 20_000 });
   const auth = new AuthService(api, secure, profiles, log, kv);
+  // SRV-8 (review R2): a sign-in counts as "seen with system trust" only without a pin.
+  auth.setPinnedCheck((url) => tls.pinFor(url) !== undefined);
   const settings = new SettingsStore(kv);
   const backgroundClock = new BackgroundClock(kv);
   auth.setEntryCheck(signOutIfAwayTooLong(backgroundClock, settings, auth, log));

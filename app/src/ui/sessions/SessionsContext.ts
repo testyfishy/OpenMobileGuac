@@ -11,8 +11,23 @@ export interface SessionsApi {
     readonly confirm: () => void;
     readonly cancel: () => void;
   } | null;
-  /** Opens (or switches to) a session. May ask the user to close one first (MUL-1 cap). */
+  /**
+   * Set while the user must choose between the open session of that connection and another
+   * one (setting "When a connection is already open" = Ask). `dontAskAgain` stores the answer.
+   */
+  readonly alreadyOpen: {
+    readonly name: string;
+    readonly goToOpen: (dontAskAgain: boolean) => void;
+    readonly openAnother: (dontAskAgain: boolean) => void;
+    readonly cancel: () => void;
+  } | null;
+  /**
+   * Opens a session, or goes to the one already open for that connection, as the setting
+   * "When a connection is already open" says (may ask). May ask the user to close one first
+   * (MUL-1 cap).
+   */
   readonly open: (serverId: string, serverName: string, target: SessionTarget) => void;
+  /** Shows a session (the switcher). */
   readonly show: (id: string) => void;
   /** Back to the app chrome; the session stays connected in the background. */
   readonly hide: () => void;

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "OpenMobileGuac's local Capacitor plugin: HTTPS and WebSocket connections that accept exactly one user-pinned certificate (SRV-8, docs/tls.md).",
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-or-later",
   "files": [
     "android/src/main/",
     "android/build.gradle",

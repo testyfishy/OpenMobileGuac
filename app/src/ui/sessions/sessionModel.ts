@@ -1,4 +1,5 @@
 import type { SessionTarget } from '../nav/navigation.ts';
+import type { OpenAgain } from '../settings/settingsModel.ts';
 
 /**
  * Open sessions (SPEC MUL-1) and their lifecycle (T2.1), as a pure reducer. The React side
@@ -123,25 +124,71 @@ export function sessionsReducer(state: SessionsState, action: SessionsAction): S
 export type OpenDecision =
   /** That connection is already open: switch to it. */
   | { readonly kind: 'existing'; readonly id: string }
+  /** That connection is already open: ask whether to go to it or open another. */
+  | { readonly kind: 'ask'; readonly id: string }
   | { readonly kind: 'open' }
   /** At the cap: the user must close one. `suggest` is the least recently shown. */
   | { readonly kind: 'limit'; readonly suggest: OpenSession };
 
+/** The most recently shown open session of that server and target, if any. */
+export function findOpenSession(
+  state: SessionsState,
+  serverId: string,
+  target: SessionTarget,
+): OpenSession | undefined {
+  let best: OpenSession | undefined;
+  for (const s of state.sessions) {
+    if (s.serverId !== serverId || !sameTarget(s.target, target)) continue;
+    if (!best || s.lastShownAt > best.lastShownAt) best = s;
+  }
+  return best;
+}
+
+/**
+ * The "When a connection is already open" setting as it applies to one target. Joining
+ * someone else's session (admin Join) and share links always go to the open one: a second
+ * copy of the same view is never the point there.
+ */
+export function openAgainFor(
+  setting: OpenAgain,
+  target: SessionTarget,
+  shareLink: boolean,
+): OpenAgain {
+  return target.join !== undefined || shareLink ? 'switch' : setting;
+}
+
+/**
+ * What tapping a connection does. `openAgain` is the effective setting (`openAgainFor`);
+ * `forceNew` is the "Open another" answer, which skips the open session but still respects
+ * the cap. Pure.
+ */
 export function decideOpen(
   state: SessionsState,
   serverId: string,
   target: SessionTarget,
   max: number,
+  openAgain: OpenAgain = 'switch',
+  forceNew = false,
 ): OpenDecision {
-  const existing = state.sessions.find(
-    (s) => s.serverId === serverId && sameTarget(s.target, target),
-  );
-  if (existing) return { kind: 'existing', id: existing.id };
+  const existing = forceNew ? undefined : findOpenSession(state, serverId, target);
+  if (existing && openAgain === 'switch') return { kind: 'existing', id: existing.id };
+  if (existing && openAgain === 'ask') return { kind: 'ask', id: existing.id };
   // Suspended sessions hold no connection, but still count: they are what the user sees
   // in the switcher, and reconnecting all of them would exceed the cap.
   if (state.sessions.length < Math.max(1, max)) return { kind: 'open' };
   const oldest = [...state.sessions].sort((a, b) => a.lastShownAt - b.lastShownAt)[0];
   return oldest ? { kind: 'limit', suggest: oldest } : { kind: 'open' };
+}
+
+/**
+ * The setting to store after the "already open" question: the answer when "Don't ask
+ * again" is ticked, otherwise nothing (`null`). Cancel never stores anything.
+ */
+export function openAgainToStore(
+  answer: 'switch' | 'new' | 'cancel',
+  dontAskAgain: boolean,
+): OpenAgain | null {
+  return answer !== 'cancel' && dontAskAgain ? answer : null;
 }
 
 export function activeSession(state: SessionsState): OpenSession | undefined {

@@ -486,7 +486,8 @@ describe('GestureRecognizer: table of sequences', () => {
         ['u', 2, 230, 100, 100],
       ],
       {},
-      ['pinch:start', 'pinch:move', 'pinch:move', 'pinch:end'],
+      // The first finger's move alone decides nothing (see "one finger ahead").
+      ['pinch:start', 'pinch:move', 'pinch:end'],
     ],
     [
       'two-finger pan',
@@ -499,7 +500,35 @@ describe('GestureRecognizer: table of sequences', () => {
         ['u', 2, 200, 140, 100],
       ],
       {},
-      ['two-finger-pan:start', 'two-finger-pan:move', 'two-finger-pan:move', 'two-finger-pan:end'],
+      ['two-finger-pan:start', 'two-finger-pan:move', 'two-finger-pan:end'],
+    ],
+    [
+      'a scroll that starts with one finger ahead of the other is a pan, not a pinch',
+      [
+        // Fingers one above the other: the upper one moving down first shortens the span
+        // by more than the pinch threshold before the lower one follows.
+        ['d', 1, 100, 100, 0],
+        ['d', 2, 150, 200, 10],
+        ['m', 1, 100, 140, 40],
+        ['m', 2, 150, 240, 50],
+        ['u', 1, 100, 140, 90],
+        ['u', 2, 150, 240, 100],
+      ],
+      {},
+      ['two-finger-pan:start', 'two-finger-pan:move', 'two-finger-pan:end'],
+    ],
+    [
+      'one finger held still while the other travels far is a pinch',
+      [
+        ['d', 1, 100, 100, 0],
+        ['d', 2, 200, 100, 10],
+        ['m', 2, 230, 100, 40],
+        ['m', 2, 270, 100, 50],
+        ['u', 1, 100, 100, 90],
+        ['u', 2, 270, 100, 100],
+      ],
+      {},
+      ['pinch:start', 'pinch:move', 'pinch:end'],
     ],
     [
       'one finger lifts in a multi-touch and the other moves: nothing',
@@ -851,16 +880,16 @@ describe('GestureRecognizer: payloads', () => {
   });
 
   it('pinch dominance is configurable', () => {
-    // First move decides nothing; after the second the span grew ~36 px while the centroid
-    // moved ~43 px: a pan by default, a pinch with dominance 0.5.
+    // The fingers move in different directions: after the second move the span grew
+    // ~43 px while the centroid moved ~32 px: a pinch by default, a pan with dominance 2.
     const steps: Step[] = [
       ['d', 1, 100, 100, 0],
       ['d', 2, 200, 100, 0],
-      ['m', 1, 100, 120, 10],
-      ['m', 2, 230, 160, 20],
+      ['m', 1, 100, 140, 10],
+      ['m', 2, 240, 110, 20],
     ];
-    expect(names(run(steps).out)[0]).toBe('two-finger-pan:start');
-    expect(names(run(steps, { pinchDominance: 0.5 }).out)[0]).toBe('pinch:start');
+    expect(names(run(steps).out)[0]).toBe('pinch:start');
+    expect(names(run(steps, { pinchDominance: 2 }).out)[0]).toBe('two-finger-pan:start');
   });
 
   it('two fingers landing on the same point do not divide by zero', () => {

@@ -350,7 +350,7 @@ export const sessionStringsEn = {
     },
     keySet: 'Key set',
     keySetHint:
-      'The keys shown above the keyboard. Create and edit sets in Settings › Keys & combos or from the key bar.',
+      'The keys shown above the keyboard. Create and edit sets in Settings › Keyboard & keys or from the key bar.',
     keySetSwipe: 'Swipe sideways on the key bar to switch sets',
     keySetSwipeHint:
       'Works once the row is scrolled to its end (not on a side column). Off: use the switch button at the end of the bar.',
@@ -363,7 +363,7 @@ export const sessionStringsEn = {
     },
     receivedFiles: 'Received files',
     receivedFilesHint:
-      'Save: written straight to a Downloads folder as they arrive (iPhone and iPad: Files › On My iPhone › OpenMobileGuac › Downloads; Android: Documents › OpenMobileGuac), then you can share them from Files › Transfers. Share: the share sheet opens when the file is complete and no copy is kept. Print jobs always open the share sheet.',
+      'Save: written straight to a Downloads folder as they arrive (iPhone and iPad: Files › On My iPhone › OMG › Downloads; Android: Documents › OpenMobileGuac), then you can share them from Files › Transfers. Share: the share sheet opens when the file is complete and no copy is kept. Print jobs always open the share sheet.',
     receivedFilesOptions: {
       downloads: 'Save to Downloads',
       share: 'Share, keep no copy',
@@ -810,7 +810,7 @@ export const sessionStringsEn = {
       `Imported ${sets} ${plural(sets, 'set', 'sets')} and ${combos} ${plural(combos, 'combo', 'combos')}`,
     importErrors: {
       json: 'This file is not valid JSON.',
-      format: 'This is not an OpenMobileGuac key set file.',
+      format: 'This is not an Open Mobile Guac key set file.',
       version: 'This file was made by a newer version of the app.',
       empty: 'The file has no key sets or combos.',
       read: 'The file could not be read.',

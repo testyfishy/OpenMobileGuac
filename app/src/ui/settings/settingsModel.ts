@@ -1,8 +1,10 @@
+import { withoutRiskySessionValues } from '../../core/backup/backup.ts';
 import {
   DEFAULT_AUTO_BACKUP,
   parseAutoBackupSettings,
   type AutoBackupSettings,
 } from '../../core/backup/schedule.ts';
+import type { JsonValue } from '../../core/storage/ProfileStore.ts';
 import {
   DEFAULT_KEY_LIBRARY,
   migrateLegacyLibrary,
@@ -68,6 +70,11 @@ export interface AppSettings {
   readonly rememberConnectionUnlock: RememberUnlock;
   /** MUL-1: how many sessions may be open at once. */
   readonly maxSessions: number;
+  /**
+   * MUL-1: tapping a connection that already has a session open in the app: ask, go to the
+   * open session, or open another one.
+   */
+  readonly openAgain: OpenAgain;
   /** CON-4: keep a small picture of the last screen per connection. */
   readonly thumbnails: boolean;
   readonly connectionSort: ConnectionSort;
@@ -89,6 +96,10 @@ export interface AppSettings {
 }
 
 export type DemoVisibility = 'auto' | 'show' | 'hide';
+
+/** What tapping an already-open connection does (MUL-1). */
+export type OpenAgain = 'ask' | 'switch' | 'new';
+export const OPEN_AGAIN_CHOICES: readonly OpenAgain[] = ['ask', 'switch', 'new'];
 
 /**
  * Whether the server list shows the Demo entry. `savedServers` is undefined while the list
@@ -116,6 +127,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   rememberConnectionPasswords: DEFAULT_REMEMBER_POLICY,
   rememberConnectionUnlock: DEFAULT_REMEMBER_UNLOCK,
   maxSessions: 3,
+  openAgain: 'switch',
   thumbnails: true,
   connectionSort: 'server',
   onboardingDone: false,
@@ -304,6 +316,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
       typeof max === 'number' && Number.isInteger(max)
         ? Math.min(MAX_SESSIONS_MAX, Math.max(MAX_SESSIONS_MIN, max))
         : d.maxSessions,
+    openAgain: pick(raw['openAgain'], OPEN_AGAIN_CHOICES, d.openAgain),
     thumbnails: typeof raw['thumbnails'] === 'boolean' ? raw['thumbnails'] : d.thumbnails,
     connectionSort: pick(
       raw['connectionSort'],
@@ -326,16 +339,38 @@ export function parseAppSettings(raw: unknown): AppSettings {
 /**
  * Settings restored from a backup: everything except what is device-specific (the lock,
  * which needs this device's biometrics, whether the introduction was seen, and what this
- * device may keep of connection passwords and how it releases them).
+ * device may keep of connection passwords and how it releases them), and except security
+ * choices a backup file must not change (pre-release review R6): "Sign out of servers
+ * after …" stays as it is, and the session defaults never switch on accepting every pushed
+ * file or the microphone (`withoutRiskySessionValues`).
  */
 export function settingsFromBackup(current: AppSettings, raw: unknown): AppSettings {
+  return settingsRestore(current, raw).settings;
+}
+
+/** `settingsFromBackup`, plus whether a security setting in the backup was left out. */
+export function settingsRestore(
+  current: AppSettings,
+  raw: unknown,
+): { readonly settings: AppSettings; readonly securityReset: boolean } {
   const parsed = parseAppSettings(raw);
+  const defaults = withoutRiskySessionValues(
+    parsed.sessionDefaults as Readonly<Record<string, JsonValue>>,
+  );
+  const signOutDiffers = parsed.serverSignOutAfterSeconds !== current.serverSignOutAfterSeconds;
   return {
-    ...parsed,
-    lock: current.lock,
-    onboardingDone: current.onboardingDone,
-    rememberConnectionPasswords: current.rememberConnectionPasswords,
-    rememberConnectionUnlock: current.rememberConnectionUnlock,
+    settings: {
+      ...parsed,
+      sessionDefaults: defaults.value as SessionSettingsPatch,
+      lock: current.lock,
+      onboardingDone: current.onboardingDone,
+      rememberConnectionPasswords: current.rememberConnectionPasswords,
+      rememberConnectionUnlock: current.rememberConnectionUnlock,
+      serverSignOutAfterSeconds: current.serverSignOutAfterSeconds,
+    },
+    securityReset:
+      defaults.changed ||
+      (isRecord(raw) && raw['serverSignOutAfterSeconds'] !== undefined && signOutDiffers),
   };
 }
 

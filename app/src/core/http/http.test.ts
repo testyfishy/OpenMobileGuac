@@ -2,7 +2,13 @@ import type { HttpOptions, HttpResponse as CapHttpResponse } from '@capacitor/co
 import { describe, expect, it } from 'vitest';
 import { createHttpClient, createSecureStore } from '../platform.ts';
 import { FetchHttpClient, type FetchLike } from './FetchHttpClient.ts';
-import { HttpTransportError, encodeForm, withQuery } from './HttpClient.ts';
+import {
+  HttpTransportError,
+  OPAQUE_REDIRECT_STATUS,
+  encodeForm,
+  isRedirectResponse,
+  withQuery,
+} from './HttpClient.ts';
 import { NativeHttpClient, classifyNativeError } from './NativeHttpClient.ts';
 import { NativeSecureStore } from '../storage/NativeSecureStore.ts';
 
@@ -59,6 +65,27 @@ describe('FetchHttpClient', () => {
     });
     expect(res.status).toBe(404);
     expect(res.body).toBe('<html>nope</html>');
+  });
+
+  it('never follows redirects and reports a hidden one as status 0', async () => {
+    let init: RequestInit | undefined;
+    const opaque = new Response(null, { status: 200 });
+    Object.defineProperty(opaque, 'type', { value: 'opaqueredirect' });
+    Object.defineProperty(opaque, 'status', { value: 0 });
+    const fetchImpl: FetchLike = async (_url, i) => {
+      init = i;
+      return opaque;
+    };
+    const res = await new FetchHttpClient(fetchImpl).request({
+      method: 'GET',
+      url: 'https://guac.example/guacamole/api/languages',
+    });
+    expect(init?.redirect).toBe('manual');
+    expect(res).toEqual({ status: OPAQUE_REDIRECT_STATUS, headers: {}, body: null });
+    expect(isRedirectResponse(res)).toBe(true);
+    expect(isRedirectResponse({ status: 302 })).toBe(true);
+    expect(isRedirectResponse({ status: 304 })).toBe(false);
+    expect(isRedirectResponse({ status: 200 })).toBe(false);
   });
 
   it('returns null for empty bodies', async () => {
@@ -129,6 +156,7 @@ describe('NativeHttpClient', () => {
       headers: { 'Guacamole-Token': 't', 'Content-Type': 'application/x-www-form-urlencoded' },
       connectTimeout: 1000,
       readTimeout: 1000,
+      disableRedirects: true,
     });
     expect(p.calls[0]?.params).toBeUndefined();
     expect(res).toEqual({

@@ -1,6 +1,7 @@
 import {
   DEFAULT_TIMEOUT_MS,
   HttpTransportError,
+  OPAQUE_REDIRECT_STATUS,
   decodeTextBody,
   serializeBody,
   withQuery,
@@ -51,7 +52,8 @@ export class FetchHttpClient implements HttpClient {
           body,
           signal: controller.signal,
           credentials: 'omit',
-          redirect: 'follow',
+          // Never replay a request (and its token header) to wherever the server points.
+          redirect: 'manual',
         });
       } catch (err) {
         if (timedOut) {
@@ -60,6 +62,10 @@ export class FetchHttpClient implements HttpClient {
         throw new HttpTransportError('unreachable', url, describe(err), { cause: err });
       }
 
+      if (response.type === 'opaqueredirect') {
+        // The browser hides the status and `Location` of a redirect it did not follow.
+        return { status: OPAQUE_REDIRECT_STATUS, headers: {}, body: null };
+      }
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
         responseHeaders[key.toLowerCase()] = value;

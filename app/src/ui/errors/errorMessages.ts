@@ -47,6 +47,8 @@ export function describeGuacError(info: GuacErrorInfo, ctx: ErrorContext = {}): 
             ? `${e.notGuacamole.detail} ${e.notGuacamole.status(info.status)}`
             : e.notGuacamole.detail,
       };
+    case 'redirected':
+      return { code: 'redirected', title: e.redirected.title, detail: e.redirected.detail };
     case 'invalid-url':
       return { code: `invalid-url-${info.reason}`, title: e.invalidUrl[info.reason] };
     case 'invalid-credentials':

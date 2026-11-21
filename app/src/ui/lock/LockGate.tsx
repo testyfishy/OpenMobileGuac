@@ -6,6 +6,7 @@ import { onAppActiveChange, setPrivacyScreen, type AuthOutcome } from '../servic
 import { shouldLockOnResume } from '../sessions/sessionModel.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { strings } from '../strings.ts';
+import { AppAwayTracker } from './appAwayTracker.ts';
 import { lockEnforced } from './LockService.ts';
 
 /**
@@ -49,19 +50,21 @@ export function LockGate() {
   }, [enabled, lock]);
 
   useEffect(() => {
-    let backgroundedAt: number | null = null;
+    // Tells the biometric prompt's own pause/resume from a real trip away (appAwayTracker.ts).
+    const away = new AppAwayTracker(lock);
     const sub = onAppActiveChange((active) => {
-      if (lock.promptActive()) return;
+      const change = away.change(active);
+      if (change.kind === 'ignore' || (change.kind === 'away' && change.tentative)) return;
       // SRV-11: the connection-password check waits for the foreground and its grace ends
       // in the background, also while the app lock is off.
       lock.setActive(active);
-      if (!active) {
-        backgroundedAt = Date.now();
+      if (change.kind === 'away') {
         // Hide the UI now, so the first frame after returning is the lock screen, not the
         // remote desktop (the privacy screen covers the app switcher itself).
         lock.cover();
         return;
       }
+      const backgroundedAt = change.awaySince;
       const l = settingsRef.current.lock;
       if (
         shouldLockOnResume(
@@ -76,7 +79,6 @@ export function LockGate() {
       } else {
         lock.uncover();
       }
-      backgroundedAt = null;
     });
     return () => sub.dispose();
   }, [lock, log]);

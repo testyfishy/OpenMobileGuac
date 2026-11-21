@@ -94,6 +94,91 @@ export function PinDetails({ pin }: { pin: TlsPin }) {
   );
 }
 
+/**
+ * The offer for an address with no trusted certificate yet. When the address was signed in
+ * to with a publicly trusted certificate before (`seenWithSystemTrust`, review R2), it is a
+ * warning with an explicit confirmation dialog instead of the one-tap button.
+ */
+export function FirstUseOffer({
+  verdict,
+  origin,
+  now,
+  busy,
+  confirm,
+  setConfirm,
+  onTrust,
+}: {
+  verdict: Extract<CertificateVerdict, { kind: 'first-use' }>;
+  origin: string;
+  now: number;
+  busy: boolean;
+  confirm: boolean;
+  setConfirm: (open: boolean) => void;
+  onTrust: () => void;
+}) {
+  const t = tlsStrings();
+  const details = (
+    <>
+      <code className="mono" style={{ wordBreak: 'break-all' }}>
+        {FINGERPRINT_COMMAND}
+      </code>
+      <PresentedDetails cert={verdict.presented} now={now} />
+      <p className="field-hint">
+        {t.firstUse.scope(origin)} {t.firstUse.passwordOnce}
+      </p>
+    </>
+  );
+  if (!verdict.seenWithSystemTrust) {
+    return (
+      <>
+        <p className="banner-title">{t.firstUse.title}</p>
+        <p>{t.firstUse.body}</p>
+        {details}
+        <button type="button" className="btn btn-block" disabled={busy} onClick={onTrust}>
+          <Icon name="lock" /> {t.firstUse.trust}
+        </button>
+      </>
+    );
+  }
+  return (
+    <>
+      <InfoBanner tone="warning">
+        <p className="banner-title">{t.firstUse.seenTitle}</p>
+        <p>{t.firstUse.seenBody}</p>
+      </InfoBanner>
+      {details}
+      <button
+        type="button"
+        className="btn btn-danger-ghost btn-block"
+        disabled={busy}
+        onClick={() => setConfirm(true)}
+      >
+        {t.firstUse.seenTrust}
+      </button>
+      {confirm ? (
+        <Dialog
+          title={t.firstUse.seenConfirmTitle}
+          tone="warning"
+          onCancel={() => setConfirm(false)}
+          actions={
+            <>
+              <button type="button" className="btn" onClick={() => setConfirm(false)}>
+                {strings.common.cancel}
+              </button>
+              <button type="button" className="btn btn-danger" disabled={busy} onClick={onTrust}>
+                {t.firstUse.seenConfirm}
+              </button>
+            </>
+          }
+        >
+          <p>{t.firstUse.seenConfirmBody}</p>
+          <Fingerprint sha256={verdict.presented.sha256} />
+        </Dialog>
+      ) : null}
+    </>
+  );
+}
+
 type PanelState =
   | { readonly phase: 'checking' }
   | { readonly phase: 'failed' }
@@ -138,10 +223,20 @@ export function CertificatePanel({ url, onTrusted }: { url: string; onTrusted?: 
 
   if (!enabled || !origin) return null;
 
-  const trust = async (presented: PresentedCertificate) => {
+  const trust = async (presented: PresentedCertificate, seenWithSystemTrust?: boolean) => {
     setBusy(true);
     try {
       await tls.trust(presented);
+      // Keep the answer the warning was based on, so forgetting the pin later does not turn
+      // a server that once had a public certificate into a casual first use again.
+      if (seenWithSystemTrust !== undefined) {
+        await services.profiles
+          .setSystemTrustSeenForOrigin(presented.origin, seenWithSystemTrust)
+          .catch(() => undefined);
+      }
+      // Review R2: no stored token or saved password goes to a certificate just accepted on
+      // trust; every server at this address asks for the password once.
+      await services.auth.requirePasswordAfterNewCertificate(presented.origin);
       setConfirm(false);
       setState({ phase: 'trusted' });
     } catch {
@@ -170,23 +265,15 @@ export function CertificatePanel({ url, onTrusted }: { url: string; onTrusted?: 
     if (v.kind === 'already-trusted') body = <p>{t.alreadyTrusted}</p>;
     else if (v.kind === 'first-use') {
       body = (
-        <>
-          <p className="banner-title">{t.firstUse.title}</p>
-          <p>{t.firstUse.body}</p>
-          <code className="mono" style={{ wordBreak: 'break-all' }}>
-            {FINGERPRINT_COMMAND}
-          </code>
-          <PresentedDetails cert={v.presented} now={now} />
-          <p className="field-hint">{t.firstUse.scope(origin)}</p>
-          <button
-            type="button"
-            className="btn btn-block"
-            disabled={busy}
-            onClick={() => void trust(v.presented)}
-          >
-            <Icon name="lock" /> {t.firstUse.trust}
-          </button>
-        </>
+        <FirstUseOffer
+          verdict={v}
+          origin={origin}
+          now={now}
+          busy={busy}
+          confirm={confirm}
+          setConfirm={setConfirm}
+          onTrust={() => void trust(v.presented, v.seenWithSystemTrust)}
+        />
       );
     } else {
       body = (

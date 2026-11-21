@@ -36,6 +36,14 @@ export interface ServerProfile {
    * when bound to `baseUrl`'s scheme, host and port; parsing drops any other pin.
    */
   readonly tlsPin?: TlsPin;
+  /**
+   * SRV-8 (pre-release review R2): this address (scheme, host, port) was signed in to over
+   * https with the operating system's certificate trust, without a pin. A self-signed
+   * certificate there later is then suspicious, and the "trust this certificate" offer asks
+   * for an explicit extra confirmation. `undefined` = not known (profiles saved before this
+   * existed; see `ProfileStore.resolveSystemTrustSeen`). Kept per address, like `tlsPin`.
+   */
+  readonly systemTrustSeen?: boolean;
 }
 
 /** Throws `ModelParseError` unless `url` is an absolute http(s) URL. */
@@ -57,6 +65,9 @@ export function parseServerProfile(raw: unknown, path = ''): ServerProfile {
   assertHttpBaseUrl(baseUrl, path ? `${path}.baseUrl` : 'baseUrl');
   // A malformed pin, or one for another scheme/host/port, is dropped, never applied.
   const tlsPin = pinForBaseUrl(obj['tlsPin'], baseUrl);
+  // Tolerant: a malformed flag reads as "not known" rather than dropping the profile.
+  const seenRaw = obj['systemTrustSeen'];
+  const systemTrustSeen = typeof seenRaw === 'boolean' ? seenRaw : undefined;
   return {
     id: expectNonEmptyString(obj, 'id', path),
     name: expectString(obj, 'name', path),
@@ -65,5 +76,6 @@ export function parseServerProfile(raw: unknown, path = ''): ServerProfile {
     rememberPassword: optionalBoolean(obj, 'rememberPassword', path) ?? false,
     createdAt: optionalNumber(obj, 'createdAt', path) ?? 0,
     ...(tlsPin ? { tlsPin } : {}),
+    ...(systemTrustSeen !== undefined ? { systemTrustSeen } : {}),
   };
 }

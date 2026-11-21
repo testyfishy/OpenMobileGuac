@@ -34,7 +34,8 @@ not edit the same files at once.
   unit tests + build) passes in `/app`. If something could not be verified (most often: iOS
   on a device), say so in the report and add it to the relevant device checklist rather than
   claiming it works.
-- New dependencies must be Apache-2.0/MIT/BSD-compatible; record them in `NOTICE`.
+- New dependencies must be under a permissive licence compatible with GPL-3.0-or-later and
+  the app-store permission (for example MIT, BSD, ISC, Apache-2.0); record them in `NOTICE`.
 
 ### Environment facts (dev PC, checked 2026-11-18)
 
@@ -102,7 +103,7 @@ microphone input; multi-monitor and image clipboard are not possible with Guacam
 Goal: prove the architecture in SPEC §8.1 on real devices before investing in features.
 
 - [ ] **T0.1 Repo scaffold.**
-  Init git; add `LICENSE` (Apache-2.0), `NOTICE`, `README.md` (what it is, status, unofficial
+  Init git; add `LICENSE` (Apache-2.0 at the time; since relicensed to GPL-3.0-or-later), `NOTICE`, `README.md` (what it is, status, unofficial
   disclaimer), `.gitignore`, `CONTRIBUTING.md`. Create `/app` with Vite + React + TypeScript
   (strict), ESLint, Prettier, Vitest, and an `npm run check` script. Add Capacitor (current
   stable; confirm the version and its minimum iOS/Android from the official docs) and

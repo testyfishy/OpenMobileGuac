@@ -345,7 +345,7 @@ export const sessionEs: SessionStrings = {
     },
     keySet: 'Conjunto de teclas',
     keySetHint:
-      'Las teclas que se muestran sobre el teclado. Crea y edita conjuntos en Ajustes › Teclas y combinaciones o desde la barra de teclas.',
+      'Las teclas que se muestran sobre el teclado. Crea y edita conjuntos en Ajustes › Teclado y teclas o desde la barra de teclas.',
     keySetSwipe: 'Deslizar de lado en la barra de teclas para cambiar de conjunto',
     keySetSwipeHint:
       'Funciona cuando la fila está desplazada hasta el final (no en una columna lateral). Desactivado: usa el botón de cambio al final de la barra.',
@@ -359,7 +359,7 @@ export const sessionEs: SessionStrings = {
     },
     receivedFiles: 'Archivos recibidos',
     receivedFilesHint:
-      'Guardar: se escriben directamente en una carpeta Descargas a medida que llegan (iPhone y iPad: Archivos › En mi iPhone › OpenMobileGuac › Downloads; Android: Documentos › OpenMobileGuac); luego puedes compartirlos desde Archivos › Transferencias. Compartir: se abre la hoja de compartir cuando el archivo está completo y no se guarda copia. Los trabajos de impresión siempre abren la hoja de compartir.',
+      'Guardar: se escriben directamente en una carpeta Descargas a medida que llegan (iPhone y iPad: Archivos › En mi iPhone › OMG › Downloads; Android: Documentos › OpenMobileGuac); luego puedes compartirlos desde Archivos › Transferencias. Compartir: se abre la hoja de compartir cuando el archivo está completo y no se guarda copia. Los trabajos de impresión siempre abren la hoja de compartir.',
     receivedFilesOptions: {
       downloads: 'Guardar en Descargas',
       share: 'Compartir, sin guardar copia',
@@ -816,7 +816,7 @@ export const sessionEs: SessionStrings = {
       `Importados ${sets} ${plural(sets, 'conjunto', 'conjuntos')} y ${combos} ${plural(combos, 'combinación', 'combinaciones')}`,
     importErrors: {
       json: 'Este archivo no es JSON válido.',
-      format: 'No es un archivo de conjuntos de teclas de OpenMobileGuac.',
+      format: 'No es un archivo de conjuntos de teclas de Open Mobile Guac.',
       version: 'Este archivo lo creó una versión más reciente de la app.',
       empty: 'El archivo no tiene conjuntos ni combinaciones.',
       read: 'No se pudo leer el archivo.',

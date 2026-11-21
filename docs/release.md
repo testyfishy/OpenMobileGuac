@@ -1,11 +1,12 @@
 # Builds and releases
 
 All device builds are made by GitHub Actions. Nothing here needs a Mac or a local Android
-SDK. Workflows live in `.github/workflows/`:
+SDK. To build on your own machine or with your own accounts, see
+[BUILDING.md](BUILDING.md). Workflows live in `.github/workflows/`:
 
 | Workflow | Runner | What it does |
 |---|---|---|
-| `ci.yml` (CI) | ubuntu-latest, Node 22 | `npm ci` + `npm run check` in `app/` on every push and PR. |
+| `ci.yml` (CI) | ubuntu-latest, Node 22 | `npm ci` + `npm run check` in `app/` on pushes to `main` and on every PR. |
 | `android.yml` (Android) | ubuntu-latest, JDK 21, preinstalled Android SDK | Web build, `npx cap sync android`, `./gradlew assembleDebug`. Uploads the APK as a run artifact. On pushes to `main` it also updates the rolling `nightly` prerelease. |
 | `ios.yml` (iOS) | macos-26 (Xcode 26.x) | Web build, `npx cap sync ios`, unsigned Simulator build. On pushes to `main` (or a manual run) **and** when the signing secrets exist, it archives, signs and uploads to TestFlight. |
 
@@ -16,9 +17,12 @@ runners can queue for a long time); run them by hand from the Actions tab if nee
 > is written but has not run end-to-end yet, usually because it needs the owner's Apple
 > account.
 
-- Verified: CI check, Android debug APK build and nightly publishing, iOS Simulator build.
-- **Unverified:** the whole TestFlight path (archive, cloud signing, upload), Android
-  release signing, and all on-device behaviour (see `docs/checklists/phase0.md`).
+- Verified: CI check, Android debug APK build and nightly publishing, iOS Simulator build,
+  and the TestFlight path (unsigned archive, cloud signing with an Admin API key, upload).
+  The signed upload has been seen passing in CI on pushes to `main` since 2026-11-20.
+- **Unverified:** Android release signing (the step is skipped: no release keystore secret
+  is set), and on-device behaviour (see `docs/checklists/phase0.md`; no checklist results
+  are recorded in this repository yet).
 
 ---
 
@@ -46,6 +50,12 @@ workflow keeps the debug key stable like this:
 1. If the secret `ANDROID_DEBUG_KEYSTORE_BASE64` is set, it uses that keystore.
 2. Otherwise it restores `~/.android/debug.keystore` from the GitHub Actions cache (key
    `android-debug-keystore-v1`), creating and caching a new one on the first run.
+
+Pull-request builds use neither: the Android Gradle plugin signs them with a throwaway key,
+so code in a pull request never sees the nightly key. The build job is read-only; a separate
+`publish` job (pushes to `main` only, `contents: write`) downloads the APK artifact and moves
+the `nightly` tag and release through the GitHub API without checking out the repository
+(AUDIT §7 R5).
 
 Option 2 needs no setup, but GitHub evicts caches that go unused for 7 days. After a long
 pause the next build gets a new key and the phone will say the update conflicts with the
@@ -161,7 +171,8 @@ Then:
    Admin is needed because the workflow lets Xcode create/use a *cloud-managed* Apple
    Distribution certificate and provisioning profile through this key; lower roles
    (App Manager, Developer) are reported to fail with "You haven't been given access to
-   cloud-managed distribution certificates". *(Unverified for this project.)*
+   cloud-managed distribution certificates". *(Admin works for this project; the lower
+   roles were not tried.)*
 4. **Generate**. Copy the **Key ID** shown in the row and the **Issuer ID** shown above the
    table.
 5. Click **Download** on the key row. You get `AuthKey_<KEYID>.p8`. **It can only be
@@ -224,23 +235,25 @@ the private key at Apple and needs only the API key. It also avoids adding a Rub
 toolchain. Archiving unsigned avoids an Apple Development profile, which Xcode can only
 create if the team has at least one registered device.
 
-**Unverified (needs your account to test):**
+**Status:** seen passing in CI. The Archive and "Sign and upload to TestFlight" steps have
+succeeded on pushes to `main` since 2026-11-20, so the export with an Admin API key and the
+upload validation both work for this project's team.
 
-- That the export step succeeds with an Admin API key on a fresh team. If it fails with a
-  cloud-signing / "no account" error, check that the key's access is **Admin**, then
-  re-run. If it still fails, the fallbacks are: (a) archive with signing on, after
-  registering the iPhone's UDID under *Certificates, Identifiers & Profiles → Devices*; or
-  (b) switch to fastlane with a stored distribution certificate. Report the exact error
-  text (it contains no secrets) and a session can adapt the workflow.
-- That `uploadSymbols` and the upload itself pass App Store Connect validation (icons,
-  Info.plist keys) on the first try. Missing marketing icons sizes etc. would show as
-  upload errors in the run log.
+If it fails on another team (for example in a fork) with a cloud-signing / "no account"
+error, check that the key's access is **Admin**, then re-run. If it still fails, the
+fallbacks are: (a) archive with signing on, after registering the iPhone's UDID under
+*Certificates, Identifiers & Profiles → Devices*; or (b) switch to fastlane with a stored
+distribution certificate. The error text in the run log contains no secrets.
 
 ### `ITSAppUsesNonExemptEncryption`
 
-`Info.plist` sets it to `false`: the app only uses the OS's standard HTTPS/TLS. This answers
-the export-compliance question for every build so TestFlight builds don't stop at
-"Missing Compliance". Re-check at submission time (SPEC §10.2).
+`Info.plist` sets it to `false`, so TestFlight builds don't stop at "Missing Compliance".
+Network encryption is the OS's standard HTTPS/TLS. The app also uses the platform's
+cryptography APIs for local features: WebCrypto PBKDF2-SHA256 and AES-256-GCM for the
+optional backup passphrase, WebCrypto HMAC for TOTP codes, and SHA-256 for certificate
+fingerprints. It contains no cryptography of its own. The owner should re-check this
+declaration at submission time (SPEC §10.2); the facts are collected in
+[store/export-compliance.md](store/export-compliance.md).
 
 ---
 
@@ -307,8 +320,8 @@ tokens and encrypts passwords and TOTP keys with a passphrase. Session thumbnail
 of remote screens) are no longer in Preferences at all: they are files in the cache
 directory (`Library/Caches` on iOS, `getCacheDir()` on Android), which neither OS backs up.
 
-Not yet checked: an Android Gradle/lint build with these attributes (only the web build and
-unit tests were run), and `adb shell bmgr backupnow` on a device to confirm nothing is
+The Android Gradle build with these attributes passes in CI (`assembleDebug`). Not yet
+checked: Android lint, and `adb shell bmgr backupnow` on a device to confirm nothing is
 backed up.
 
 ## Network configuration

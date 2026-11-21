@@ -1308,6 +1308,17 @@ a {
   background: var(--omg-surface);
   text-align: start;
   cursor: pointer;
+  position: relative;
+}
+
+/* "Open" on a Jump back in card: over the picture's corner, so the name keeps its width. */
+.quick-open {
+  position: absolute;
+  top: 0.875rem;
+  inset-inline-end: 0.875rem;
+  display: flex;
+  border-radius: 999px;
+  background: var(--omg-surface);
 }
 
 .quick-thumb {

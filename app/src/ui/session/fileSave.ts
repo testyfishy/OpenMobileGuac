@@ -364,6 +364,13 @@ function nativeHttp(
           recursive: true,
           connectTimeout: HTTP_IDLE_TIMEOUT_MS,
           readTimeout: HTTP_IDLE_TIMEOUT_MS,
+          // The request carries the session token: never replay it elsewhere. Honoured by
+          // Android (HttpURLConnection). There a 3xx "succeeds" with the redirect page as the
+          // body, but the stream was never intercepted, so no in-band `end` arrives and
+          // `transfers.ts` drops the part file as incomplete. The iOS implementation ignores
+          // this option and follows redirects with the token (docs/AUDIT.md, pre-release
+          // review R3); a final non-2xx makes it reject, and the transfer goes in band.
+          disableRedirects: true,
         });
         try {
           const st = await Filesystem.stat({ path: partPath, directory: place.directory });

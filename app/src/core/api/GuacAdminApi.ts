@@ -1,5 +1,6 @@
 import {
   HttpTransportError,
+  isRedirectResponse,
   type HttpClient,
   type HttpRequest,
   type HttpResponse,
@@ -429,9 +430,11 @@ export class GuacAdminApi {
     return new GuacApiError(info);
   }
 
+  /** As `GuacApi.send`: transport failures and redirects reject with `GuacApiError`. */
   private async send(req: HttpRequest): Promise<HttpResponse> {
+    let res: HttpResponse;
     try {
-      return await this.http.request(
+      res = await this.http.request(
         this.timeoutMs === undefined ? req : { ...req, timeoutMs: this.timeoutMs },
       );
     } catch (err) {
@@ -444,5 +447,13 @@ export class GuacAdminApi {
       }
       throw err;
     }
+    if (isRedirectResponse(res)) {
+      throw new GuacApiError({
+        kind: 'redirected',
+        url: req.url,
+        location: res.headers['location'],
+      });
+    }
+    return res;
   }
 }

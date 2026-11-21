@@ -12,6 +12,7 @@ import { Keyboard } from '@capacitor/keyboard';
 import { StatusBar } from '@capacitor/status-bar';
 import type { HapticHint } from '../../session/pointer/PointerModel.ts';
 import { sessionStrings } from './sessionStrings.ts';
+import { foldFromSignals, NO_FOLD, type FoldInfo, type ViewportSegment } from './deviceShape.ts';
 
 export function isNative(): boolean {
   try {
@@ -320,17 +321,10 @@ export function enterImmersive(): Disposable {
 // ---------------------------------------------------------------------------------------
 // Foldables (DSP-8)
 
-export interface FoldInfo {
-  /** A horizontal hinge (tabletop / laptop posture): segments above and below. */
-  readonly horizontalFold: boolean;
-  /** Top of the lower segment in CSS px from the viewport top, when known. */
-  readonly foldTop: number | null;
-}
-
-const NO_FOLD: FoldInfo = { horizontalFold: false, foldTop: null };
+export type { FoldInfo } from './deviceShape.ts';
 
 interface ViewportSegmentsApi {
-  readonly segments?: readonly { readonly top: number; readonly height: number }[] | null;
+  readonly segments?: readonly ViewportSegment[] | null;
 }
 
 interface DevicePostureApi {
@@ -343,22 +337,16 @@ interface DevicePostureApi {
  * Current fold state from whichever API the WebView has: the Viewport Segments API
  * (`window.viewport.segments`), the `vertical-viewport-segments` media query (two
  * segments stacked vertically = a horizontal fold), and the Device Posture API
- * (`navigator.devicePosture.type === 'folded'`, without geometry). Absent APIs = no fold.
+ * (`navigator.devicePosture.type === 'folded'`, without geometry, trusted only where the
+ * hinge direction is unambiguous). Absent APIs = no fold. See `foldFromSignals`.
  */
 export function readFold(): FoldInfo {
   if (typeof window === 'undefined') return NO_FOLD;
+  let segments: readonly ViewportSegment[] | null | undefined;
   try {
-    const vp = (window as unknown as { viewport?: ViewportSegmentsApi }).viewport;
-    const segs = vp?.segments;
-    if (segs && segs.length === 2) {
-      const [a, b] = segs;
-      if (a && b && Math.abs(a.top - b.top) > 1) {
-        return { horizontalFold: true, foldTop: Math.max(a.top, b.top) };
-      }
-      return NO_FOLD;
-    }
+    segments = (window as unknown as { viewport?: ViewportSegmentsApi }).viewport?.segments;
   } catch {
-    // ignore
+    segments = undefined;
   }
   const mq = (q: string) => {
     try {
@@ -367,14 +355,17 @@ export function readFold(): FoldInfo {
       return false;
     }
   };
-  if (mq('(vertical-viewport-segments: 2)')) {
-    return { horizontalFold: true, foldTop: Math.round(window.innerHeight / 2) };
-  }
   const posture = (navigator as Navigator & { devicePosture?: DevicePostureApi }).devicePosture;
-  if (posture?.type === 'folded' && window.innerWidth > window.innerHeight) {
-    return { horizontalFold: true, foldTop: Math.round(window.innerHeight / 2) };
-  }
-  return NO_FOLD;
+  const angle = typeof screen !== 'undefined' ? screen.orientation?.angle : undefined;
+  return foldFromSignals({
+    segments,
+    stacked: mq('(vertical-viewport-segments: 2)'),
+    sideBySide: mq('(horizontal-viewport-segments: 2)'),
+    posture: posture?.type,
+    angle,
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
 }
 
 /** Calls `cb` whenever the fold state may have changed. */

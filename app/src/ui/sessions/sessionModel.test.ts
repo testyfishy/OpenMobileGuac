@@ -5,6 +5,9 @@ import {
   activeSession,
   decideAuthRecovery,
   decideOpen,
+  findOpenSession,
+  openAgainFor,
+  openAgainToStore,
   openTargetKeys,
   sessionsReducer,
   shouldLockOnResume,
@@ -91,6 +94,61 @@ describe('decideOpen', () => {
     expect(d.kind).toBe('limit');
     expect(d.kind === 'limit' && d.suggest.id).toBe('b');
     expect(decideOpen(s, 's1', target('d'), 4)).toEqual({ kind: 'open' });
+  });
+
+  it('follows "When a connection is already open"', () => {
+    const s = withSessions('a');
+    expect(decideOpen(s, 's1', target('a'), 3, 'switch')).toEqual({ kind: 'existing', id: 'a' });
+    expect(decideOpen(s, 's1', target('a'), 3, 'ask')).toEqual({ kind: 'ask', id: 'a' });
+    expect(decideOpen(s, 's1', target('a'), 3, 'new')).toEqual({ kind: 'open' });
+    // Not open: every setting simply opens.
+    for (const p of ['ask', 'switch', 'new'] as const) {
+      expect(decideOpen(s, 's1', target('b'), 3, p)).toEqual({ kind: 'open' });
+      expect(decideOpen(s, 's2', target('a'), 3, p)).toEqual({ kind: 'open' });
+    }
+  });
+
+  it('"Open another" skips the open session but still respects the cap', () => {
+    const s = withSessions('a');
+    expect(decideOpen(s, 's1', target('a'), 3, 'ask', true)).toEqual({ kind: 'open' });
+    const d = decideOpen(s, 's1', target('a'), 1, 'ask', true);
+    expect(d.kind === 'limit' && d.suggest.id).toBe('a');
+    // Opening another at the cap with 'new' asks to close one, too.
+    expect(decideOpen(s, 's1', target('a'), 1, 'new').kind).toBe('limit');
+  });
+
+  it('goes to the most recently shown of several sessions of that connection', () => {
+    let s = withSessions('a');
+    const dup: OpenSession = { ...session('a', 5), id: 'a2' };
+    s = sessionsReducer(s, { type: 'open', session: dup });
+    s = sessionsReducer(s, { type: 'show', id: 'a', now: 50 });
+    expect(decideOpen(s, 's1', target('a'), 3, 'switch')).toEqual({ kind: 'existing', id: 'a' });
+    s = sessionsReducer(s, { type: 'show', id: 'a2', now: 60 });
+    expect(decideOpen(s, 's1', target('a'), 3, 'ask')).toEqual({ kind: 'ask', id: 'a2' });
+    expect(findOpenSession(s, 's1', target('a'))?.id).toBe('a2');
+    expect(findOpenSession(s, 's2', target('a'))).toBeUndefined();
+  });
+
+  it('a suspended session still counts as open (switching reconnects it)', () => {
+    const s = sessionsReducer(withSessions('a'), { type: 'suspend-all' });
+    expect(decideOpen(s, 's1', target('a'), 3, 'switch')).toEqual({ kind: 'existing', id: 'a' });
+  });
+
+  it('admin Join and share links always go to the open session', () => {
+    const joined: SessionTarget = { ...target('a'), join: '$abc' };
+    expect(openAgainFor('ask', joined, false)).toBe('switch');
+    expect(openAgainFor('new', joined, false)).toBe('switch');
+    expect(openAgainFor('new', target('a'), true)).toBe('switch');
+    expect(openAgainFor('ask', target('a'), false)).toBe('ask');
+    expect(openAgainFor('new', target('a'), false)).toBe('new');
+  });
+
+  it('stores the answer only with "Don\'t ask again", never on Cancel', () => {
+    expect(openAgainToStore('switch', true)).toBe('switch');
+    expect(openAgainToStore('new', true)).toBe('new');
+    expect(openAgainToStore('switch', false)).toBeNull();
+    expect(openAgainToStore('new', false)).toBeNull();
+    expect(openAgainToStore('cancel', true)).toBeNull();
   });
 
   it('builds open-target keys per server', () => {

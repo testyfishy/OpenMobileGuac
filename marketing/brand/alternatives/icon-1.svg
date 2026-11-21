@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>Icon option 1: OMG lettering</title>
+<defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6fd6b6"/><stop offset="1" stop-color="#1f6f5c"/></linearGradient></defs>
+<rect width="1024" height="1024" fill="url(#g1)"/>
+  <circle cx="820" cy="190" r="420" fill="#ffffff" opacity="0.06"/>
+  <g fill="none" stroke="#ffffff" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="314.2" cy="512" r="62"/>
+    <path d="M453.44 574 V450 L512 536.08 L570.56 450 V574"/>
+    <path d="M751.3 465.9 A62 62 0 1 0 771.8 512 H714.76"/>
+  </g>
+</svg>

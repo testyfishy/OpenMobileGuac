@@ -116,7 +116,7 @@ function paintDesktop(d: DemoDesktop, p: Painter): void {
   );
 
   // Heading below the taskbar (both are on layer 0).
-  p.text('OpenMobileGuac demo desktop', 18, TASKBAR_H + 22, { size: 14, bold: true }, '#ffffff');
+  p.text('Open Mobile Guac demo desktop', 18, TASKBAR_H + 22, { size: 14, bold: true }, '#ffffff');
   p.text(
     'Simulated on this device · no network · no personal data',
     18,

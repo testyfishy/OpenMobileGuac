@@ -25,6 +25,7 @@ import {
   parseServerOptions,
   sanitizeSessionPatch,
   settingsFromBackup,
+  settingsRestore,
 } from './settings/settingsModel.ts';
 import type { SessionSettings } from './integration/session.ts';
 import { parseThemePreference, resolveTheme } from './theme/theme.ts';
@@ -45,6 +46,7 @@ describe('describeGuacError', () => {
       },
       { kind: 'session-expired', status: 403, message: undefined, translatableMessage: undefined },
       { kind: 'invalid-response', url: 'u', detail: 'x' },
+      { kind: 'redirected', url: 'u', location: undefined },
     ] as const;
     const titles = infos.map((i) => describeGuacError(i).title);
     expect(new Set(titles).size).toBe(titles.length);
@@ -296,6 +298,22 @@ describe('settings model', () => {
       lock: { enabled: true, afterSeconds: 0 },
       onboardingDone: true,
     });
+  });
+
+  it('a backup never changes the background sign-out or switches on risky defaults (review R6)', () => {
+    const current = { ...DEFAULT_APP_SETTINGS, serverSignOutAfterSeconds: 300 };
+    const r = settingsRestore(current, {
+      serverSignOutAfterSeconds: null,
+      sessionDefaults: { microphone: true, remoteFiles: 'accept' },
+    });
+    expect(r.settings.serverSignOutAfterSeconds).toBe(300);
+    expect(r.settings.sessionDefaults.microphone).toBeUndefined();
+    expect(r.settings.sessionDefaults.remoteFiles).toBeUndefined();
+    expect(r.securityReset).toBe(true);
+    expect(settingsRestore(current, { theme: 'dark' }).securityReset).toBe(false);
+    expect(describeGuacError({ kind: 'redirected', url: 'u', location: undefined }).code).toBe(
+      'redirected',
+    );
   });
 
   it('parses per-server options and maps clipboard policies', () => {

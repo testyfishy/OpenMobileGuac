@@ -195,6 +195,14 @@ describe('connection test', () => {
     expect(result.candidates.every((c) => c.failure === 'unreachable')).toBe(true);
   });
 
+  it('labels a redirect as such (never followed)', async () => {
+    const result = await runConnectionTest('https://guac.example/guacamole', {
+      http: http(() => ({ status: 302, body: null })),
+    });
+    expect(result.api).toBe('fail');
+    expect(result.candidates[0]).toMatchObject({ failure: 'redirected', httpStatus: 302 });
+  });
+
   it('flags invalid input', async () => {
     const result = await runConnectionTest('', { http: http(() => ({ status: 200, body: {} })) });
     expect(result.invalid).toBe(true);

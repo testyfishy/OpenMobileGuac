@@ -7,7 +7,7 @@
 const plural = (n: number, one: string, other: string) => (n === 1 ? one : other);
 
 export const en = {
-  appName: 'OpenMobileGuac',
+  appName: 'Open Mobile Guac',
 
   common: {
     back: 'Back',
@@ -202,6 +202,7 @@ export const en = {
       timeout: 'timed out',
       tls: 'certificate not trusted',
       'not-guacamole': 'not Guacamole',
+      redirected: 'redirected elsewhere',
     } as Record<string, string>,
     websocketDetail: {
       error: 'the WebView could not open it',
@@ -209,7 +210,7 @@ export const en = {
       closed: 'closed by the server or a proxy',
     } as Record<string, string>,
     wsHintTls:
-      'The API works but the tunnel does not. With HTTPS this usually means the WebView does not trust the certificate (see Settings › Diagnostics and docs/tls.md); behind a reverse proxy, check that WebSocket upgrades are forwarded.',
+      'The API works but the tunnel does not. With HTTPS this usually means the WebView does not trust the certificate (see Settings › General & about › Diagnostics and docs/tls.md); behind a reverse proxy, check that WebSocket upgrades are forwarded.',
     allGood: 'Everything needed for a session answered.',
   },
 
@@ -236,6 +237,8 @@ export const en = {
     sessionExpired: 'Your session expired. Sign in again.',
     signedOutInBackground:
       'Signed out because the app was in the background (Settings › Sign out of servers after). Enter your password to continue.',
+    newCertificatePassword:
+      'You trusted a new certificate for this server. Enter your password once, so a saved password is never sent to a certificate you have not signed in with.',
     logout: 'Sign out',
     signedInAs: (user: string) => `Signed in as ${user}`,
     anonymous: 'Signed in (anonymous)',
@@ -313,6 +316,11 @@ export const en = {
       title: 'Not a Guacamole server',
       detail: 'Something answered at that address, but it is not the Apache Guacamole web app.',
       status: (status: number) => `The server answered with HTTP ${status}.`,
+    },
+    redirected: {
+      title: 'The server redirected the request',
+      detail:
+        'The server redirected the request to another address. If a sign-in gateway sits in front of Guacamole, use single sign-on or open the server address it redirects to.',
     },
     invalidUrl: {
       empty: 'Enter the server address.',
@@ -396,6 +404,7 @@ export const en = {
     linkCopied:
       'Link copied. Add it as a home-screen shortcut with your launcher or the Shortcuts app.',
     openSessionBadge: 'Open',
+    openSessionLabel: 'Session open in the app',
     swipeHint: 'Swipe for actions',
     linkConfirmTitle: (connection: string, server: string) => `Open “${connection}” on ${server}?`,
     linkConfirmBody:
@@ -451,6 +460,12 @@ export const en = {
     limitBody: (n: number) =>
       `Up to ${n} ${plural(n, 'session', 'sessions')} can be open at once (Settings › Sessions). Disconnect one to open another.`,
     closeOldest: (name: string) => `Disconnect ${name} and continue`,
+    alreadyOpenTitle: (name: string) => `${name} is already open`,
+    alreadyOpenBody: 'Go back to the session that is open, or open another one next to it?',
+    alreadyOpenGoTo: 'Go to the open session',
+    alreadyOpenAnother: 'Open another',
+    alreadyOpenDontAsk:
+      'Don’t ask again (change it in Settings › Sessions › When a connection is already open)',
     suspendedTitle: 'Disconnected to save battery',
     suspendedBody:
       'The app was in the background longer than the time set in Settings, so this session was closed cleanly.',
@@ -465,7 +480,7 @@ export const en = {
     body: 'Unlock with Face ID, fingerprint or your device passcode to continue.',
     unlock: 'Unlock',
     failed: 'Not unlocked. Try again.',
-    reason: 'Unlock OpenMobileGuac',
+    reason: 'Unlock Open Mobile Guac',
     unavailable:
       'Face ID, fingerprint and the device passcode are not available right now. Check that a passcode is set in the device settings, then try again.',
     retry: 'Try again',
@@ -483,6 +498,63 @@ export const en = {
 
   settings: {
     title: 'Settings',
+    /** Settings categories, their sub-pages and the search across them. */
+    pages: {
+      search: 'Search settings',
+      noMatch: 'No settings match your search.',
+      resultCount: (n: number) => `${n} ${plural(n, 'setting', 'settings')} found`,
+      advanced: 'Advanced',
+      more: 'More',
+      danger: 'Reset and remove',
+      resetPage: 'Reset this page to the defaults',
+      resetPageHint: 'Only the session defaults on this page. Connections keep their own choices.',
+      reset: 'Reset',
+      resetAllSession: 'Reset all session defaults',
+      resetAllSessionHint:
+        'Display, toolbar, pointer, gesture, keyboard, clipboard, file and sound defaults. Connections keep their own choices.',
+      categories: {
+        general: 'General & about',
+        display: 'Display',
+        toolbar: 'Toolbar & layout',
+        pointer: 'Pointer & touch',
+        gestures: 'Gestures',
+        keyboard: 'Keyboard & keys',
+        sessions: 'Sessions',
+        security: 'Security & privacy',
+        backup: 'Backup & restore',
+      },
+      groups: {
+        serverList: 'Server list',
+        help: 'Help',
+        picture: 'Picture',
+        remoteSize: 'Remote desktop size',
+        screen: 'This screen',
+        layout: 'Landscape and foldables',
+        mode: 'Pointer mode',
+        trackpad: 'Trackpad pointer',
+        feedback: 'Feedback',
+        keyBar: 'Key bar',
+        typing: 'Typing',
+        openSessions: 'Open sessions',
+        background: 'In the background',
+        thumbnails: 'Thumbnails',
+        appLock: 'App lock',
+        serverSignIn: 'Server sign-in',
+        connectionPasswords: 'Connection passwords',
+      },
+      summaries: {
+        gestures: (on: number, total: number) => `${on} of ${total} switches on`,
+        lockOn: 'App lock on',
+        lockOff: 'App lock off',
+        sessions: (n: number) => `Up to ${n} at once`,
+        autoBackupOn: (frequency: string) => `Automatic: ${frequency}`,
+        autoBackupOff: 'Automatic backups off',
+        pointer: (mode: string, speed: string) => `${mode} · speed ${speed}`,
+        keyboard: (set: string, combos: number) =>
+          `Key set: ${set} · ${combos} saved ${plural(combos, 'combo', 'combos')}`,
+        remember: (policy: string) => `Passwords: ${policy}`,
+      },
+    },
     appearance: 'Appearance',
     theme: 'Theme',
     themeSystem: 'System',
@@ -524,6 +596,8 @@ export const en = {
       'Asked when the app returns from the background and before saved credentials are used. The app’s content is hidden in the app switcher while this is on.',
     lockUnavailableWeb: 'Available in the mobile app only.',
     lockUnavailableDevice: 'Set up a device passcode, Face ID or fingerprint first.',
+    lockUnavailableError:
+      'The device did not say whether a passcode or biometrics are set up. Reopen the app and try again.',
     lockAfter: 'Lock when the app has been in the background for',
     rememberConnection: 'Remember connection passwords',
     rememberConnectionOptions: {
@@ -560,6 +634,12 @@ export const en = {
     sessions: 'Sessions',
     maxSessions: 'Sessions open at once',
     maxSessionsHint: 'Each open session uses memory and data. Older devices may prefer 1 or 2.',
+    openAgain: 'When a connection is already open',
+    openAgainAsk: 'Ask',
+    openAgainSwitch: 'Go to the open session',
+    openAgainNew: 'Open another',
+    openAgainHint:
+      'What tapping a connection that has a session open in the app does. A disconnected session reconnects. A second session to the same computer may sign the first one out (for example with RDP). Joining someone’s session and share links always go to the open one.',
     backgroundDisconnect: 'Disconnect sessions after the app is in the background for',
     backgroundDisconnectIos:
       'On iPhone and iPad the system pauses the app soon after you leave it, so it cannot keep a session alive: the Guacamole server ends it about 15 seconds after the app goes quiet, whatever is chosen here. When you come back, the session reconnects by itself.',
@@ -567,7 +647,7 @@ export const en = {
       'Saves battery and data. This does not sign you out of the server: reconnecting takes one tap.',
     serverSignOut: 'Sign out of servers after the app is in the background for',
     serverSignOutHint:
-      'After this time the app signs out of every server, and the next sign-in asks for the password even if one is saved. “Never” keeps you signed in until the server itself ends the sign-in (by default after an hour without use). Separate from disconnecting sessions above, and from the app lock, which only asks for Face ID / fingerprint / device passcode. Does not apply while Android keeps sessions connected in the background.',
+      'After this time the app signs out of every server, and the next sign-in asks for the password even if one is saved. “Never” keeps you signed in until the server itself ends the sign-in (by default after an hour without use). Separate from disconnecting sessions (Settings › Sessions), and from the app lock, which only asks for Face ID / fingerprint / device passcode. Does not apply while Android keeps sessions connected in the background.',
     thumbnails: 'Save a thumbnail of each session',
     thumbnailsHint:
       'A small picture of the last screen, shown in recents. Stored on this device only.',
@@ -580,7 +660,7 @@ export const en = {
     about: 'About',
     version: 'Version',
     licence: 'Licence',
-    licenceValue: 'Apache License 2.0',
+    licenceValue: 'GNU GPL, version 3 or later',
     source: 'Source code',
     disclaimer:
       'Unofficial — not affiliated with or endorsed by the Apache Software Foundation. Apache Guacamole is a trademark of the ASF.',
@@ -684,13 +764,19 @@ export const en = {
       ` ${n} saved ${n === 1 ? 'server has' : 'servers have'} a different address in the backup, so ${n === 1 ? 'it was' : 'they were'} added as ${n === 1 ? 'a new server' : 'new servers'} without saved passwords or sign-in. Sign in to ${n === 1 ? 'it' : 'them'} again if the address is right.`,
     restoredSecretsSkipped:
       ' Saved passwords and TOTP keys in the backup were not restored (no passphrase).',
+    restoredUnsealedSkipped: (n: number) =>
+      ` Saved passwords or TOTP keys for ${n} ${n === 1 ? 'server were' : 'servers were'} not restored: the backup does not say which address they belong to.`,
+    restoredPinsDropped: (n: number) =>
+      ` Trusted certificates were not restored for ${n} ${n === 1 ? 'server' : 'servers'}; you will be asked again.`,
+    restoredSecurityReset:
+      ' Some security settings were not restored and keep this device’s values or the safe defaults: “Sign out of servers after”, asking before app links connect, accepting files from the remote computer, and the microphone.',
     restored: (added: number, updated: number, removed: number) =>
       `Restored: ${added} added, ${updated} updated${removed ? `, ${removed} removed` : ''}.`,
     replaceConfirmTitle: 'Replace all servers?',
     replaceConfirm: 'Replace',
     errors: {
       json: 'That file is not valid JSON.',
-      format: 'That is not an OpenMobileGuac backup.',
+      format: 'That is not an Open Mobile Guac backup.',
       version: 'This backup was made by a newer version of the app. Update the app and try again.',
       shape: 'The backup file is damaged.',
       read: 'The file could not be read.',

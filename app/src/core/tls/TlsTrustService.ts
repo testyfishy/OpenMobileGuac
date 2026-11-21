@@ -10,6 +10,8 @@ import { formatName, parseCertificate, type CertificateDetails } from './x509.ts
 export interface PinStore {
   list(): Promise<readonly ServerProfile[]>;
   setTlsPinForOrigin(origin: string, pin: TlsPin | undefined): Promise<readonly string[]>;
+  /** `ProfileStore.systemTrustSeen`; absent in tests that do not care (then: not seen). */
+  systemTrustSeen?(baseUrl: string): Promise<boolean>;
 }
 
 /** A certificate a server presented, as read by `inspect`. */
@@ -23,8 +25,17 @@ export interface PresentedCertificate {
 
 /** What the UI should offer after a certificate failure. */
 export type CertificateVerdict =
-  /** No trusted certificate for this address yet: offer "Trust this certificate". */
-  | { readonly kind: 'first-use'; readonly presented: PresentedCertificate }
+  /**
+   * No trusted certificate for this address yet: offer "Trust this certificate". With
+   * `seenWithSystemTrust`, this address was signed in to before with a publicly trusted
+   * certificate: a self-signed one now may be an interception, so the offer is a warning
+   * with an extra confirmation (pre-release review R2).
+   */
+  | {
+      readonly kind: 'first-use';
+      readonly presented: PresentedCertificate;
+      readonly seenWithSystemTrust: boolean;
+    }
   /** A different certificate than the trusted one: block, show old vs new. */
   | { readonly kind: 'changed'; readonly presented: PresentedCertificate; readonly pinned: TlsPin }
   /** The presented certificate is the trusted one; the failure has another cause. */
@@ -161,7 +172,10 @@ export class TlsTrustService {
     await this.refresh().catch(() => undefined);
     const presented = await this.inspect(url);
     const pinned = this.pinFor(url);
-    if (!pinned) return { kind: 'first-use', presented };
+    if (!pinned) {
+      const seen = (await this.store.systemTrustSeen?.(url).catch(() => true)) ?? false;
+      return { kind: 'first-use', presented, seenWithSystemTrust: seen };
+    }
     if (pinned.sha256 === presented.sha256) return { kind: 'already-trusted', presented };
     return { kind: 'changed', presented, pinned };
   }

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2064" height="2752" viewBox="0 0 2064 2752">
+<title>store screenshot</title>
+<defs><linearGradient id="markGrad" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#6fd6b6"/><stop offset="1" stop-color="#1f6f5c"/></linearGradient></defs>
+<defs>
+    <radialGradient id="bgg1" cx="0.78" cy="0.35" r="0.65"><stop offset="0" stop-color="#1c5a4b" stop-opacity="0.95"/><stop offset="1" stop-color="#0f1115" stop-opacity="0"/></radialGradient>
+    <radialGradient id="bgg2" cx="0.05" cy="1" r="0.6"><stop offset="0" stop-color="#173c4c" stop-opacity="0.7"/><stop offset="1" stop-color="#0f1115" stop-opacity="0"/></radialGradient>
+    <pattern id="bgdots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="#ffffff" opacity="0.06"/></pattern>
+  </defs>
+  <rect width="2064" height="2752" fill="#0f1115"/>
+  <rect width="2064" height="2752" fill="url(#bgg1)"/>
+  
+  
+    <text x="1032" y="230" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif" font-size="118" font-weight="700" letter-spacing="-1.18"><tspan fill="#eceef2">Esc, Ctrl, Alt and</tspan></text>
+<text x="1032" y="364.52" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif" font-size="118" font-weight="700" letter-spacing="-1.18"><tspan fill="#eceef2">arrows, </tspan><tspan fill="#5cc8a8">one tap</tspan><tspan fill="#eceef2"> away</tspan></text>
+    <text x="1032" y="469.52" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif" font-size="50" font-weight="400" fill="#a2a9b6">Extra key bar, with or without the keyboard</text>
+    <g>
+    <defs><clipPath id="cap21"><rect x="257.92" y="625.4399999999999" width="1548.16" height="2064.213333333333" rx="27.879999999999995"/></clipPath>
+      <filter id="cap21s" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="49.199999999999996"/></filter></defs>
+    <rect x="261.2" y="677.92" width="1541.6" height="2091.3717333333334" rx="73.8" fill="#000" opacity="0.5" filter="url(#cap21s)"/>
+    <rect x="212" y="579.52" width="1640" height="2156.0533333333333" rx="73.8" fill="#07080a"/>
+    <rect x="214" y="581.52" width="1636" height="2152.0533333333333" rx="71.8" fill="none" stroke="#3a404b" stroke-width="4"/>
+    <image x="257.92" y="625.4399999999999" width="1548.16" height="2064.213333333333" href="../raw/ipad-keys.jpg" xlink:href="../raw/ipad-keys.jpg" preserveAspectRatio="xMidYMid slice" clip-path="url(#cap21)"/>
+  </g>
+</svg>

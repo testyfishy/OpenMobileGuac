@@ -189,6 +189,13 @@ export interface GestureConfig {
   readonly velocityWindowMs: number;
 }
 
+/** Two fingers moving within this angle of each other (cos 60°) travel "the same way". */
+const SAME_DIRECTION_COS = 0.5;
+/** A finger that moved less than this share of the other's travel counts as still. */
+const ONE_FINGER_STILL = 0.25;
+/** With one finger still, the pinch and pan thresholds are this many times longer. */
+const ONE_FINGER_WAIT = 2.5;
+
 export const DEFAULT_GESTURE_CONFIG: GestureConfig = {
   tapSlopPx: 10,
   tapMaxMs: 250,
@@ -694,9 +701,25 @@ export class GestureRecognizer {
     const cy = (a.y + b.y) / 2;
     const spanChange = Math.abs(span - startSpan);
     const centroidMove = dist(cx, cy, scx, scy);
+    // How the two fingers moved relative to each other decides between scrolling and
+    // zooming. Fingers that travel the same way are a pan however much their distance
+    // changes (a scroll often starts with one finger slightly ahead of the other). While
+    // only one finger has moved, the gesture is still open: it becomes a pinch only after
+    // a clearly longer stretch, so a scroll whose second finger starts late is not a zoom.
+    const ax = a.x - a.startX;
+    const ay = a.y - a.startY;
+    const bx = b.x - b.startX;
+    const by = b.y - b.startY;
+    const la = Math.hypot(ax, ay);
+    const lb = Math.hypot(bx, by);
+    const oneStill = Math.min(la, lb) < Math.max(la, lb) * ONE_FINGER_STILL;
+    const together = !oneStill && (ax * bx + ay * by) / (la * lb) > SAME_DIRECTION_COS;
+    const wait = oneStill ? ONE_FINGER_WAIT : 1;
     const isPinch =
-      spanChange >= c.pinchThresholdPx && spanChange >= c.pinchDominance * centroidMove;
-    const isPan = !isPinch && centroidMove >= c.twoFingerPanThresholdPx;
+      !together &&
+      spanChange >= c.pinchThresholdPx * wait &&
+      spanChange >= c.pinchDominance * centroidMove;
+    const isPan = !isPinch && centroidMove >= c.twoFingerPanThresholdPx * wait;
     if (!isPinch && !isPan) return;
 
     this.flushMulti(out, t);

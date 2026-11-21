@@ -35,14 +35,17 @@ jobs:
     runs-on: ${{ inputs.runner || vars.IOS_RUNNER || 'macos-26' }}
     timeout-minutes: 45
     env:
-      # Secrets can't be used directly in `if:`; expose a flag instead.
-      HAS_SIGNING: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID != '' && secrets.APP_STORE_CONNECT_API_ISSUER_ID != '' && secrets.APP_STORE_CONNECT_API_KEY_P8 != '' && secrets.APPLE_TEAM_ID != '' }}
-      WANT_UPLOAD: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.testflight) }}
+      # Secrets can't be used directly in `if:`; expose a flag instead. Never on pull
+      # requests: no signing secret reaches a job that runs PR code.
+      HAS_SIGNING: ${{ github.event_name != 'pull_request' && secrets.APP_STORE_CONNECT_API_KEY_ID != '' && secrets.APP_STORE_CONNECT_API_ISSUER_ID != '' && secrets.APP_STORE_CONNECT_API_KEY_P8 != '' && secrets.APPLE_TEAM_ID != '' }}
+      WANT_UPLOAD: ${{ github.event_name != 'pull_request' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.testflight)) }}
     defaults:
       run:
         working-directory: app
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v7
         with:

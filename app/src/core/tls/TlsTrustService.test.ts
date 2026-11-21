@@ -297,3 +297,15 @@ describe('PinRoutingHttpClient', () => {
     }
   });
 });
+
+describe('first use after a publicly trusted certificate (pre-release review R2)', () => {
+  it('the verdict says whether the address was signed in to with system trust', async () => {
+    const s = await setup();
+    await s.store.add({ name: 'A', baseUrl: `${HOST}/guacamole` });
+    const fresh = await s.tls.check(`${HOST}/guacamole`);
+    expect(fresh).toMatchObject({ kind: 'first-use', seenWithSystemTrust: false });
+    await s.store.setSystemTrustSeenForOrigin(HOST, true);
+    const seen = await s.tls.check(`${HOST}/guacamole`);
+    expect(seen).toMatchObject({ kind: 'first-use', seenWithSystemTrust: true });
+  });
+});

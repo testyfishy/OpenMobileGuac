@@ -16,22 +16,28 @@ jobs:
     name: Debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Read-only: this job runs the repository's code (npm, Gradle). Publishing the nightly
+    # is the separate `publish` job below, which runs no repository code.
     permissions:
-      contents: write # publishing the rolling "nightly" prerelease
+      contents: read
     concurrency:
       group: android-${{ github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       ANDROID_VERSION_CODE: ${{ github.run_number }}
       # Optional: a base64-encoded debug keystore so every nightly has the same signature
-      # and installs over the previous one. See docs/release.md.
-      HAS_DEBUG_KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 != '' }}
-      HAS_RELEASE_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      # and installs over the previous one. See docs/release.md. Never on pull requests:
+      # their builds sign with a throwaway key the Android Gradle plugin creates.
+      HAS_DEBUG_KEYSTORE: ${{ github.event_name != 'pull_request' && secrets.ANDROID_DEBUG_KEYSTORE_BASE64 != '' }}
+      HAS_RELEASE_KEYSTORE: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      IS_PR: ${{ github.event_name == 'pull_request' }}
     defaults:
       run:
         working-directory: app
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v7
         with:
@@ -46,7 +52,7 @@ jobs:
 
       # Uses the Android SDK preinstalled on the ubuntu runner image (ANDROID_HOME).
       # Gradle downloads any missing SDK platform/build-tools automatically.
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       - name: Web build and Capacitor sync
         run: |
@@ -55,7 +61,8 @@ jobs:
           npx cap sync android
 
       # Debug signing. Prefer a stable keystore from secrets; otherwise reuse one cached
-      # from earlier runs; otherwise create one (and cache it).
+      # from earlier runs; otherwise create one (and cache it). None of this on pull
+      # requests: PR code must not get the key the nightlies are signed with.
       - name: Restore debug keystore from secret
         if: env.HAS_DEBUG_KEYSTORE == 'true'
         env:
@@ -64,14 +71,14 @@ jobs:
           mkdir -p "$HOME/.android"
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
       - name: Restore cached debug keystore
-        if: env.HAS_DEBUG_KEYSTORE != 'true'
+        if: env.IS_PR != 'true' && env.HAS_DEBUG_KEYSTORE != 'true'
         id: keystore-cache
         uses: actions/cache@v6
         with:
           path: ~/.android/debug.keystore
           key: android-debug-keystore-v1
       - name: Create debug keystore
-        if: env.HAS_DEBUG_KEYSTORE != 'true' && steps.keystore-cache.outputs.cache-hit != 'true'
+        if: env.IS_PR != 'true' && env.HAS_DEBUG_KEYSTORE != 'true' && steps.keystore-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$HOME/.android"
           keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" \
@@ -120,18 +127,43 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish rolling nightly prerelease
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  # The rolling "nightly" prerelease. The only job with write access, and it never checks
+  # out or runs repository code: it takes the APK the build job uploaded and moves the tag
+  # and the release through the GitHub API.
+  publish:
+    name: Publish nightly
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: android-nightly-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: OpenMobileGuac-debug-apk
+          path: ${{ runner.temp }}/out
+
+      - name: Move the nightly tag and update the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          git tag -f nightly "$GITHUB_SHA"
-          git push -f origin refs/tags/nightly
+          apk="$RUNNER_TEMP/out/OpenMobileGuac-debug.apk"
+          test -f "$apk"
+          if gh api "repos/$GH_REPO/git/ref/tags/nightly" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/nightly" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$GH_REPO/git/refs" -f ref=refs/tags/nightly -f sha="$GITHUB_SHA" >/dev/null
+          fi
           notes="Rolling debug build of ${GITHUB_SHA::7} (run ${GITHUB_RUN_NUMBER}). Not for production use. Install steps: docs/checklists/phase0.md"
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly --prerelease --title "Nightly (debug)" --notes "$notes"
           else
             gh release create nightly --prerelease --title "Nightly (debug)" --notes "$notes" --verify-tag
           fi
-          gh release upload nightly "$RUNNER_TEMP/out/OpenMobileGuac-debug.apk" --clobber
+          gh release upload nightly "$apk" --clobber

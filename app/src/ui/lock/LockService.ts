@@ -29,6 +29,12 @@ import {
 const RECENT_MS = 30_000;
 
 /**
+ * How long after a system prompt a pause/resume may still be the prompt's own (Android shows
+ * it as an activity; iOS resigns active for Face ID). See `AppAwayTracker`.
+ */
+export const PROMPT_BOUNCE_MS = 1500;
+
+/**
  * SRV-11: after the connection-password check was cancelled or failed, further checks in
  * this window are not shown (the password prompt appears instead), so several sessions
  * reconnecting at once never stack prompts after the user said no.
@@ -135,7 +141,17 @@ export class LockService {
 
   /** True while a system prompt is open or just closed (it can trigger pause/resume). */
   promptActive(): boolean {
-    return this.inFlight !== null || this.now() - this.promptEndedAt < 1500;
+    return this.promptInFlight() || this.promptEndedRecently();
+  }
+
+  /** A system prompt is open right now. */
+  promptInFlight(): boolean {
+    return this.inFlight !== null;
+  }
+
+  /** A system prompt closed less than `PROMPT_BOUNCE_MS` ago. */
+  promptEndedRecently(): boolean {
+    return this.now() - this.promptEndedAt < PROMPT_BOUNCE_MS;
   }
 
   lock(): void {
@@ -219,6 +235,7 @@ export class LockService {
    * the app lock. True = the value may be used now.
    *
    * - No biometrics or passcode on the device (or the web build): no check, true.
+   * - The biometric plugin failed (`error`): false, as for a declined check.
    * - Waits until the app lock is passed and the app is in the foreground, so the prompt is
    *   never shown behind the lock screen or while in the background.
    * - Grace: a successful check of any kind within `RECENT_MS`, without going to the
@@ -228,7 +245,10 @@ export class LockService {
    *   False never deletes anything: the caller shows the normal password prompt.
    */
   async confirmPresence(reason: string, cancel: string): Promise<boolean> {
-    const availability = await this.availabilityFn().catch(() => 'no-device-security' as const);
+    const availability = await this.availabilityFn().catch(() => 'error' as const);
+    // The plugin failed: nothing is known, so treat it as declined (the caller shows the
+    // password prompt). Only a definite "no biometrics or passcode" skips the check.
+    if (availability === 'error') return false;
     if (availability !== 'available') return true;
     await this.whenUnlocked();
     await this.whenActive();

@@ -33,6 +33,8 @@ export interface NativeHttpPlugin {
  * - The query string is built here, not with `params`, so both HTTP clients encode it the same
  *   way.
  * - HTTP error statuses resolve normally. The plugin rejects only when there is no response.
+ * - `disableRedirects: true`: Android `CapacitorHttpUrlConnection.setDisableRedirects` and
+ *   iOS `CapacitorUrlRequest.getUrlSession` stop following, and the 3xx is returned.
  * - `data` is already parsed when the response content type is JSON, and is a string
  *   otherwise.
  *
@@ -67,6 +69,9 @@ export class NativeHttpClient implements HttpClient {
         connectTimeout: timeout,
         readTimeout: timeout,
         responseType: 'text',
+        // A 3xx then resolves as-is instead of being followed with the same headers
+        // (Android `setInstanceFollowRedirects(false)`, iOS session delegate returns nil).
+        disableRedirects: true,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -1,10 +1,10 @@
 # OpenMobileGuac
 
-An open-source mobile client (iOS and Android) for
-[Apache Guacamole](https://guacamole.apache.org/) servers. It aims to make remote desktop
-sessions comfortable on a phone or tablet: proper touch pointer modes, a reliable soft
-keyboard with a key bar and combos, clipboard in both directions, and zoom and pan that
-behave well.
+A free, open-source mobile client (iOS and Android) for
+[Apache Guacamole](https://guacamole.apache.org/) servers that you host yourself. It aims to
+make remote desktop sessions comfortable on a phone or tablet: proper touch pointer modes, a
+reliable soft keyboard with a key bar and combos, clipboard in both directions, and zoom and
+pan that behave well.
 
 It is a [Capacitor](https://capacitorjs.com/) app with a TypeScript + React UI. The
 official Guacamole JavaScript client library (`guacamole-common-js`, Apache-2.0) handles
@@ -16,32 +16,74 @@ for the specification and [docs/PLAN.md](docs/PLAN.md) for the delivery plan.
 > project. "Apache", "Apache Guacamole", and "Guacamole" are trademarks of the Apache
 > Software Foundation.
 
-## Status
+## The open-source promise
 
-**Early development.** Nothing is published to any app store, and **nothing has been
-verified on a physical phone yet.** What exists has been exercised in unit tests and in a
-desktop browser (including phone-sized viewports) against the built-in Demo server.
+- **Open source, for good.** All of the app's source code, the native projects and the
+  build workflows are in this repository under the GPL-3.0-or-later (see [Licence](#licence)).
+  There is no closed part.
+- **Free.** No price, no paid tier, no in-app purchases, no licence key.
+- **No account, no telemetry.** The app has no analytics, ads, tracking or crash-reporting
+  SDK, and the developer runs no server. It connects only to the Guacamole servers you add
+  (and to the single sign-on page your server sends you to, if it uses one). Details:
+  [PRIVACY.md](PRIVACY.md); the network audit is in [docs/AUDIT.md](docs/AUDIT.md) §3.
 
-Built (code and unit tests; untested on a phone or a real server). Full status per feature:
-[docs/FEATURES.md](docs/FEATURES.md).
+## How this project is distributed
 
-- Servers: several profiles, secure storage for passwords and tokens, TOTP (optionally with
-  a stored seed), plain-`http` warning, silent re-login, biometric app lock, backup and
+| Platform | Where | Built by |
+|---|---|---|
+| Source | This repository | — |
+| Android | APK on [GitHub Releases](https://github.com/testyfishy/OpenMobileGuac/releases). Today this is only the rolling debug build on the [`nightly`](https://github.com/testyfishy/OpenMobileGuac/releases/tag/nightly) prerelease. Google Play later | [`.github/workflows/android.yml`](.github/workflows/android.yml) |
+| iOS | App Store and TestFlight, under the maintainer's Apple developer account. Not yet on the App Store | [`.github/workflows/ios.yml`](.github/workflows/ios.yml), on GitHub's macOS runners, from a commit on `main` |
+
+The iOS build is made by the public workflow, and its run log is public. The build number
+in TestFlight and the App Store is the workflow run number, so each build can be traced to
+a run and a commit.
+
+There is no iOS app file on GitHub. Most iPhones can only install apps from the App Store
+or TestFlight, so a file here would not help most people. Anyone with a Mac, or a fork with
+GitHub Actions, can build and install their own copy from this source with their own Apple
+developer account: see [docs/BUILDING.md](docs/BUILDING.md).
+
+## Features
+
+Full list with the status of each feature: [docs/FEATURES.md](docs/FEATURES.md).
+Comparison with the Guacamole 1.6.0 web client: [docs/GUACAMOLE-PARITY.md](docs/GUACAMOLE-PARITY.md).
+
+- Servers: several profiles, passwords and tokens in the iOS Keychain / Android Keystore,
+  TOTP (optionally with a stored secret), self-signed HTTPS by trusting a certificate
+  fingerprint, plain-`http` warning, silent re-login, biometric app lock, backup and
   restore, share links, deep links, SSO (experimental).
-- Connections: tree with search, favourites, recents and thumbnails.
+- Connections: tree with search, favourites, recents and thumbnails; connection and folder
+  management for accounts that are allowed to edit them.
 - Session screen: fit modes, pinch zoom, direct-touch, trackpad and RDP multi-touch modes,
-  hardware mouse and keyboard, soft-keyboard bridge with an editable key bar and combos,
-  clipboard both ways with a history panel, file transfer and print jobs, audio mute,
-  split/tabletop layout, keep-awake, automatic reconnect.
+  hardware mouse and keyboard, soft-keyboard bridge with key sets, an editable key bar and
+  combos, clipboard both ways with a history panel, file transfer and print jobs, audio and
+  microphone, a configurable toolbar, keep-awake, automatic reconnect.
 - Several sessions at once, background grace period, English and Spanish, local diagnostics.
 - A built-in **Demo server** that runs entirely on the device: a simulated desktop with a
   text editor, an input tester and a zoom target, so every control can be tried without a
   server. It contains no personal data and sends nothing over the network.
 
-Not yet verified: everything on real devices (soft keyboards, OS paste prompts, real
-multi-touch, rotation, lock, keep-awake, anything iOS-specific), sessions against a real
-Guacamole server, and the TestFlight / Android release-signing paths
-([docs/release.md](docs/release.md)). Testing order for the owner:
+## Status
+
+**Early development, not yet released in any store.**
+
+What has been checked:
+
+- Unit tests and a production build on every push to `main` and every pull request
+  (`npm run check` in CI).
+- The whole UI in a desktop browser at phone sizes, against the built-in Demo server, and
+  some sign-in flows against a local Guacamole 1.6.0 server (see FEATURES.md).
+- CI builds the Android debug APK and an iOS Simulator build, and uploads signed iOS builds
+  to TestFlight from `main` (seen passing in CI since 2026-11-20).
+
+What has been checked by hand: the maintainer uses TestFlight builds on an iPhone against
+their own Guacamole server (sign-in, VNC sessions, landscape layout, extra keys, the
+remembered connection password with Face ID). No results are recorded in the checklists
+yet, and nothing has been run on an Android device. Not yet checked
+systematically on a device: RDP and SSH sessions, OS paste prompts, file transfer,
+keep-awake, self-signed certificates, backups, and everything on Android. Android
+release signing has not run. Testing order:
 [docs/checklists/README.md](docs/checklists/README.md), then
 [phase0.md](docs/checklists/phase0.md), [session-device.md](docs/checklists/session-device.md)
 and [app-device.md](docs/checklists/app-device.md).
@@ -56,13 +98,21 @@ and [app-device.md](docs/checklists/app-device.md).
 
 ## Documentation
 
-- [docs/SPEC.md](docs/SPEC.md): specification.
-- [docs/PLAN.md](docs/PLAN.md): delivery plan and task list.
+- [docs/BUILDING.md](docs/BUILDING.md): build both apps from source, with your own signing.
 - [docs/release.md](docs/release.md): CI, nightly APK, signing and TestFlight.
 - [docs/FEATURES.md](docs/FEATURES.md): feature status and comparison with other clients.
+- [docs/GUACAMOLE-PARITY.md](docs/GUACAMOLE-PARITY.md): parity with the Guacamole web client.
+- [docs/AUDIT.md](docs/AUDIT.md): feature, security and privacy audit.
+- [docs/tls.md](docs/tls.md): self-signed and private-CA servers.
+- [docs/sso.md](docs/sso.md): single sign-on.
+- [docs/SPEC.md](docs/SPEC.md) and [docs/PLAN.md](docs/PLAN.md): specification and plan.
 - [docs/checklists/](docs/checklists/README.md): on-device test checklists, in testing order.
 - [docs/protocol-notes.md](docs/protocol-notes.md): notes on the Guacamole protocol and web
   client.
+- [docs/TRANSLATING.md](docs/TRANSLATING.md): adding a language.
+- [docs/store/](docs/store/README.md): store listing drafts and the submission checklist.
+- [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md),
+  [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Repository layout
 
@@ -107,9 +157,9 @@ Requirements of Capacitor 8, from the official docs
 | JDK (Android builds)  | 21 (the generated Gradle files set `JavaVersion.VERSION_21`) |
 | Gradle / AGP          | 8.14.3 / 8.13.0 (as generated)                          |
 
-These are the toolchain floors. The product targets in SPEC §7 (iOS 16+, Android 8.0 /
-API 26+) are higher; the final floors are set in Phase 0. The generated project still uses
-Capacitor's defaults (`minSdkVersion = 24`).
+These are the toolchain floors. The project sets `minSdkVersion = 26` (Android 8.0, in
+`app/android/variables.gradle`) and the iOS deployment target 15.0. SPEC §7 aims at iOS 16+;
+the final floors are set in Phase 0.
 
 ## Development
 
@@ -137,21 +187,30 @@ Set `VITE_DEV_GUAC_URL` (including the context path), `VITE_DEV_GUAC_USER` and
 included, to that server and lists it pre-filled. These values are read only by the dev
 server and never go into a production build.
 
-Device builds are made by GitHub Actions (see [docs/release.md](docs/release.md)). For a
-local Android build you also need the Android SDK (Android Studio) and JDK 21:
-
-```sh
-npm run build && npx cap sync android
-npx cap open android
-```
-
-The iOS project is generated and committed under `app/ios`; building it requires macOS and
-Xcode (CI builds it for the Simulator).
+Device builds are made by GitHub Actions (see [docs/release.md](docs/release.md)). For local
+Android and iOS builds, including your own signing, see [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## License
+## Licence
 
-[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attributions.
+OpenMobileGuac is licensed under the [GNU General Public License, version 3 or later](LICENSE)
+(GPL-3.0-or-later), with an
+[additional permission for app stores](LICENSE-APP-STORE-EXCEPTION). See [NOTICE](NOTICE)
+for attributions.
+
+What this means in plain words (the licence text is what counts):
+
+- You may use, study, change and share the app, for free.
+- If you distribute a changed version (a fork, a store listing, an APK), you must share its
+  source code under the same licence. That keeps every version of the app open.
+- App stores add terms of their own that can conflict with the GPL. The additional
+  permission allows the app, and forks of it, to be distributed through stores such as the
+  App Store and Google Play anyway, as long as the complete source of the distributed
+  version is made available under this licence.
+
+Earlier commits of this repository were published under the Apache License 2.0 and remain
+available under it. The vendored `guacamole-common-js` in `app/src/vendor` is Apache-2.0
+and keeps its own LICENSE and NOTICE; Apache-2.0 code can be used in a GPL-3.0 program.

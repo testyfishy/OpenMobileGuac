@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>OpenMobileGuac mark (proposal)</title>
+<defs><linearGradient id="markGrad" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#6fd6b6"/><stop offset="1" stop-color="#1f6f5c"/></linearGradient></defs>
+<rect width="1024" height="1024" fill="#0f1115"/><g transform="translate(112 112) scale(8)">
+    <rect width="100" height="100" rx="23" fill="url(#markGrad)"/>
+    <rect x="20" y="24" width="60" height="42" rx="7" fill="none" stroke="#ffffff" stroke-width="6.5"/>
+    <rect x="32" y="74" width="36" height="6.5" rx="3.25" fill="#ffffff"/>
+    <path transform="translate(-3 -6)" d="M52 36 L52 60 L57.5 54.5 L61.5 63.5 L66 61.5 L62 52.8 L69.5 52.5 Z" fill="#06231b" stroke="#ffffff" stroke-width="3.2" stroke-linejoin="round"/>
+  </g>
+</svg>

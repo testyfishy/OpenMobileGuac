@@ -4,12 +4,14 @@ import type { ProfileData } from '../storage/ProfileStore.ts';
 import {
   BACKUP_FORMAT,
   backupFileName,
+  countUnsealedSecrets,
   createBackup,
   decryptSecrets,
   encryptSecrets,
   parseBackup,
   planRestore,
   secretsToRestore,
+  withoutRiskySessionValues,
 } from './backup.ts';
 
 const profile = (id: string, over: Partial<ServerProfile> = {}): ServerProfile => ({
@@ -243,5 +245,61 @@ describe('secretsToRestore (AUDIT #1: secrets never follow a changed address)', 
       b: { password: 'pb', baseUrl: 'https://b.example/guacamole' },
     });
     expect(out).toEqual([{ id: 'b', password: 'pb' }]);
+  });
+});
+
+describe('pre-release review R7: secrets need a sealed address', () => {
+  const backup = createBackup({ profiles: [data(profile('a'))], appVersion: '0', now: 0 });
+  const plan = planRestore([], backup, 'merge', () => 'never');
+
+  it('releases nothing for an entry without a sealed baseUrl, and counts it', () => {
+    const secrets = { a: { password: 'pa', totpSeed: 'otpauth://totp/x?secret=AAAA' } };
+    expect(secretsToRestore(plan, backup, secrets)).toEqual([]);
+    expect(countUnsealedSecrets(secrets)).toBe(1);
+    // Pin-only entries (no password, no seed) are neither restored nor counted.
+    expect(countUnsealedSecrets({ a: { tlsPin: 'ab' } })).toBe(0);
+    expect(
+      secretsToRestore(plan, backup, { a: { baseUrl: 'https://guac.example/guacamole' } }),
+    ).toEqual([]);
+  });
+});
+
+describe('pre-release review R6: security settings are not restored', () => {
+  const risky: ProfileData = {
+    ...data(profile('a')),
+    connectionSettings: {
+      'c/postgresql/1': { fitMode: 'fit-width', remoteFiles: 'accept', microphone: true },
+      'c/postgresql/2': { remoteFiles: 'decline', microphone: false },
+    },
+    options: {
+      ssoMode: 'webview',
+      confirmLinks: false,
+      sessionDefaults: { microphone: true, remoteFiles: 'accept', fitMode: 'fit' },
+    },
+  };
+  const backup = createBackup({ profiles: [risky], appVersion: '0', now: 0 });
+
+  it('drops accept-all files, the microphone and confirmLinks: false at every level', () => {
+    for (const mode of ['merge', 'replace'] as const) {
+      const plan = planRestore([], backup, mode, () => 'never');
+      expect(plan.securityReset).toBe(1);
+      const d = plan.entries[0]?.data;
+      expect(d?.connectionSettings).toEqual({
+        'c/postgresql/1': { fitMode: 'fit-width' },
+        'c/postgresql/2': { remoteFiles: 'decline', microphone: false },
+      });
+      expect(d?.options).toEqual({ ssoMode: 'webview', sessionDefaults: { fitMode: 'fit' } });
+    }
+  });
+
+  it('leaves safe values alone and reports nothing', () => {
+    const safe = createBackup({ profiles: [data(profile('a'))], appVersion: '0', now: 0 });
+    const plan = planRestore([], safe, 'merge', () => 'never');
+    expect(plan.securityReset).toBe(0);
+    expect(plan.entries[0]?.data.options).toEqual({ ssoMode: 'webview' });
+    expect(withoutRiskySessionValues({ microphone: false })).toEqual({
+      value: { microphone: false },
+      changed: false,
+    });
   });
 });

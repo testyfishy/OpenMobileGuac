@@ -55,16 +55,24 @@ Binding rules, all enforced in core and unit-tested (`tlsPinStorage.test.ts`):
 
 ### Backups (AUDIT §6 item 1 applied to pins)
 
-- The pin travels in the plain part of a backup (it is not secret).
+- The pin travels in the plain part of a backup (it is not secret), and with a passphrase
+  its fingerprint is also sealed in the encrypted part next to `baseUrl`, for every pinned
+  server (with or without a saved password).
 - Parsing drops a pin that does not match the server's own `baseUrl` (an edited address
   cannot carry trust to another host).
-- A **merge** never adds or replaces the pin of a saved server; the device's own pin (if
-  still bound) is kept. Only a server *added* by the restore takes the backup's pin.
-- When saved passwords/TOTP seeds are exported, the pin's fingerprint is also sealed inside
-  the encrypted part (next to `baseUrl`). On restore, a server's secrets are restored only if
-  the sealed fingerprint equals the plain pin; an edited plain pin (for example an
-  attacker's certificate) means the secrets are skipped, so a saved password can never be
-  sent to a certificate the user did not trust for it.
+- The plain part is not authenticated, so a restore accepts a pin only when the decrypted
+  part seals the same fingerprint for the same address (AUDIT §7 R6). Without the
+  passphrase, or with an edited file, no pin is restored and the summary says the user will
+  be asked again.
+- Neither **merge** nor **replace** adds or replaces the pin of an address this device
+  already knows (saved, or removed by this replace): the device's own trust state is kept.
+  Only a server at an address new to the device takes the (sealed) backup pin.
+- On restore, a server's secrets are restored only if the encrypted part seals its address,
+  and, when the plain part names a pin, the same fingerprint; an edited plain pin (for
+  example an attacker's certificate) means the secrets are skipped, so a saved password can
+  never be sent to a certificate the user did not trust for it.
+- "Signed in before with the system's trust" (`systemTrustSeen`, below) is exported; a
+  restore can set it, never clear it.
 
 ### Native transport (`app/plugins/omg-pinned-tls`)
 
@@ -136,7 +144,13 @@ Failure codes: `PIN_MISMATCH` (with the presented certificate), `TLS`, `TIMEOUT`
 1. **First use.** Probe/sign-in fails with `tls` → the panel calls `inspect` and shows
    fingerprint, subject, issuer, validity and names, plus the `openssl` command to compare.
    "Trust this certificate for this server" stores the pin for that origin only; "Try again"
-   repeats the action, which now uses the native path.
+   repeats the action, which now uses the native path. If this address was signed in to
+   before with the operating system's trust (`ServerProfile.systemTrustSeen`), the panel is
+   a warning instead ("This server used a publicly trusted certificate before…") and needs
+   a confirmation dialog (AUDIT §7 R2).
+   After any new pin (first use or changed), every server at that address is signed out on
+   the device (token dropped, nothing sent over the new certificate) and the saved password
+   is not used until the user types it once.
 2. **Changed certificate.** The native path rejects with `PIN_MISMATCH`; the panel shows the
    trusted and the presented certificate side by side, says nothing was sent, and requires
    "Trust the new certificate…" plus a confirmation dialog.
@@ -190,7 +204,8 @@ Use a server with a self-signed certificate (for example nginx in front of Guaca
    connects until re-trusted.
 6. Forget: connecting fails with the certificate error again.
 7. A normal Let's Encrypt server on the same phone still works and never uses the plugin.
-8. Backup with passwords, restore on another install: the pin and password come back; edit
-   the backup's pin by hand: the password is not restored.
+8. Backup with passwords, restore on another install with the passphrase: the pin and
+   password come back; without the passphrase: no pin, and the summary says so; edit the
+   backup's pin by hand: neither the pin nor the password is restored.
 9. Android only: confirm `PIN_MISMATCH` carries the new certificate (Conscrypt keeps the
    cause); if not, the panel still inspects the server and shows old vs new.

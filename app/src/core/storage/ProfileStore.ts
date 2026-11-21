@@ -86,7 +86,9 @@ export interface NewServerProfile {
 }
 
 /** The pin is changed only through `setTlsPinForOrigin` (SRV-8). */
-export type ServerProfilePatch = Partial<Omit<ServerProfile, 'id' | 'createdAt' | 'tlsPin'>>;
+export type ServerProfilePatch = Partial<
+  Omit<ServerProfile, 'id' | 'createdAt' | 'tlsPin' | 'systemTrustSeen'>
+>;
 
 export interface ProfileStoreOptions {
   readonly secureStore?: SecureStore;
@@ -143,6 +145,26 @@ function originPinState(
   return other
     ? { found: true, pin: pinForBaseUrl(other.tlsPin, other.baseUrl) }
     : { found: false, pin: undefined };
+}
+
+/**
+ * `ServerProfile.systemTrustSeen` of `baseUrl`'s origin among `profiles` (ignoring
+ * `exceptId`): true if any profile there says so, else false if any says no, else unknown.
+ */
+function originSeen(
+  profiles: readonly ServerProfile[],
+  baseUrl: string,
+  exceptId?: string,
+): boolean | undefined {
+  const origin = pinOrigin(baseUrl);
+  if (origin === undefined) return undefined;
+  let seen: boolean | undefined;
+  for (const p of profiles) {
+    if (p.id === exceptId || pinOrigin(p.baseUrl) !== origin) continue;
+    if (p.systemTrustSeen === true) return true;
+    if (p.systemTrustSeen === false) seen = false;
+  }
+  return seen;
 }
 
 function parseJson(text: string | null): unknown {
@@ -204,6 +226,7 @@ export class ProfileStore {
       // profiles takes their trust state (pin or none), never its own.
       const there = originPinState(profiles, input.baseUrl);
       const tlsPin = there.found ? there.pin : pinForBaseUrl(input.tlsPin, input.baseUrl);
+      const seen = originSeen(profiles, input.baseUrl);
       const profile: ServerProfile = {
         id: this.generateId(),
         name: input.name,
@@ -212,6 +235,11 @@ export class ProfileStore {
         rememberPassword: input.rememberPassword ?? false,
         createdAt: this.now(),
         ...(tlsPin ? { tlsPin } : {}),
+        ...(seen !== undefined
+          ? { systemTrustSeen: seen }
+          : tlsPin
+            ? { systemTrustSeen: false }
+            : {}),
       };
       if (profiles.some((p) => p.id === profile.id)) throw new Error('Generated a duplicate id');
       await this.writeProfiles([...profiles, profile]);
@@ -227,23 +255,28 @@ export class ProfileStore {
       const current = profiles[index];
       if (!current) throw new Error(`No profile with id ${id}`);
       const defined = Object.fromEntries(
-        Object.entries(patch).filter(([k, v]) => v !== undefined && k !== 'tlsPin'),
+        Object.entries(patch).filter(
+          ([k, v]) => v !== undefined && k !== 'tlsPin' && k !== 'systemTrustSeen',
+        ),
       ) as ServerProfilePatch;
-      const { tlsPin: currentPin, ...rest } = current;
+      const { tlsPin: currentPin, systemTrustSeen: currentSeen, ...rest } = current;
       // SRV-8: a trusted certificate belongs to a scheme, host and port. It survives a path
       // change on the same origin. On any other address change the profile takes the new
-      // address's trust state (another saved profile's pin there, or none).
+      // address's trust state (another saved profile's pin there, or none). The same goes
+      // for "seen with system trust".
       const nextBase = defined.baseUrl ?? current.baseUrl;
-      const keptPin =
-        pinOrigin(nextBase) === pinOrigin(current.baseUrl)
-          ? pinForBaseUrl(currentPin, nextBase)
-          : originPinState(profiles, nextBase, id).pin;
+      const sameOrigin = pinOrigin(nextBase) === pinOrigin(current.baseUrl);
+      const keptPin = sameOrigin
+        ? pinForBaseUrl(currentPin, nextBase)
+        : originPinState(profiles, nextBase, id).pin;
+      const keptSeen = sameOrigin ? currentSeen : originSeen(profiles, nextBase, id);
       const updated: ServerProfile = {
         ...rest,
         ...defined,
         id: current.id,
         createdAt: current.createdAt,
         ...(keptPin ? { tlsPin: keptPin } : {}),
+        ...(keptSeen !== undefined ? { systemTrustSeen: keptSeen } : {}),
       };
       const next = [...profiles];
       next[index] = updated;
@@ -307,7 +340,11 @@ export class ProfileStore {
   exportAll(): Promise<ProfileData[]> {
     return this.serialized(async () => {
       const out: ProfileData[] = [];
-      for (const profile of await this.readProfiles()) {
+      for (const stored of await this.readProfiles()) {
+        // The backup carries the resolved answer, so a restore of an older profile does not
+        // fall back to "never seen" once its token is gone.
+        const seen = await this.resolveSeen(stored);
+        const profile = seen === undefined ? stored : { ...stored, systemTrustSeen: seen };
         out.push({
           profile,
           favourites: await this.readRefs(profileKey(profile.id, 'favourites')),
@@ -328,6 +365,16 @@ export class ProfileStore {
   applyRestore(entries: readonly RestoreEntry[], removeIds: readonly string[] = []): Promise<void> {
     return this.serialized(async () => {
       let profiles = await this.readProfiles();
+      // This device's trust state per address, taken before `removeIds` go: "Replace" removes
+      // every profile first, and must not make every address look new (pre-release review R6).
+      const before = [...profiles];
+      const seenBefore = new Map<string, boolean>();
+      for (const p of before) {
+        const origin = pinOrigin(p.baseUrl);
+        if (origin === undefined) continue;
+        const seen = await this.resolveSeen(p);
+        if (seen !== undefined) seenBefore.set(origin, (seenBefore.get(origin) ?? false) || seen);
+      }
       for (const id of removeIds) {
         profiles = profiles.filter((p) => p.id !== id);
         await this.removeLocalData(id);
@@ -341,24 +388,38 @@ export class ProfileStore {
         const previous = profiles[index];
         // SRV-8: a backup never adds or replaces the trusted certificate of a saved address.
         // - A saved server keeps its own pin (if still bound to the address).
-        // - A new server at an address that already has profiles (saved, or earlier in this
-        //   restore) takes that address's trust state, pin or none.
-        // - Only a server at an address new to this device takes the backup's pin, and only
-        //   when bound to its own scheme, host and port.
-        const { tlsPin: backupPin, ...restored } = e.data.profile;
+        // - A new server at an address that has profiles (saved, earlier in this restore, or
+        //   removed by this "Replace") takes that address's trust state, pin or none.
+        // - Only a server at an address new to this device takes the backup's pin, which
+        //   `planRestore` keeps only when the decrypted secrets seal it; and only when bound
+        //   to its own scheme, host and port.
+        const { tlsPin: backupPin, systemTrustSeen: backupSeen, ...restored } = e.data.profile;
         const there = originPinState(profiles, restored.baseUrl, e.targetId);
+        // Including a removed profile under the same id ("Replace" keeps backup ids).
+        const removed = originPinState(before, restored.baseUrl);
         const tlsPin =
           previous && pinOrigin(previous.baseUrl) === pinOrigin(restored.baseUrl)
             ? pinForBaseUrl(previous.tlsPin, restored.baseUrl)
             : there.found
               ? there.pin
-              : previous
-                ? undefined
-                : pinForBaseUrl(backupPin, restored.baseUrl);
+              : removed.found
+                ? removed.pin
+                : previous
+                  ? undefined
+                  : pinForBaseUrl(backupPin, restored.baseUrl);
+        // "Seen with system trust" can be set by a backup, never cleared: the device's own
+        // answer for that address wins unless the backup says yes.
+        const origin = pinOrigin(restored.baseUrl);
+        const deviceSeen = origin === undefined ? undefined : seenBefore.get(origin);
+        const answer =
+          backupSeen === true || deviceSeen === true ? true : (deviceSeen ?? backupSeen);
+        // As in `setTlsPinForOrigin`: a pinned profile never stays "unknown".
+        const systemTrustSeen = answer ?? (tlsPin ? false : undefined);
         const profile: ServerProfile = {
           ...restored,
           id: e.targetId,
           ...(tlsPin ? { tlsPin } : {}),
+          ...(systemTrustSeen !== undefined && origin !== undefined ? { systemTrustSeen } : {}),
         };
         if (previous && !sameServerEndpoint(previous.baseUrl, profile.baseUrl)) {
           // Defence in depth: `planRestore` never maps a different endpoint onto an existing
@@ -416,11 +477,64 @@ export class ProfileStore {
         changed.push(p.id);
         const { tlsPin: _old, ...rest } = p;
         void _old;
+        // A pinned profile with no answer yet records "not seen with system trust", so the
+        // token/password fallback (`resolveSeen`) cannot misread it after "Forget".
+        if (pin && rest.systemTrustSeen === undefined) {
+          return { ...rest, tlsPin: pin, systemTrustSeen: false };
+        }
         return pin ? { ...rest, tlsPin: pin } : rest;
       });
       if (changed.length > 0) await this.writeProfiles(next);
       return changed;
     });
+  }
+
+  /**
+   * Records whether the address `origin` (`https://host:port`) was signed in to with the
+   * operating system's certificate trust (`ServerProfile.systemTrustSeen`), on every saved
+   * profile there.
+   */
+  setSystemTrustSeenForOrigin(origin: string, seen: boolean): Promise<string[]> {
+    return this.serialized(async () => {
+      const profiles = await this.readProfiles();
+      const changed: string[] = [];
+      const next = profiles.map((p) => {
+        if (pinOrigin(p.baseUrl) !== origin || this.isEphemeral(p.id)) return p;
+        if (p.systemTrustSeen === seen) return p;
+        changed.push(p.id);
+        return { ...p, systemTrustSeen: seen };
+      });
+      if (changed.length > 0) await this.writeProfiles(next);
+      return changed;
+    });
+  }
+
+  /**
+   * Whether the address of `profileId` (or `baseUrl`, for an unsaved server) was signed in to
+   * with system trust. Profiles saved before the flag existed have no answer; for them an
+   * https profile without a pin that has a stored token or saved password counts as seen:
+   * it can only have signed in through the system's trust.
+   */
+  async systemTrustSeen(baseUrl: string): Promise<boolean> {
+    const profiles = await this.list();
+    const origin = pinOrigin(baseUrl);
+    if (origin === undefined) return false;
+    for (const p of profiles) {
+      if (pinOrigin(p.baseUrl) === origin && (await this.resolveSeen(p)) === true) return true;
+    }
+    return false;
+  }
+
+  /** `systemTrustSeen`, with the fallback for older profiles (see `systemTrustSeen`). */
+  private async resolveSeen(p: ServerProfile): Promise<boolean | undefined> {
+    if (p.systemTrustSeen !== undefined) return p.systemTrustSeen;
+    if (pinOrigin(p.baseUrl) === undefined || p.tlsPin || !this.secureStore) return undefined;
+    const has = async (key: string) =>
+      ((await this.secureStore?.get(key).catch(() => null)) ?? null) !== null;
+    if ((await has(secretKeys.authToken(p.id))) || (await has(secretKeys.password(p.id)))) {
+      return true;
+    }
+    return undefined;
   }
 
   // ---- per-server options ---------------------------------------------------------------

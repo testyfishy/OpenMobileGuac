@@ -188,6 +188,7 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
         remember: profile.rememberPassword,
         needsHttpConfirm: insecure && !dismissed && !auth.isHttpConfirmed(profile.id),
         ...(secrets.signedOutInBackground ? { notice: strings.login.signedOutInBackground } : {}),
+        ...(secrets.newCertificate ? { notice: strings.login.newCertificatePassword } : {}),
       });
     })();
     return () => {

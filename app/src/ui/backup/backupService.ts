@@ -98,7 +98,9 @@ export async function buildBackup(
       const id = p.profile.id;
       const password = await services.secure.get(secretKeys.password(id)).catch(() => null);
       const totpSeed = await services.secure.get(secretKeys.totpSeed(id)).catch(() => null);
-      if (password || totpSeed) {
+      // A trusted certificate is sealed even without a password: a restore accepts a pin only
+      // when the encrypted part vouches for it (pre-release review R6).
+      if (password || totpSeed || p.profile.tlsPin) {
         // The address goes inside the encrypted part too, so an edited plain `baseUrl`
         // cannot carry these secrets to another host (AUDIT #1).
         plain[id] = {

@@ -25,6 +25,15 @@ export const tlsEn = {
     trust: 'Trust this certificate for this server',
     scope: (origin: string) =>
       `Only this exact certificate will be accepted, and only for ${origin}.`,
+    seenTitle: 'Warning: this server used a trusted certificate before',
+    seenBody:
+      'This server used a publicly trusted certificate before. A self-signed certificate now can mean someone is intercepting the connection. Do not continue on a public or unknown network, and only if you replaced the certificate yourself and the fingerprint below matches the one on the server. On the server:',
+    seenTrust: 'Trust this certificate anyway…',
+    seenConfirmTitle: 'Trust a self-signed certificate for this server?',
+    seenConfirmBody:
+      'Continue only if you changed this server to a self-signed or private certificate yourself. Afterwards you will be asked for your password once.',
+    seenConfirm: 'Trust it',
+    passwordOnce: 'After trusting it, you will be asked for your password once.',
   },
   changed: {
     title: 'The server’s certificate has changed',
@@ -76,6 +85,15 @@ export const tlsEs: TlsStrings = {
     trust: 'Confiar en este certificado para este servidor',
     scope: (origin: string) =>
       `Solo se aceptará exactamente este certificado, y solo para ${origin}.`,
+    seenTitle: 'Atención: este servidor usaba antes un certificado de confianza',
+    seenBody:
+      'Este servidor usaba antes un certificado de confianza pública. Un certificado autofirmado ahora puede significar que alguien está interceptando la conexión. No continúes en una red pública o desconocida, y hazlo solo si tú mismo cambiaste el certificado y la huella de abajo coincide con la del servidor. En el servidor:',
+    seenTrust: 'Confiar en este certificado de todos modos…',
+    seenConfirmTitle: '¿Confiar en un certificado autofirmado para este servidor?',
+    seenConfirmBody:
+      'Continúa solo si tú mismo cambiaste este servidor a un certificado autofirmado o privado. Después se te pedirá la contraseña una vez.',
+    seenConfirm: 'Confiar',
+    passwordOnce: 'Después de confiar en él, se te pedirá la contraseña una vez.',
   },
   changed: {
     title: 'El certificado del servidor ha cambiado',

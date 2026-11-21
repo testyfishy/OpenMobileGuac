@@ -16,6 +16,7 @@ import {
   type TotpParams,
 } from '../../core/totp/totp.ts';
 import { findDuoRedirect } from '../../core/sso/sso.ts';
+import { pinOrigin } from '../../core/tls/fingerprint.ts';
 import { isShareServerId } from './shareSessions.ts';
 
 /**
@@ -36,7 +37,15 @@ export interface SavedSecrets {
    * servers after …"): the saved password is not used until the user signs in once.
    */
   readonly signedOutInBackground?: boolean;
+  /**
+   * A new certificate was just trusted for this server's address (SRV-8): the saved password
+   * is not sent over it until the user types it once (pre-release review R2).
+   */
+  readonly newCertificate?: boolean;
 }
+
+/** Why the saved password is held back until the user signs in once. */
+export type PasswordRequiredReason = 'background' | 'certificate';
 
 export interface LoginRequest {
   readonly username: string;
@@ -51,6 +60,8 @@ export type RevalidateResult = 'ok' | 'relogged' | 'needs-sign-in';
 export type CredentialGate = () => Promise<boolean>;
 
 const passwordRequiredKey = (profileId: string): string => `auth/passwordRequired/${profileId}`;
+/** Stored value of `passwordRequiredKey` for a newly trusted certificate ('1': background). */
+const CERT_MARK = 'certificate';
 
 /** Enough of a session to call `DELETE api/session` with a stored token. */
 export function tokenOnlySession(baseUrl: string, token: string): AuthSession {
@@ -84,8 +95,10 @@ export class AuthService {
   private readonly passwordListeners = new Set<(profileId: string, password: string) => void>();
   private readonly backgroundSignOutListeners = new Set<(profileId: string) => void>();
   private readonly signedOutListeners = new Set<(profileId: string) => void>();
-  /** Servers signed out after the background time: known answer per id (`kv` is the truth). */
-  private readonly passwordRequired = new Map<string, boolean>();
+  /** Servers whose saved password is held back: known answer per id (`kv` is the truth). */
+  private readonly passwordRequired = new Map<string, PasswordRequiredReason | null>();
+  /** Whether an address has a trusted certificate (pin, saved or pending): `TlsTrustService`. */
+  private pinned: (baseUrl: string) => boolean = () => false;
   private readonly kv: KeyValueStore | undefined;
   /** Start-up check ("Sign out of servers after …" while the app was not running). */
   private entry: Promise<void> = Promise.resolve();
@@ -221,9 +234,9 @@ export class AuthService {
       this.transientPasswords.delete(profile.id);
       return { token, password: transient || null };
     }
-    if (await this.isPasswordRequired(profile.id)) {
-      return { token, password: null, signedOutInBackground: true };
-    }
+    const required = await this.passwordRequiredReason(profile.id);
+    if (required === 'certificate') return { token, password: null, newCertificate: true };
+    if (required) return { token, password: null, signedOutInBackground: true };
     if (!(await this.hasSavedPassword(profile))) return { token, password: null };
     await this.ready();
     if (this.gate && !(await this.gate())) {
@@ -243,6 +256,7 @@ export class AuthService {
       const session = await this.api.resumeSession(profile, token);
       this.sessions.set(profile.id, session);
       this.log?.info('auth', 'stored session resumed');
+      await this.noteSystemTrust(profile);
       this.emit(profile.id);
       return session;
     } catch (err) {
@@ -283,6 +297,7 @@ export class AuthService {
       }
       throw err;
     }
+    await this.noteSystemTrust(profile);
     await this.adopt(profile.id, session);
     if (!this.virtualPasswords.has(profile.id)) {
       if (req.remember) {
@@ -311,6 +326,7 @@ export class AuthService {
   ): Promise<AuthSession> {
     await this.ready();
     const session = await this.api.loginWithParameters(profile, parameters);
+    await this.noteSystemTrust(profile);
     await this.adopt(profile.id, session);
     return session;
   }
@@ -527,23 +543,86 @@ export class AuthService {
 
   /** Whether the saved password is held back until the user signs in (see above). */
   async isPasswordRequired(profileId: string): Promise<boolean> {
+    return (await this.passwordRequiredReason(profileId)) !== null;
+  }
+
+  /** Why the saved password is held back, or `null` when it is not. */
+  async passwordRequiredReason(profileId: string): Promise<PasswordRequiredReason | null> {
     const known = this.passwordRequired.get(profileId);
     if (known !== undefined) return known;
-    const stored = this.kv
-      ? (await this.kv.get(passwordRequiredKey(profileId)).catch(() => null)) === '1'
-      : false;
+    const raw = this.kv
+      ? await this.kv.get(passwordRequiredKey(profileId)).catch(() => null)
+      : null;
+    const stored: PasswordRequiredReason | null =
+      raw === CERT_MARK ? 'certificate' : raw === null ? null : 'background';
     this.passwordRequired.set(profileId, stored);
     return stored;
   }
 
-  private async setPasswordRequired(profileId: string, required: boolean): Promise<void> {
-    if (this.passwordRequired.get(profileId) === required) return;
-    this.passwordRequired.set(profileId, required);
+  private async setPasswordRequired(
+    profileId: string,
+    required: boolean,
+    reason: PasswordRequiredReason = 'background',
+  ): Promise<void> {
+    const next = required ? reason : null;
+    if (this.passwordRequired.get(profileId) === next) return;
+    this.passwordRequired.set(profileId, next);
     if (!this.kv) return;
     const key = passwordRequiredKey(profileId);
     // Best effort: without the persisted mark a restart only means the saved password is
     // used again (the behaviour before this setting existed).
-    await (required ? this.kv.set(key, '1') : this.kv.remove(key)).catch(() => undefined);
+    await (
+      next === null
+        ? this.kv.remove(key)
+        : this.kv.set(key, next === 'certificate' ? CERT_MARK : '1')
+    ).catch(() => undefined);
+  }
+
+  // ---- newly trusted certificates (SRV-8, pre-release review R2) ------------------------
+
+  /** Installs the "has a trusted certificate" check (`TlsTrustService.pinFor`). */
+  setPinnedCheck(pinned: (baseUrl: string) => boolean): void {
+    this.pinned = pinned;
+  }
+
+  /**
+   * After a new certificate was trusted for `origin` (`https://host:port`): every server at
+   * that address is signed out on this device (live session and stored token dropped, with no
+   * request over the new certificate), and the saved password is held back until the user
+   * types it once. A stored token or password must never go to a certificate the user has
+   * just accepted on trust.
+   */
+  async requirePasswordAfterNewCertificate(origin: string): Promise<void> {
+    const profiles = await this.profiles.list().catch((): ServerProfile[] => []);
+    const ids = profiles.filter((p) => pinOrigin(p.baseUrl) === origin).map((p) => p.id);
+    for (const [id, s] of this.sessions) {
+      if (pinOrigin(s.baseUrl) === origin && !ids.includes(id)) ids.push(id);
+    }
+    for (const id of ids) {
+      if (isShareServerId(id)) continue;
+      this.sessions.delete(id);
+      await this.secure.remove(secretKeys.authToken(id)).catch(() => undefined);
+      await this.setPasswordRequired(id, true, 'certificate');
+      this.signedOut(id);
+    }
+    for (const id of ids) {
+      if (isShareServerId(id)) continue;
+      this.emit(id);
+      for (const l of this.backgroundSignOutListeners) l(id);
+    }
+    if (ids.length > 0) this.log?.info('auth', 'new certificate trusted: password required once');
+  }
+
+  /**
+   * A sign-in over https with the operating system's trust (no pin for that address) worked:
+   * remember it per address, so a self-signed certificate there later gets the stronger
+   * warning (`ServerProfile.systemTrustSeen`). Best effort.
+   */
+  private async noteSystemTrust(profile: Pick<ServerProfile, 'id' | 'baseUrl'>): Promise<void> {
+    const origin = pinOrigin(profile.baseUrl);
+    if (origin === undefined || isShareServerId(profile.id)) return;
+    if (this.virtualPasswords.has(profile.id) || this.pinned(profile.baseUrl)) return;
+    await this.profiles.setSystemTrustSeenForOrigin(origin, true).catch(() => undefined);
   }
 
   // ---- TOTP seed (SRV-9) -----------------------------------------------------------------

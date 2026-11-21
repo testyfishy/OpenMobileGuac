@@ -58,6 +58,26 @@ describe('GuacApi.login', () => {
     expect(http.requests[0]?.headers?.[TOKEN_HEADER]).toBeUndefined();
   });
 
+  it('rejects a redirect as redirected instead of following it with the password', async () => {
+    for (const status of [301, 302, 307, 308, 0]) {
+      const http = new FakeHttpClient().on('POST', TOKENS, () => ({
+        status,
+        headers: (status === 0 ? {} : { location: 'https://gateway.example/login' }) as Record<
+          string,
+          string
+        >,
+        body: null,
+      }));
+      const info = await errorInfo(new GuacApi(http).login(profile, creds));
+      expect(info).toEqual({
+        kind: 'redirected',
+        url: TOKENS,
+        location: status === 0 ? undefined : 'https://gateway.example/login',
+      });
+      expect(http.requests).toHaveLength(1);
+    }
+  });
+
   it('maps INVALID_CREDENTIALS (403) to invalid-credentials', async () => {
     const http = new FakeHttpClient().on('POST', TOKENS, () =>
       jsonResponse(403, invalidCredentialsJson),
@@ -399,6 +419,86 @@ describe('GuacApi.probe', () => {
     // A typed http:// is the user's choice already; no fallback flag needed.
     const typed = await new GuacApi(http).probe('http://guac.example:8443');
     expect(typed.secure).toBe(false);
+  });
+
+  it('follows a same-origin redirect during the probe only', async () => {
+    const http = new FakeHttpClient()
+      .on('GET', 'https://guac.example/guacamole/api/languages', () => ({
+        status: 404,
+        headers: {},
+        body: 'Not Found',
+      }))
+      .on('GET', 'https://guac.example/api/languages', () => ({
+        status: 301,
+        headers: { location: '/remote/' },
+        body: null,
+      }))
+      .on('GET', 'https://guac.example/remote/api/languages', () =>
+        jsonResponse(200, languagesJson),
+      );
+    expect(await new GuacApi(http).probe('guac.example')).toEqual({
+      baseUrl: 'https://guac.example/remote',
+      secure: true,
+    });
+    expect(http.requests.every((r) => r.body === undefined && !r.headers)).toBe(true);
+  });
+
+  it('never follows a cross-origin redirect and reports it', async () => {
+    const http = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      () => ({ status: 302, headers: { location: 'https://sso.example/login' }, body: null }),
+    );
+    expect(await errorInfo(new GuacApi(http).probe('https://guac.example/guacamole'))).toEqual({
+      kind: 'redirected',
+      url: 'https://guac.example/guacamole/api/languages',
+      location: 'https://sso.example/login',
+    });
+    expect(http.requests.every((r) => r.url.startsWith('https://guac.example/'))).toBe(true);
+    // http → https on the same host is a different origin too: not followed.
+    const upgrade = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      (req) => ({
+        status: 301,
+        headers: { location: req.url.replace('http:', 'https:') },
+        body: null,
+      }),
+    );
+    expect(
+      (await errorInfo(new GuacApi(upgrade).probe('http://guac.example/guacamole'))).kind,
+    ).toBe('redirected');
+    expect(upgrade.requests).toHaveLength(1);
+  });
+
+  it('reports the redirect when a same-origin hop is not Guacamole (a sign-in gateway)', async () => {
+    const http = new FakeHttpClient()
+      .on('GET', 'https://guac.example/guacamole/api/languages', () => ({
+        status: 302,
+        headers: { location: '/oauth2/sign_in' },
+        body: null,
+      }))
+      .on('GET', 'https://guac.example/oauth2/sign_in/api/languages', () =>
+        textResponse(200, '<html>Sign in</html>'),
+      );
+    expect(await errorInfo(new GuacApi(http).probe('https://guac.example/guacamole'))).toEqual({
+      kind: 'redirected',
+      url: 'https://guac.example/guacamole/api/languages',
+      location: '/oauth2/sign_in',
+    });
+  });
+
+  it('stops after a few same-origin redirects', async () => {
+    let n = 0;
+    const http = new FakeHttpClient().on(
+      'GET',
+      () => true,
+      () => ({ status: 302, headers: { location: `/loop${++n}/` }, body: null }),
+    );
+    expect((await errorInfo(new GuacApi(http).probe('https://guac.example/guacamole'))).kind).toBe(
+      'redirected',
+    );
+    expect(http.requests.length).toBeLessThanOrEqual(4);
   });
 
   it('rejects unusable input without any request', async () => {

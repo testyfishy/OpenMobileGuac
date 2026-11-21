@@ -168,6 +168,46 @@ Default: Free side. Phone only (a tablet, portrait and the split layout keep the
 - [ ] Match device size on (RDP with display update): after rotation the remote resizes to
       fill the screen with no letterboxing.
 
+## Foldables (DSP-3, DSP-8): iPhone Duo, Galaxy Z Fold, Pixel Fold
+
+Reference sizes (CSS px / points; derived, not published by Apple): iPhone Duo outer screen
+about 466×678, inner screen about 669×951 (Apple's screenshot specification: 1398×2034 and
+2007×2853 px at 3x). Write down what Diagnostics shows (screen and viewport) on each screen.
+
+- [ ] iPhone Duo: the build was made with Xcode 27.1 / the iOS 27.1 SDK or later. Apple: apps
+      built with Xcode 26 or earlier do not extend under the status bar and camera, so the
+      app cannot fill the screen whatever the web layer does. (CI uses `macos-26`, Xcode 26.x,
+      at the time of writing.)
+- [ ] Every screen of the app (server list, settings, a session) fills the outer screen and
+      the inner screen edge to edge, in portrait and landscape: no black bands, no
+      letterboxed "compatibility" frame, nothing under the camera or the side status bar.
+- [ ] Outer screen: the status bar and camera sit at one side (iPhone Duo, also in
+      portrait). The toolbar, key bar and sheets stay clear of them; record which side
+      `safe-area-inset-*` reports.
+- [ ] Session open on the outer screen, unfold: no reconnect; the desktop re-fits the inner
+      screen within a second; with Match device size on, the remote resizes to the new
+      area (no bands). Fold again: back to the phone layout and size.
+- [ ] Phone layout on the outer screen in landscape (side toolbar, key column per
+      "Docked toolbar in landscape" and "Extra keys in landscape"); tablet layout on the
+      inner screen (toolbar where Toolbar style puts it, key bar as a row).
+- [ ] Unfold and fold with the soft keyboard up: the layout switches at once; the remote
+      resize, if any, follows when the keyboard closes.
+- [ ] Rotate the open device both ways: re-lays out; note whether the inner screen honours
+      the app's orientations (Apple's guidance contradicts itself on this).
+- [ ] Book pose (partly folded, hinge vertical): the desktop stays one picture across the
+      fold; the split layout does not turn on by itself. Note whether the WebView reports
+      viewport segments or a device posture (Diagnostics, or Safari Web Inspector:
+      `window.viewport?.segments`, `navigator.devicePosture?.type`,
+      `matchMedia('(horizontal-viewport-segments: 2)').matches`). On iOS 27.1 these are
+      Safari feature flags, off by default.
+- [ ] Laptop / tabletop pose (open device turned so the hinge runs across, partly folded):
+      with Split layout on Auto, the split turns on only where the system reports the fold;
+      the desktop ends at the hinge and the trackpad starts below it.
+- [ ] Split View on the inner screen (two apps side by side): a half-width window gets the
+      phone layout and the desktop fills it.
+- [ ] Android book foldables: the same steps; also that the activity is not recreated on
+      fold (no reconnect; `configChanges` includes `screenSize|smallestScreenSize|screenLayout`).
+
 ## Connection state (DSP-9)
 
 - [ ] Airplane mode for 5 s: "Reconnecting…" overlay, then the session resumes by itself.
@@ -513,7 +553,7 @@ resolution" for each:
 
 - [ ] RDP drive: download a file of 2 GB or more from Files. Progress counts up past 2 GB, the
       app's memory stays flat (Xcode / Android Studio memory gauge), and the file appears
-      complete in Files › On My iPhone › OpenMobileGuac › Downloads (Android 11+: Files ›
+      complete in Files › On My iPhone › OMG › Downloads (Android 11+: Files ›
       Documents › OpenMobileGuac; Android 8–10: Android/data/<app id>/files/Downloads). Its
       size and checksum match the original.
 - [ ] Download the same file again: it is saved as "name (2).ext", nothing is overwritten.

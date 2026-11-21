@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1290" height="2796" viewBox="0 0 1290 2796">
+<title>store screenshot</title>
+<defs><linearGradient id="markGrad" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#6fd6b6"/><stop offset="1" stop-color="#1f6f5c"/></linearGradient></defs>
+<defs>
+    <radialGradient id="bgg1" cx="0.78" cy="0.35" r="0.65"><stop offset="0" stop-color="#1c5a4b" stop-opacity="0.95"/><stop offset="1" stop-color="#0f1115" stop-opacity="0"/></radialGradient>
+    <radialGradient id="bgg2" cx="0.05" cy="1" r="0.6"><stop offset="0" stop-color="#173c4c" stop-opacity="0.7"/><stop offset="1" stop-color="#0f1115" stop-opacity="0"/></radialGradient>
+    <pattern id="bgdots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="#ffffff" opacity="0.06"/></pattern>
+  </defs>
+  <rect width="1290" height="2796" fill="#0f1115"/>
+  <rect width="1290" height="2796" fill="url(#bgg1)"/>
+  
+  
+    <text x="645" y="250" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif" font-size="104" font-weight="700" letter-spacing="-1.04"><tspan fill="#eceef2">Fit, zoom or</tspan></text>
+<text x="645" y="368.56" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif" font-size="104" font-weight="700" letter-spacing="-1.04"><tspan fill="#eceef2"></tspan><tspan fill="#5cc8a8">pixel-perfect</tspan><tspan fill="#eceef2"> 1:1</tspan></text>
+    <text x="645" y="460.96000000000004" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif" font-size="44" font-weight="400" fill="#a2a9b6">Remembered for each connection</text>
+    <g>
+    <defs><clipPath id="cap17"><rect x="168.28" y="586.04" width="953.44" height="2066.5257674418604" rx="103.02000000000001"/></clipPath>
+      <filter id="cap17s" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="30.299999999999997"/></filter></defs>
+    <rect x="170.3" y="618.36" width="949.4" height="2059.3931944186043" rx="131.3" fill="#000" opacity="0.5" filter="url(#cap17s)"/>
+    <rect x="140" y="557.76" width="1010" height="2123.0857674418603" rx="131.3" fill="#07080a"/>
+    <rect x="142" y="559.76" width="1006" height="2119.0857674418603" rx="129.3" fill="none" stroke="#3a404b" stroke-width="4"/>
+    <image x="168.28" y="586.04" width="953.44" height="2066.5257674418604" href="../raw/iphone-view.jpg" xlink:href="../raw/iphone-view.jpg" preserveAspectRatio="xMidYMid slice" clip-path="url(#cap17)"/>
+  </g>
+</svg>

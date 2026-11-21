@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AuthOutcome, BiometryAvailability } from '../services/native.ts';
+import {
+  biometryAvailability,
+  type AuthOutcome,
+  type BiometryAvailability,
+} from '../services/native.ts';
 import { DECLINE_MS, lockEnforced, LockService } from './LockService.ts';
 
 function make(outcomes: AuthOutcome[]) {
@@ -188,6 +192,29 @@ describe('LockService.confirmPresence (SRV-11 connection passwords)', () => {
       expect(await lock.confirmPresence('r', 'c')).toBe(true);
       expect(authenticate).not.toHaveBeenCalled();
     }
+  });
+
+  it('a biometric plugin error is a refusal, never "no device security" (review R8)', async () => {
+    const { lock, authenticate } = presence([], 'error');
+    expect(await lock.confirmPresence('r', 'c')).toBe(false);
+    expect(authenticate).not.toHaveBeenCalled();
+    const throwing = new LockService({
+      authenticate,
+      availability: () => Promise.reject(new Error('plugin missing')),
+    });
+    expect(await throwing.confirmPresence('r', 'c')).toBe(false);
+    // The lock itself stays enforced on an error (fails closed).
+    expect(lockEnforced(true, 'error')).toBe(true);
+  });
+
+  it('biometryAvailability maps a checkBiometry exception to error', async () => {
+    const failing = () => Promise.reject(new Error('boom'));
+    expect(await biometryAvailability(failing, () => true)).toBe('error');
+    const none = async () => ({ isAvailable: false, deviceIsSecure: false });
+    expect(await biometryAvailability(none, () => true)).toBe('no-device-security');
+    const pin = async () => ({ isAvailable: false, deviceIsSecure: true });
+    expect(await biometryAvailability(pin, () => true)).toBe('available');
+    expect(await biometryAvailability(failing, () => false)).toBe('web');
   });
 });
 

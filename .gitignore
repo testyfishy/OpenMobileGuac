@@ -39,3 +39,16 @@ Thumbs.db
 
 # Local tool state
 .claude/
+
+# Signing material and store credentials: never commit.
+*.p8
+*.p12
+*.pem
+*.cer
+*.mobileprovision
+*.ipa
+keystore.properties
+google-services.json
+GoogleService-Info.plist
+.env.*
+!.env.example

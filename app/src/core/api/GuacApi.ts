@@ -1,5 +1,6 @@
 import {
   HttpTransportError,
+  isRedirectResponse,
   type FormFields,
   type HttpClient,
   type HttpRequest,
@@ -27,6 +28,35 @@ import { GuacApiError, errorFromApiBody, type GuacErrorInfo } from './errors.ts'
  */
 
 export const TOKEN_HEADER = 'Guacamole-Token';
+
+const MAX_PROBE_REDIRECTS = 3;
+const PROBE_PATH_RE = /\/api\/languages\/?$/;
+
+/**
+ * Where a probe redirect points, as a new candidate, when it stays on the same scheme, host
+ * and port; otherwise `undefined`. `Location: /guacamole/api/languages` and
+ * `Location: /guacamole/` both give the base `<origin>/guacamole`.
+ */
+function sameOriginProbeTarget(
+  requestUrl: string,
+  location: string | undefined,
+  secure: boolean,
+): ServerUrlCandidate | undefined {
+  if (!location) return undefined;
+  let from: URL;
+  let to: URL;
+  try {
+    from = new URL(requestUrl);
+    to = new URL(location, requestUrl);
+  } catch {
+    return undefined;
+  }
+  if (to.origin !== from.origin || to.username || to.password) return undefined;
+  const path = to.pathname.replace(PROBE_PATH_RE, '').replace(/\/+$/, '');
+  const baseUrl = `${to.origin}${path}`;
+  if (`${baseUrl}/api/languages` === `${from.origin}${from.pathname}`) return undefined;
+  return { baseUrl, secure };
+}
 
 export interface Credentials {
   readonly username: string;
@@ -67,19 +97,46 @@ export class GuacApi {
     const candidates = schemeTyped || opts.allowHttp ? all : all.filter((c) => c.secure);
 
     const failures: GuacErrorInfo[] = [];
-    for (const candidate of candidates) {
-      const url = joinUrl(candidate.baseUrl, 'api/languages');
-      try {
-        const res = await this.send({ method: 'GET', url });
-        if (res.status === 200 && isRecord(res.body)) return candidate;
-        failures.push({ kind: 'not-guacamole', url: candidate.baseUrl, status: res.status });
-      } catch (err) {
-        if (err instanceof GuacApiError) failures.push(err.info);
-        else throw err;
+    for (const first of candidates) {
+      // A same-origin redirect (for example `/` → `/guacamole/`) is followed here, and only
+      // here: the probe carries no credentials, and the base URL it settles on is the one
+      // later requests use. A redirect to another scheme, host or port is never followed.
+      let candidate = first;
+      // When a followed hop does not lead to Guacamole (a same-origin sign-in gateway such
+      // as `/oauth2/sign_in`), the redirect is what the user needs to hear about.
+      let firstRedirect: GuacErrorInfo | undefined;
+      for (let hop = 0; ; hop++) {
+        const url = joinUrl(candidate.baseUrl, 'api/languages');
+        try {
+          const res = await this.send({ method: 'GET', url });
+          if (res.status === 200 && isRecord(res.body)) return candidate;
+          failures.push(
+            firstRedirect ?? { kind: 'not-guacamole', url: candidate.baseUrl, status: res.status },
+          );
+        } catch (err) {
+          if (!(err instanceof GuacApiError)) throw err;
+          const next =
+            err.info.kind === 'redirected' && hop < MAX_PROBE_REDIRECTS
+              ? sameOriginProbeTarget(url, err.info.location, candidate.secure)
+              : undefined;
+          if (err.info.kind === 'redirected') firstRedirect ??= err.info;
+          if (next) {
+            candidate = next;
+            continue;
+          }
+          failures.push(firstRedirect ?? err.info);
+        }
+        break;
       }
     }
     const rank = (info: GuacErrorInfo): number =>
-      info.kind === 'tls' ? 0 : info.kind === 'not-guacamole' ? 1 : 2;
+      info.kind === 'tls'
+        ? 0
+        : info.kind === 'redirected'
+          ? 1
+          : info.kind === 'not-guacamole'
+            ? 2
+            : 3;
     const best = [...failures].sort((a, b) => rank(a) - rank(b))[0];
     const error = new GuacApiError(best ?? { kind: 'invalid-url', reason: 'invalid' });
     error.httpFallbackAvailable = candidates.length < all.length;
@@ -414,10 +471,14 @@ export class GuacApi {
     }
   }
 
-  /** Sends a request and maps transport failures to `GuacApiError`. */
+  /**
+   * Sends a request and maps transport failures to `GuacApiError`. A redirect (never followed
+   * by the HTTP clients) rejects with `redirected`.
+   */
   private async send(req: HttpRequest): Promise<HttpResponse> {
+    let res: HttpResponse;
     try {
-      return await this.http.request(
+      res = await this.http.request(
         this.timeoutMs === undefined ? req : { ...req, timeoutMs: this.timeoutMs },
       );
     } catch (err) {
@@ -430,6 +491,14 @@ export class GuacApi {
       }
       throw err;
     }
+    if (isRedirectResponse(res)) {
+      throw new GuacApiError({
+        kind: 'redirected',
+        url: req.url,
+        location: res.headers['location'],
+      });
+    }
+    return res;
   }
 
   private errorFor(res: HttpResponse, baseUrl: string, sessionScoped: boolean): GuacApiError {

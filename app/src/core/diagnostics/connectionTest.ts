@@ -1,6 +1,6 @@
 import { GuacApiError, type GuacErrorInfo } from '../api/errors.ts';
 import { buildTunnelUrls } from '../api/tunnel.ts';
-import { HttpTransportError, type HttpClient } from '../http/HttpClient.ts';
+import { HttpTransportError, isRedirectResponse, type HttpClient } from '../http/HttpClient.ts';
 import { isRecord } from '../models/json.ts';
 import { joinUrl, normalizeServerUrl } from '../url/normalizeServerUrl.ts';
 
@@ -129,7 +129,8 @@ export async function runConnectionTest(
         candidates.push({
           baseUrl: c.baseUrl,
           status: 'fail',
-          failure: 'not-guacamole',
+          // Redirects are never followed (a sign-in gateway, or another address).
+          failure: isRedirectResponse(res) ? 'redirected' : 'not-guacamole',
           httpStatus: res.status,
           ms,
         });

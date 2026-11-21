@@ -533,3 +533,64 @@ describe('AuthService: sign out of servers after the background time', () => {
     expect(token).toBe(authResultJson.authToken);
   });
 });
+
+describe('AuthService and newly trusted certificates (pre-release review R2)', () => {
+  it('records "seen with system trust" after a sign-in without a pin, not with one', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    const { auth, profile, profiles } = await setup(http);
+    let pinned = true;
+    auth.setPinnedCheck(() => pinned);
+    await auth.login(profile, { username: 'u', password: 'pw', remember: true, extra: {} });
+    expect((await profiles.get(profile.id))?.systemTrustSeen).toBeUndefined();
+    pinned = false;
+    await auth.login(profile, { username: 'u', password: 'pw', remember: true, extra: {} });
+    expect((await profiles.get(profile.id))?.systemTrustSeen).toBe(true);
+  });
+
+  it('after a new pin: token and live session dropped locally, saved password held back once', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    const { auth, profile, secure } = await setup(http);
+    await auth.login(profile, { username: 'u', password: 'pw', remember: true, extra: {} });
+    const restarted: string[] = [];
+    auth.onBackgroundSignOut((id) => restarted.push(id));
+    const before = http.requests.length;
+    await auth.requirePasswordAfterNewCertificate('https://guac.example:443');
+    // Nothing was sent over the new certificate (no logout with the old token).
+    expect(http.requests).toHaveLength(before);
+    expect(auth.current(profile.id)).toBeUndefined();
+    expect(await secure.get(secretKeys.authToken(profile.id))).toBeNull();
+    expect(await secure.get(secretKeys.password(profile.id))).toBe('pw'); // kept, not used
+    expect(restarted).toEqual([profile.id]);
+    expect(await auth.loadSecrets(profile)).toEqual({
+      token: null,
+      password: null,
+      newCertificate: true,
+    });
+    // Typing the password once lifts it.
+    await auth.login(profile, { username: 'u', password: 'pw', remember: true, extra: {} });
+    expect((await auth.loadSecrets(profile)).password).toBe('pw');
+  });
+
+  it('only servers at that address are affected', async () => {
+    const http = new FakeHttpClient();
+    const { auth, profile, secure } = await setup(http);
+    await secure.set(secretKeys.authToken(profile.id), 'tok');
+    await auth.requirePasswordAfterNewCertificate('https://other.example:443');
+    expect(await secure.get(secretKeys.authToken(profile.id))).toBe('tok');
+    expect(await auth.isPasswordRequired(profile.id)).toBe(false);
+  });
+});
+
+describe('AuthService.revalidate after a new certificate (pre-release review R2)', () => {
+  it('does not sign in silently with the saved password', async () => {
+    const http = new FakeHttpClient().on('POST', TOKENS, () => jsonResponse(200, authResultJson));
+    const { auth, profile } = await setup(http);
+    await auth.login(profile, { username: 'u', password: 'pw', remember: true, extra: {} });
+    await auth.requirePasswordAfterNewCertificate('https://guac.example:443');
+    const before = http.requests.length;
+    expect(await auth.revalidate(profile, { httpAllowed: true, totpAutofill: true })).toBe(
+      'needs-sign-in',
+    );
+    expect(http.requests).toHaveLength(before);
+  });
+});

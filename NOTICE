@@ -1,7 +1,18 @@
 OpenMobileGuac
 Copyright 2026 The OpenMobileGuac contributors
 
-This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version (see LICENSE), with the additional permission for application stores
+in LICENSE-APP-STORE-EXCEPTION.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+Versions of this project published before the licence change were released
+under the Apache License, Version 2.0, and remain available under it.
 
 OpenMobileGuac is an unofficial client for Apache Guacamole. It is not affiliated
 with, endorsed by, or sponsored by the Apache Software Foundation. "Apache",
@@ -58,6 +69,10 @@ CocoaPods / Swift Package Manager at build time, not stored in this repository):
     Copyright (c) 2024 OutSystems.
     Source: https://github.com/OutSystems/OSInAppBrowserLib-iOS (LICENSE;
     CocoaPods spec "license": MIT)
+  com.squareup.okhttp3:okhttp 4.12.0               Apache License 2.0
+    Copyright Square, Inc. HTTP and WebSocket client used by the
+    omg-pinned-tls plugin on Android (servers with a trusted self-signed
+    certificate).
   com.google.code.gson:gson 2.13.2                 Apache License 2.0
     Copyright Google LLC.
 

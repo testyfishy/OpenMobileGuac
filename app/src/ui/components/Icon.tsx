@@ -42,7 +42,12 @@ export type IconName =
   | 'key'
   | 'archive'
   | 'globe'
-  | 'pulse';
+  | 'pulse'
+  | 'pointer'
+  | 'hand'
+  | 'keyboard'
+  | 'shield'
+  | 'toolbar';
 
 const paths: Record<IconName, ReactNode> = {
   back: <path d="M15 5l-7 7 7 7" />,
@@ -189,6 +194,28 @@ const paths: Record<IconName, ReactNode> = {
     </>
   ),
   pulse: <path d="M3 12h4l2.5-6 5 12 2.5-6h4" />,
+  pointer: <path d="M6 3.5l12 7.2-5.2 1.3 3.2 6.2-2.4 1.3-3.2-6.3L6 17z" />,
+  hand: (
+    <path d="M9 11.5V5a1.5 1.5 0 0 1 3 0v5.5M12 10V4a1.5 1.5 0 0 1 3 0v6.5M15 10.5V6a1.5 1.5 0 0 1 3 0v8a6.5 6.5 0 0 1-6.5 6.5h-.6a6 6 0 0 1-4.6-2.2L3.6 15a1.6 1.6 0 0 1 2.4-2.1L9 15.5" />
+  ),
+  keyboard: (
+    <>
+      <rect x="2.5" y="6" width="19" height="12" rx="2" />
+      <path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 12.5h.01M18 12.5h.01M8 15h8" />
+    </>
+  ),
+  shield: (
+    <>
+      <path d="M12 3.5l7.5 3v5.2c0 4.4-3.1 7.6-7.5 8.8-4.4-1.2-7.5-4.4-7.5-8.8V6.5z" />
+      <path d="M9 12l2 2 4-4" />
+    </>
+  ),
+  toolbar: (
+    <>
+      <rect x="3" y="14.5" width="18" height="5.5" rx="2" />
+      <path d="M7 17.2h.01M12 17.2h.01M17 17.2h.01M3.5 4.5h17M3.5 9h11" />
+    </>
+  ),
 };
 
 export interface IconProps {

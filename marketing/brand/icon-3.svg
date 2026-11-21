@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>App icon (option 3): screen and pointer, avocado cue</title>
+<defs><linearGradient id="g3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5f8f2e"/><stop offset="1" stop-color="#2a4d1a"/></linearGradient></defs>
+<rect width="1024" height="1024" fill="url(#g3)"/>
+  <g transform="translate(512 512) scale(0.78) translate(-512 -512)">
+  <rect x="184" y="214" width="656" height="476" rx="64" fill="#24401a" stroke="#f3f7e8" stroke-width="40"/>
+  <path d="M512 300 C566 300 590 362 612 420 C642 498 630 606 512 606 C394 606 382 498 412 420 C434 362 458 300 512 300 Z" fill="#4f7d24"/>
+  <path d="M512 300 C566 300 590 362 612 420 C642 498 630 606 512 606 C394 606 382 498 412 420 C434 362 458 300 512 300 Z" fill="#c9e37a" transform="translate(512 460) scale(0.84) translate(-512 -460)"/>
+  <circle cx="512" cy="500" r="62" fill="#7a4a26"/>
+  <path transform="translate(560 470) scale(5.4)" d="M0 0 L0 22 L5.5 16.8 L9.4 25.6 L13.2 24 L9.4 15.4 L16.6 15.2 Z" fill="#ffffff" stroke="#24401a" stroke-width="1.6" stroke-linejoin="round"/>
+  <rect x="392" y="752" width="240" height="42" rx="21" fill="#f3f7e8"/>
+  </g>
+</svg>

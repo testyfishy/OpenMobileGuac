@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1080" height="1920" viewBox="0 0 1080 1920">
+<title>store screenshot</title>
+<defs><linearGradient id="markGrad" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#6fd6b6"/><stop offset="1" stop-color="#1f6f5c"/></linearGradient></defs>
+<defs>
+    <radialGradient id="bgg1" cx="0.78" cy="0.35" r="0.65"><stop offset="0" stop-color="#1c5a4b" stop-opacity="0.95"/><stop offset="1" stop-color="#0f1115" stop-opacity="0"/></radialGradient>
+    <radialGradient id="bgg2" cx="0.05" cy="1" r="0.6"><stop offset="0" stop-color="#173c4c" stop-opacity="0.7"/><stop offset="1" stop-color="#0f1115" stop-opacity="0"/></radialGradient>
+    <pattern id="bgdots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="#ffffff" opacity="0.06"/></pattern>
+  </defs>
+  <rect width="1080" height="1920" fill="#0f1115"/>
+  <rect width="1080" height="1920" fill="url(#bgg1)"/>
+  
+  
+    <text x="540" y="160" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif" font-size="76" font-weight="700" letter-spacing="-0.76"><tspan fill="#eceef2">Key sets for </tspan><tspan fill="#5cc8a8">every</tspan><tspan fill="#eceef2"></tspan></text>
+<text x="540" y="246.64" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif" font-size="76" font-weight="700" letter-spacing="-0.76"><tspan fill="#eceef2"></tspan><tspan fill="#5cc8a8">kind</tspan><tspan fill="#eceef2"> of desktop</tspan></text>
+    <text x="540" y="313.84" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif" font-size="32" font-weight="400" fill="#a2a9b6">Windows, macOS, Linux terminal, or your own</text>
+    <g>
+    <defs><clipPath id="cap28"><rect x="237.92000000000002" y="402.16" width="604.16" height="1309.4816744186046" rx="65.28"/></clipPath>
+      <filter id="cap28s" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="19.2"/></filter></defs>
+    <rect x="239.2" y="422.64" width="601.5999999999999" height="1304.9620241860464" rx="83.2" fill="#000" opacity="0.5" filter="url(#cap28s)"/>
+    <rect x="220" y="384.24" width="640" height="1345.3216744186045" rx="83.2" fill="#07080a"/>
+    <rect x="222" y="386.24" width="636" height="1341.3216744186045" rx="81.2" fill="none" stroke="#3a404b" stroke-width="4"/>
+    <image x="237.92000000000002" y="402.16" width="604.16" height="1309.4816744186046" href="../raw/iphone-keysets.jpg" xlink:href="../raw/iphone-keysets.jpg" preserveAspectRatio="xMidYMid slice" clip-path="url(#cap28)"/>
+  </g>
+</svg>

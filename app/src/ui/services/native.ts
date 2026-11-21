@@ -170,16 +170,27 @@ export async function shareText(
 
 // ---- biometrics and privacy screen (SRV-6) ---------------------------------------------
 
-export type BiometryAvailability = 'available' | 'no-device-security' | 'web';
+/**
+ * - `available`: biometrics or a device passcode can be checked.
+ * - `no-device-security`: the plugin answered that neither is set up.
+ * - `error`: the plugin failed, so nothing is known. Never treated as "no security": that
+ *   would skip the SRV-11 check (pre-release review R8). Callers fail closed.
+ * - `web`: the browser build (no lock at all).
+ */
+export type BiometryAvailability = 'available' | 'no-device-security' | 'error' | 'web';
 
-export async function biometryAvailability(): Promise<BiometryAvailability> {
-  if (!native()) return 'web';
+export async function biometryAvailability(
+  check: () => Promise<{ isAvailable: boolean; deviceIsSecure: boolean }> = () =>
+    BiometricAuth.checkBiometry(),
+  isNative: () => boolean = native,
+): Promise<BiometryAvailability> {
+  if (!isNative()) return 'web';
   try {
-    const r = await BiometricAuth.checkBiometry();
+    const r = await check();
     // Device credential (passcode/PIN/pattern) is an accepted fallback.
     return r.isAvailable || r.deviceIsSecure ? 'available' : 'no-device-security';
   } catch {
-    return 'no-device-security';
+    return 'error';
   }
 }
 

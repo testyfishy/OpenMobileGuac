@@ -7,6 +7,10 @@
  * Contract:
  * - Any HTTP status, including 4xx/5xx, resolves with an `HttpResponse`.
  * - Failure to get a response at all rejects with `HttpTransportError`.
+ * - Redirects are never followed: a request carrying a token or a password must not be
+ *   replayed to another address. A 3xx resolves as-is (with its `location` header when the
+ *   platform exposes it). Browser `fetch` cannot see a redirect's status or headers, so there
+ *   it resolves with status `OPAQUE_REDIRECT_STATUS` (0). Use `isRedirectResponse`.
  */
 
 export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -45,6 +49,15 @@ export interface HttpClient {
 }
 
 export const DEFAULT_TIMEOUT_MS = 15_000;
+
+/** Status of a redirect the browser hid from us (`fetch` with `redirect: 'manual'`). */
+export const OPAQUE_REDIRECT_STATUS = 0;
+
+/** A redirect that was not followed (3xx other than 304, or an opaque browser redirect). */
+export function isRedirectResponse(res: Pick<HttpResponse, 'status'>): boolean {
+  if (res.status === OPAQUE_REDIRECT_STATUS) return true;
+  return res.status >= 300 && res.status < 400 && res.status !== 304;
+}
 
 /**
  * Why no response was received.

@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { sessionEs } from '../i18n/session.es.ts';
-import { SessionDefaultsEditor } from './SessionDefaultsEditor.tsx';
+import { SettingsPageBody } from './SettingsPageBody.tsx';
+import { searchSettings } from './settingsCatalog.ts';
 import { GESTURES, gestureForKey, gestureKeys } from '../session/gestures.ts';
 import { InputMenu } from '../session/InputMenu.tsx';
 import { DEFAULT_SESSION_SETTINGS } from '../session/settings.ts';
@@ -9,17 +10,17 @@ import { SETTING_DESCRIPTORS, descriptorsIn, matchesGesture } from '../session/s
 import { sessionStringsEn } from '../session/sessionStrings.ts';
 import { buildSessionActions, type SessionActionContext } from '../session/sessionActions.tsx';
 
-function editor(query: string, values = DEFAULT_SESSION_SETTINGS): string {
+/** Settings › Gestures. */
+function editor(values = DEFAULT_SESSION_SETTINGS): string {
   return renderToStaticMarkup(
-    <SessionDefaultsEditor
+    <SettingsPageBody
+      page="gestures"
       values={values}
       changed={new Set()}
-      query={query}
-      onQuery={() => undefined}
       onChange={() => undefined}
-      onResetSection={() => undefined}
-      onResetAll={() => undefined}
       onEditList={() => undefined}
+      renderApp={() => null}
+      onResetKeys={() => undefined}
     />,
   );
 }
@@ -137,7 +138,7 @@ describe('gesture catalogue (Settings › Gestures)', () => {
   });
 
   it('the Settings screen shows each gesture once with an animation, hidden from readers', () => {
-    const html = editor('');
+    const html = editor();
     for (const g of GESTURES) {
       expect(html.split(`data-gesture="${g.id}"`).length - 1, g.id).toBe(1);
     }
@@ -167,17 +168,20 @@ describe('gesture catalogue (Settings › Gestures)', () => {
     expect(matchesGesture(pinch, 'terminal font', DEFAULT_SESSION_SETTINGS)).toBe(true);
     expect(matchesGesture(tap, 'tolerance', DEFAULT_SESSION_SETTINGS)).toBe(true);
     expect(matchesGesture(tap, 'clipboard', DEFAULT_SESSION_SETTINGS)).toBe(false);
-    const html = editor('three-finger');
-    expect(html).toContain('data-gesture="threeFingerTap"');
-    expect(html).not.toContain('data-gesture="pinch"');
-    expect(html).toContain('data-setting-key="gestureThreeFingerTap"');
+    const found = searchSettings('three-finger', {
+      values: DEFAULT_SESSION_SETTINGS,
+      biometryLabel: 'Face ID',
+    }).map((r) => r.ref);
+    expect(found).toContain('gestureThreeFingerTap');
+    expect(found).not.toContain('gesturePinchZoom');
+    expect(found.every((r) => !r.startsWith('app:'))).toBe(true);
   });
 
   it('warns when trackpad mode is left without a one-finger drag', () => {
     const warning = sessionStringsEn.gestures.noTrackpadDrag;
-    expect(editor('')).not.toContain(warning);
+    expect(editor()).not.toContain(warning);
     expect(
-      editor('', { ...DEFAULT_SESSION_SETTINGS, gestureLongPress: false, tapDrag: false }),
+      editor({ ...DEFAULT_SESSION_SETTINGS, gestureLongPress: false, tapDrag: false }),
     ).toContain(warning);
   });
 });

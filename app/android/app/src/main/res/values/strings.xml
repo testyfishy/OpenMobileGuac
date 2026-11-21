@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">OpenMobileGuac</string>
-    <string name="title_activity_main">OpenMobileGuac</string>
+    <string name="app_name">OMG</string>
+    <string name="title_activity_main">OMG</string>
     <string name="package_name">io.github.testyfishy.omg</string>
     <string name="custom_url_scheme">io.github.testyfishy.omg</string>
 </resources>

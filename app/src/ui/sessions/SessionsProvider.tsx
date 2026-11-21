@@ -10,6 +10,7 @@ import {
 import type { ServerProfile } from '../../core/models/ServerProfile.ts';
 import type { RevalidateResult } from '../services/AuthService.ts';
 import { DEMO_PROFILE_ID } from '../integration/demoProfile.ts';
+import { AppAwayTracker } from '../lock/appAwayTracker.ts';
 import type { SessionTarget } from '../nav/navigation.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
 import {
@@ -30,6 +31,9 @@ import {
   INITIAL_SESSIONS,
   decideAuthRecovery,
   decideOpen,
+  findOpenSession,
+  openAgainFor,
+  openAgainToStore,
   sessionsReducer,
   shouldSignOutAfterBackground,
   type OpenSession,
@@ -43,6 +47,13 @@ interface Pending {
   readonly suggest: OpenSession;
 }
 
+/** "<name> is already open": waiting for Go to the open session / Open another. */
+interface AskPending {
+  readonly serverId: string;
+  readonly serverName: string;
+  readonly target: SessionTarget;
+}
+
 /**
  * Owns the open sessions (MUL-1) and their lifecycle (T2.1): disconnect after the
  * background grace period, reconnect with re-validated sign-in, thumbnails (CON-4).
@@ -50,9 +61,10 @@ interface Pending {
  */
 export function SessionsProvider({ children }: { children: ReactNode }) {
   const services = useServices();
-  const { settings } = useAppSettings();
+  const { settings, update: updateSettings } = useAppSettings();
   const [state, dispatch] = useReducer(sessionsReducer, INITIAL_SESSIONS);
   const [pending, setPending] = useState<Pending | null>(null);
+  const [ask, setAsk] = useState<AskPending | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const stateRef = useRef(state);
   const settingsRef = useRef(settings);
@@ -90,23 +102,6 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       services.log.info('session', 'closed session');
     },
     [services.log],
-  );
-
-  const open = useCallback(
-    (serverId: string, serverName: string, target: SessionTarget) => {
-      const d = decideOpen(stateRef.current, serverId, target, settingsRef.current.maxSessions);
-      if (d.kind === 'existing') {
-        dispatch({ type: 'show', id: d.id, now: Date.now() });
-        return;
-      }
-      if (d.kind === 'limit') {
-        setPending({ serverId, serverName, target, suggest: d.suggest });
-        haptic('warning');
-        return;
-      }
-      openNow(serverId, serverName, target);
-    },
-    [openNow],
   );
 
   const show = useCallback((id: string) => {
@@ -214,6 +209,57 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [findProfile, revalidateServer, services.log],
   );
 
+  /**
+   * Goes to an open session as the switcher does; a session disconnected in the background
+   * reconnects at once (re-validating the sign-in first). One whose sign-in failed shows its
+   * "Sign in again" card.
+   */
+  const goTo = useCallback(
+    (id: string) => {
+      const s = stateRef.current.sessions.find((x) => x.id === id);
+      if (!s) return;
+      dispatch({ type: 'show', id, now: Date.now() });
+      setSwitcherOpen(false);
+      if (s.state === 'suspended') reconnect(id);
+    },
+    [reconnect],
+  );
+
+  const openWith = useCallback(
+    (serverId: string, serverName: string, target: SessionTarget, forceNew: boolean) => {
+      const policy = openAgainFor(settingsRef.current.openAgain, target, isShareServerId(serverId));
+      const d = decideOpen(
+        stateRef.current,
+        serverId,
+        target,
+        settingsRef.current.maxSessions,
+        policy,
+        forceNew,
+      );
+      if (d.kind === 'existing') {
+        goTo(d.id);
+        return;
+      }
+      if (d.kind === 'ask') {
+        setAsk({ serverId, serverName, target });
+        return;
+      }
+      if (d.kind === 'limit') {
+        setPending({ serverId, serverName, target, suggest: d.suggest });
+        haptic('warning');
+        return;
+      }
+      openNow(serverId, serverName, target);
+    },
+    [goTo, openNow],
+  );
+
+  const open = useCallback(
+    (serverId: string, serverName: string, target: SessionTarget) =>
+      openWith(serverId, serverName, target, false),
+    [openWith],
+  );
+
   const recoverSignIn = useCallback(
     (id: string) => {
       const s = stateRef.current.sessions.find((x) => x.id === id);
@@ -317,17 +363,21 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       if (all.every((s) => s.serverId !== DEMO_PROFILE_ID)) setSwitcherOpen(false);
       void services.auth.signOutAfterBackground();
     };
+    // The biometric prompt itself can pause/resume the app (appAwayTracker.ts).
+    const away = new AppAwayTracker(services.lock);
     const sub = onAppActiveChange((active) => {
-      // The biometric prompt itself can pause/resume the app on Android.
-      if (services.lock.promptActive()) return;
-      if (!active) {
-        backgroundedAt = Date.now();
+      const change = away.change(active);
+      if (change.kind === 'ignore') return;
+      if (change.kind === 'away') {
+        backgroundedAt = change.at;
         // Persisted too: the system may end the app while it is away (checked at start-up).
         if (settingsRef.current.serverSignOutAfterSeconds !== null) {
           services.backgroundClock.note(backgroundedAt);
         }
+        // No grace timer while a prompt is open: that pause is most likely the prompt's.
         const grace = settingsRef.current.backgroundDisconnectSeconds;
         if (
+          !change.tentative &&
           graceApplies({ graceSeconds: grace, keepAliveRunning: keepAliveRunning() }) &&
           grace !== null
         ) {
@@ -335,6 +385,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         }
       } else {
         clearTimeout(timer);
+        backgroundedAt = change.awaySince;
         signOutIfDue();
         suspendIfDue();
         backgroundedAt = null;
@@ -379,10 +430,30 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [pending, settings.maxSessions, close, openNow],
   );
 
+  const alreadyOpen = useMemo(() => {
+    if (!ask) return null;
+    const answer = (choice: 'switch' | 'new', dontAskAgain: boolean) => {
+      setAsk(null);
+      const store = openAgainToStore(choice, dontAskAgain);
+      if (store !== null) updateSettings({ ...settingsRef.current, openAgain: store });
+      // Re-resolved now: the session may have closed while the question was showing.
+      const existing = findOpenSession(stateRef.current, ask.serverId, ask.target);
+      if (choice === 'switch' && existing) goTo(existing.id);
+      else openWith(ask.serverId, ask.serverName, ask.target, true);
+    };
+    return {
+      name: ask.target.name,
+      goToOpen: (dontAskAgain: boolean) => answer('switch', dontAskAgain),
+      openAnother: (dontAskAgain: boolean) => answer('new', dontAskAgain),
+      cancel: () => setAsk(null),
+    };
+  }, [ask, goTo, openWith, updateSettings]);
+
   const api = useMemo<SessionsApi>(
     () => ({
       state,
       limit,
+      alreadyOpen,
       open,
       show,
       hide,
@@ -397,6 +468,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [
       state,
       limit,
+      alreadyOpen,
       open,
       show,
       hide,

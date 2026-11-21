@@ -1,4 +1,5 @@
 import { isRecord } from '../models/json.ts';
+import { pinOrigin } from '../tls/fingerprint.ts';
 import { sameServerEndpoint } from '../url/normalizeServerUrl.ts';
 import { parseServerProfile, type ServerProfile } from '../models/ServerProfile.ts';
 import type { TlsPin } from '../tls/TlsPin.ts';
@@ -34,8 +35,14 @@ export interface BackupServer {
   readonly recents: readonly RecentEntry[];
   readonly connectionSettings: Readonly<Record<string, ConnectionSettings>>;
   readonly options?: ConnectionSettings;
-  /** SRV-8: the trusted certificate; restored only under the rules in `ProfileStore.applyRestore`. */
+  /**
+   * SRV-8: the trusted certificate. Restored only when the same pin for the same address is
+   * sealed in the decrypted secrets (`planRestore`), and then only under the rules in
+   * `ProfileStore.applyRestore`.
+   */
   readonly tlsPin?: TlsPin;
+  /** SRV-8: see `ServerProfile.systemTrustSeen`. A restore can set it, never clear it. */
+  readonly systemTrustSeen?: boolean;
 }
 
 export interface EncryptedSecrets {
@@ -98,6 +105,9 @@ export function createBackup(input: {
       connectionSettings: d.connectionSettings,
       ...(d.options ? { options: d.options } : {}),
       ...(d.profile.tlsPin ? { tlsPin: d.profile.tlsPin } : {}),
+      ...(d.profile.systemTrustSeen !== undefined
+        ? { systemTrustSeen: d.profile.systemTrustSeen }
+        : {}),
     })),
     ...(input.secrets ? { secrets: input.secrets } : {}),
   };
@@ -257,12 +267,22 @@ export interface RestorePlan {
   readonly addressChanged: number;
   /** Backup ids of those servers: their secrets in the backup are not restored either. */
   readonly addressChangedIds: readonly string[];
+  /**
+   * Servers whose trusted certificate in the backup was not restored, because it was not
+   * sealed in the decrypted part (and this device does not trust it already). The user is
+   * asked again on the first connection.
+   */
+  readonly pinsDropped: number;
+  /** Servers whose per-server or per-connection security settings were not restored. */
+  readonly securityReset: number;
 }
 
 /**
  * Which decrypted backup secrets may be stored, and under which profile id: never for a
- * server whose address changed against a saved one, and never when the address sealed in
- * the encrypted part differs from the backup's plain `baseUrl` (an edited file).
+ * server whose address changed against a saved one, and only when the encrypted part seals
+ * the same address as the backup's plain `baseUrl`. An entry without a sealed address (a
+ * crafted file, or one from before addresses were sealed) releases nothing (pre-release
+ * review R7); `countUnsealedSecrets` counts them for the summary.
  */
 export function secretsToRestore(
   plan: RestorePlan,
@@ -271,11 +291,12 @@ export function secretsToRestore(
 ): { readonly id: string; readonly password?: string; readonly totpSeed?: string }[] {
   const out: { id: string; password?: string; totpSeed?: string }[] = [];
   for (const [backupId, s] of Object.entries(secrets)) {
+    if (!s.password && !s.totpSeed) continue;
     const id = plan.idMap[backupId];
     if (!id || plan.addressChangedIds.includes(backupId)) continue;
     const server = backup.servers.find((x) => x.id === backupId);
     if (!server) continue;
-    if (s.baseUrl !== undefined && !sameServerEndpoint(s.baseUrl, server.baseUrl)) continue;
+    if (s.baseUrl === undefined || !sameServerEndpoint(s.baseUrl, server.baseUrl)) continue;
     // SRV-8: a password must never reach a certificate the user did not trust for it. When
     // the plain part names a trusted certificate, the sealed part must name the same one.
     if (server.tlsPin && s.tlsPin !== server.tlsPin.sha256) continue;
@@ -288,7 +309,82 @@ export function secretsToRestore(
   return out;
 }
 
-function toProfileData(s: BackupServer, id: string): ProfileData {
+/** Saved passwords or TOTP seeds in the backup that are not bound to a sealed address. */
+export function countUnsealedSecrets(secrets: BackupSecrets): number {
+  return Object.values(secrets).filter((s) => (s.password || s.totpSeed) && s.baseUrl === undefined)
+    .length;
+}
+
+/**
+ * The plain part of a backup is not authenticated: anyone who can edit the file can put a
+ * pin there. A pin counts only when the decrypted part seals the same certificate for the
+ * same address (pre-release review R6).
+ */
+function sealedPin(s: BackupServer, secrets: BackupSecrets | undefined): TlsPin | undefined {
+  if (!s.tlsPin) return undefined;
+  const sealed = secrets?.[s.id];
+  if (!sealed || sealed.baseUrl === undefined || sealed.tlsPin !== s.tlsPin.sha256) {
+    return undefined;
+  }
+  return sameServerEndpoint(sealed.baseUrl, s.baseUrl) ? s.tlsPin : undefined;
+}
+
+/**
+ * Session settings a backup must not switch on for this device, with the value that is
+ * dropped (the device's own choice, or the safe default, applies instead): accepting every
+ * file the remote computer pushes, and sending the microphone.
+ */
+const RISKY_SESSION_VALUES: Readonly<Record<string, JsonValue>> = {
+  remoteFiles: 'accept',
+  microphone: true,
+};
+
+/** `patch` without the risky values; `changed` when something was dropped. */
+export function withoutRiskySessionValues<T extends Readonly<Record<string, JsonValue>>>(
+  patch: T,
+): { readonly value: T; readonly changed: boolean } {
+  let changed = false;
+  const out: Record<string, JsonValue> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (k in RISKY_SESSION_VALUES && RISKY_SESSION_VALUES[k] === v) changed = true;
+    else out[k] = v;
+  }
+  return { value: (changed ? out : patch) as T, changed };
+}
+
+/**
+ * Per-server and per-connection security settings are not restored (pre-release review R6):
+ * the risky session values above, and `confirmLinks: false` (app links that connect
+ * without asking). Dropped rather than overwritten, so a merge keeps the device's own value.
+ */
+function withoutRiskySettings(s: BackupServer): { server: BackupServer; changed: boolean } {
+  let changed = false;
+  const connectionSettings: Record<string, ConnectionSettings> = {};
+  for (const [k, v] of Object.entries(s.connectionSettings)) {
+    const r = withoutRiskySessionValues(v);
+    changed ||= r.changed;
+    connectionSettings[k] = r.value;
+  }
+  let options = s.options;
+  if (options) {
+    const { confirmLinks, sessionDefaults, ...rest } = options;
+    const next: Record<string, JsonValue> = { ...rest };
+    if (confirmLinks === false) changed = true;
+    else if (confirmLinks !== undefined) next['confirmLinks'] = confirmLinks;
+    if (isRecord(sessionDefaults)) {
+      const r = withoutRiskySessionValues(sessionDefaults as ConnectionSettings);
+      changed ||= r.changed;
+      next['sessionDefaults'] = r.value;
+    } else if (sessionDefaults !== undefined) next['sessionDefaults'] = sessionDefaults;
+    options = next;
+  }
+  return {
+    server: { ...s, connectionSettings, ...(options ? { options } : {}) },
+    changed,
+  };
+}
+
+function toProfileData(s: BackupServer, id: string, pin: TlsPin | undefined): ProfileData {
   return {
     profile: {
       id,
@@ -297,7 +393,8 @@ function toProfileData(s: BackupServer, id: string): ProfileData {
       username: s.username,
       rememberPassword: s.rememberPassword,
       createdAt: s.createdAt,
-      ...(s.tlsPin ? { tlsPin: s.tlsPin } : {}),
+      ...(pin ? { tlsPin: pin } : {}),
+      ...(s.systemTrustSeen !== undefined ? { systemTrustSeen: s.systemTrustSeen } : {}),
     },
     favourites: s.favourites,
     recents: s.recents,
@@ -319,12 +416,30 @@ export function planRestore(
   backup: BackupFile,
   mode: RestoreMode,
   generateId: () => string,
+  /** The decrypted secrets, when the passphrase was given: only they can vouch for a pin. */
+  secrets?: BackupSecrets,
 ): RestorePlan {
   const idMap: Record<string, string> = {};
+  let pinsDropped = 0;
+  let securityReset = 0;
+  const servers = backup.servers.map((raw) => {
+    const { server, changed } = withoutRiskySettings(raw);
+    if (changed) securityReset++;
+    const pin = sealedPin(server, secrets);
+    if (server.tlsPin && !pin) {
+      // Not worth mentioning when this device already trusts that very certificate there.
+      const origin = pinOrigin(server.baseUrl);
+      const known = existing.some(
+        (p) => pinOrigin(p.baseUrl) === origin && p.tlsPin?.sha256 === server.tlsPin?.sha256,
+      );
+      if (!known) pinsDropped++;
+    }
+    return { server, pin };
+  });
   if (mode === 'replace') {
-    const entries = backup.servers.map((s) => {
+    const entries = servers.map(({ server: s, pin }) => {
       idMap[s.id] = s.id;
-      return { targetId: s.id, data: toProfileData(s, s.id), merge: false };
+      return { targetId: s.id, data: toProfileData(s, s.id, pin), merge: false };
     });
     return {
       entries,
@@ -335,6 +450,8 @@ export function planRestore(
       removed: existing.length,
       addressChanged: 0,
       addressChangedIds: [],
+      pinsDropped,
+      securityReset,
     };
   }
   const used = new Set(existing.map((p) => p.id));
@@ -344,7 +461,7 @@ export function planRestore(
   let updated = 0;
   let addressChanged = 0;
   const addressChangedIds: string[] = [];
-  for (const s of backup.servers) {
+  for (const { server: s, pin } of servers) {
     // An id match counts only when the address is the same: secrets are tied to the
     // endpoint, and a crafted or stale backup must not repoint a saved server (AUDIT #1).
     const byId = existing.find((p) => p.id === s.id && !claimed.has(p.id));
@@ -363,7 +480,7 @@ export function planRestore(
     if (match) {
       claimed.add(match.id);
       idMap[s.id] = match.id;
-      entries.push({ targetId: match.id, data: toProfileData(s, match.id), merge: true });
+      entries.push({ targetId: match.id, data: toProfileData(s, match.id, pin), merge: true });
       updated++;
       continue;
     }
@@ -374,7 +491,7 @@ export function planRestore(
     }
     used.add(id);
     idMap[s.id] = id;
-    entries.push({ targetId: id, data: toProfileData(s, id), merge: false });
+    entries.push({ targetId: id, data: toProfileData(s, id, pin), merge: false });
     added++;
   }
   return {
@@ -386,6 +503,8 @@ export function planRestore(
     removed: 0,
     addressChanged,
     addressChangedIds,
+    pinsDropped,
+    securityReset,
   };
 }
 

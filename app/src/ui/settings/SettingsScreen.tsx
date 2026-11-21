@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Dialog } from '../components/Dialog.tsx';
 import { RangeField, Segmented, Toggle } from '../components/Form.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -10,10 +10,13 @@ import {
   normalizeSessionSettings,
   type SessionSettings,
 } from '../session/settings.ts';
-import { descriptorsIn, type ListEditor } from '../session/settingsSchema.ts';
+import { descriptorOf, type ListEditor, type SettingKey } from '../session/settingsSchema.ts';
 import { sessionStrings } from '../session/sessionStrings.ts';
 import { keySetNameIn } from '../session/keySetNames.ts';
-import { useNav } from '../nav/NavContext.ts';
+import { GESTURES } from '../session/gestures.ts';
+import { resolveToolbarItems } from '../session/toolbarItems.ts';
+import { useBackInterceptor, useNav } from '../nav/NavContext.ts';
+import { topRoute } from '../nav/navigation.ts';
 import { useAppSettings, useProfilesVersion, useServices } from '../services/context.ts';
 import {
   isAndroid,
@@ -43,12 +46,24 @@ import {
   SERVER_SIGN_OUT_CHOICES,
   diffFromDefaults,
   type DemoVisibility,
+  type OpenAgain,
   mergeSessionSettings,
   parseServerOptions,
   serverOptionsToJson,
 } from './settingsModel.ts';
-import { SessionDefaultsEditor } from './SessionDefaultsEditor.tsx';
+import {
+  SETTINGS_CATEGORIES,
+  categoryOf,
+  searchSettings,
+  splitHint,
+  type AppItemId,
+  type SearchResult,
+  type SettingsPageId,
+} from './settingsCatalog.ts';
+import { MoreHint } from './SessionDefaultsEditor.tsx';
+import { SettingsPageBody } from './SettingsPageBody.tsx';
 import { SessionListEditor } from './SessionListEditors.tsx';
+import './settingsPages.css';
 
 function durationLabel(seconds: number | null): string {
   if (seconds === null) return strings.common.never;
@@ -57,7 +72,52 @@ function durationLabel(seconds: number | null): string {
   return seconds < 60 ? strings.common.seconds(seconds) : strings.common.minutes(seconds / 60);
 }
 
-/** Global settings (SET-1), security (SRV-6), sessions (MUL-1, T2.1), data and About. */
+/** A hint paragraph: the first sentence of a long one, the rest behind "More". */
+function Hint({ text }: { text: string }) {
+  const [lead, rest] = splitHint(text);
+  return (
+    <>
+      <p className="field-hint">{lead}</p>
+      <MoreHint text={rest} />
+    </>
+  );
+}
+
+/** A switch whose long hint shows its first sentence, the rest behind "More". */
+function LongToggle(props: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const [lead, rest] = splitHint(props.hint);
+  return (
+    <>
+      <Toggle
+        label={props.label}
+        hint={lead}
+        checked={props.checked}
+        disabled={props.disabled ?? false}
+        onChange={props.onChange}
+      />
+      <MoreHint text={rest} />
+    </>
+  );
+}
+
+interface OpenPage {
+  readonly id: SettingsPageId;
+  /** `data-setting-key` / `data-setting-id` to scroll to and highlight. */
+  readonly focus?: string;
+}
+
+/**
+ * Settings: a short list of categories (SET-1), each opening a sub-page, with one search
+ * across every setting. Security (SRV-6), sessions (MUL-1, T2.1), key library, data, About.
+ * Sub-pages are local to this screen: Back, Android back and Escape return to the list, which
+ * keeps its scroll position and the search.
+ */
 export function SettingsScreen() {
   const nav = useNav();
   const services = useServices();
@@ -68,6 +128,7 @@ export function SettingsScreen() {
     settingsRef.current = settings;
   });
   const t = strings.settings;
+  const tp = t.pages;
   const session = normalizeSessionSettings(
     mergeSessionSettings(DEFAULT_SESSION_SETTINGS, settings.sessionDefaults, {}),
   );
@@ -76,6 +137,7 @@ export function SettingsScreen() {
     [settings.sessionDefaults],
   );
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState<OpenPage | null>(null);
   const [listEditor, setListEditor] = useState<ListEditor | null>(null);
   const [biometry, setBiometry] = useState<BiometryAvailability | undefined>(undefined);
   const [method, setMethod] = useState<BiometryMethod>('generic');
@@ -88,6 +150,64 @@ export function SettingsScreen() {
   const android = isAndroid();
   const ios = platformName() === 'ios';
   const openSessions = sessions.state.sessions.length;
+
+  // ---- Sub-page navigation: back returns to the list (only while Settings is on top).
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listScroll = useRef(0);
+  const opener = useRef<string | null>(null);
+  const isTop = topRoute(nav.state).name === 'settings';
+  const scroller = () => rootRef.current?.closest('.screen-body') ?? null;
+  const openPage = (next: OpenPage, from: string) => {
+    listScroll.current = scroller()?.scrollTop ?? 0;
+    opener.current = from;
+    setPage(next);
+  };
+  const closePage = () => setPage(null);
+  useBackInterceptor(page !== null && isTop, closePage);
+
+  useLayoutEffect(() => {
+    const body = scroller();
+    if (page) {
+      if (body) body.scrollTop = 0;
+      return;
+    }
+    if (body) body.scrollTop = listScroll.current;
+  }, [page]);
+
+  // Back on the list: focus the row that opened the page (after Screen focused its title).
+  useEffect(() => {
+    if (page || !opener.current) return undefined;
+    const el = rootRef.current?.querySelector<HTMLElement>(`[data-opener="${opener.current}"]`);
+    opener.current = null;
+    const timer = setTimeout(() => el?.focus({ preventScroll: true }), 0);
+    return () => clearTimeout(timer);
+  }, [page]);
+
+  // Opened from a search result: scroll to the setting, open "Advanced" if needed, flash it.
+  useEffect(() => {
+    if (!page?.focus) return undefined;
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const sel = `[data-setting-key="${page.focus}"], [data-setting-id="${page.focus}"]`;
+    const el = root.querySelector<HTMLElement>(sel);
+    if (!el) return undefined;
+    const details = el.closest('details');
+    if (details) details.open = true;
+    // A control that is hidden right now (e.g. "Lock after" while the lock is off): its group.
+    const target = el.childElementCount > 0 ? el : (el.closest('section') ?? el);
+    target.scrollIntoView({ block: 'center' });
+    target.classList.add('setting-flash');
+    // After the screen has focused its title: move focus on to the control itself.
+    const focusTimer = setTimeout(() => {
+      target.querySelector<HTMLElement>('input, button, select')?.focus({ preventScroll: true });
+    }, 0);
+    const timer = setTimeout(() => target.classList.remove('setting-flash'), 2000);
+    return () => {
+      clearTimeout(focusTimer);
+      clearTimeout(timer);
+      target.classList.remove('setting-flash');
+    };
+  }, [page]);
 
   useEffect(() => {
     if (!android || !settings.keepAliveBackground) return;
@@ -180,6 +300,17 @@ export function SettingsScreen() {
     });
   };
 
+  const resetKeys = (keys: readonly SettingKey[]) => {
+    const drop = new Set<string>(keys);
+    const cur = settingsRef.current;
+    write({
+      ...cur,
+      sessionDefaults: Object.fromEntries(
+        Object.entries(cur.sessionDefaults).filter(([k]) => !drop.has(k)),
+      ),
+    });
+  };
+
   const setLock = async (on: boolean) => {
     if (on) {
       // Prove the prompt works before relying on it.
@@ -249,13 +380,13 @@ export function SettingsScreen() {
     toast.show(t.connectionPasswordsForgotten);
   };
 
-  return (
-    <Screen title={t.title} onBack={nav.back}>
-      <div className="form settings">
-        <section className="settings-group" aria-labelledby="set-appearance">
-          <h2 id="set-appearance" className="section-title">
-            {t.appearance}
-          </h2>
+  const keySetName = (id: string) => keySetNameIn(settings.keys, id);
+
+  /** The control of each app-level item (the catalogue says where it is shown). */
+  const renderApp = (id: AppItemId): ReactNode => {
+    switch (id) {
+      case 'theme':
+        return (
           <Segmented<ThemePreference>
             label={t.theme}
             value={settings.theme}
@@ -266,6 +397,9 @@ export function SettingsScreen() {
               { value: 'dark', label: t.themeDark },
             ]}
           />
+        );
+      case 'language':
+        return (
           <Segmented<LanguagePreference>
             label={t.language}
             value={settings.language}
@@ -275,176 +409,97 @@ export function SettingsScreen() {
               ...LOCALES.map((l) => ({ value: l, label: LOCALE_NAMES[l] })),
             ]}
           />
-        </section>
-
-        <section className="settings-group" aria-labelledby="set-security">
-          <h2 id="set-security" className="section-title">
-            <Icon name="lock" size="1rem" /> {t.security}
-          </h2>
-          <Toggle
-            label={t.lockEnable}
-            hint={
-              biometry === 'web'
-                ? t.lockUnavailableWeb
-                : biometry === 'no-device-security'
-                  ? t.lockUnavailableDevice
-                  : t.lockHint
-            }
-            checked={settings.lock.enabled && lockAvailable}
-            disabled={!lockAvailable}
-            onChange={(v) => void setLock(v)}
-          />
-          {settings.lock.enabled && lockAvailable ? (
-            <Segmented<string>
-              label={t.lockAfter}
-              value={String(settings.lock.afterSeconds)}
-              onChange={(v) =>
-                update({ ...settings, lock: { ...settings.lock, afterSeconds: Number(v) } })
-              }
-              options={LOCK_AFTER_CHOICES.map((s) => ({
-                value: String(s),
-                label: durationLabel(s),
-              }))}
+        );
+      case 'showDemo':
+        return (
+          <>
+            <Segmented<DemoVisibility>
+              label={t.showDemo}
+              value={settings.showDemo}
+              onChange={(showDemo) => update({ ...settings, showDemo })}
+              options={[
+                { value: 'auto', label: t.showDemoAuto },
+                { value: 'show', label: t.showDemoShow },
+                { value: 'hide', label: t.showDemoHide },
+              ]}
             />
-          ) : null}
-          <Segmented<RememberPolicy>
-            label={t.rememberConnection}
-            value={settings.rememberConnectionPasswords}
-            onChange={setRememberPolicy}
-            options={REMEMBER_POLICIES.map((p) => ({
-              value: p,
-              label: t.rememberConnectionOptions[p],
-            }))}
-          />
-          <p className="field-hint">{t.rememberConnectionHint}</p>
-          {settings.rememberConnectionPasswords === 'device' &&
-          services.secretStorage === 'memory' ? (
-            <p className="field-hint">{t.rememberConnectionMemoryOnly}</p>
-          ) : null}
-          {settings.rememberConnectionPasswords !== 'never' ? (
-            <Toggle
-              label={t.rememberConnectionUnlock(t.biometryMethods[method])}
-              hint={
-                lockAvailable || biometry === undefined
-                  ? t.rememberConnectionUnlockHint
-                  : t.rememberConnectionUnlockUnavailable
-              }
-              checked={rememberUnlockOn(
-                settings.rememberConnectionUnlock,
-                settings.rememberConnectionPasswords,
-                lockAvailable,
-              )}
-              disabled={!lockAvailable}
-              onChange={(v) => void setRememberUnlock(v)}
-            />
-          ) : null}
-          <button
-            type="button"
-            className="btn btn-ghost"
-            data-action="forget-connection-passwords"
-            onClick={() => void forgetConnectionPasswords()}
-          >
-            {t.forgetConnectionPasswords}
-          </button>
+            <Hint text={t.showDemoHint} />
+          </>
+        );
+      case 'introduction':
+        return (
+          <div className="link-list">
+            <button
+              type="button"
+              className="row-main link-row"
+              onClick={() => update({ ...settings, onboardingDone: false })}
+            >
+              <Icon name="info" /> <span className="row-text">{t.introduction}</span>
+            </button>
+          </div>
+        );
+      case 'diagnostics':
+        return (
+          <div className="link-list">
+            <button
+              type="button"
+              className="row-main link-row"
+              onClick={() => nav.push({ name: 'diagnostics' })}
+            >
+              <Icon name="bug" /> <span className="row-text">{t.diagnostics}</span>
+              <Icon name="chevron-right" className="row-chevron" />
+            </button>
+          </div>
+        );
+      case 'about':
+        return (
+          <>
+            <dl className="about">
+              <div>
+                <dt>{t.version}</dt>
+                <dd>{__APP_VERSION__}</dd>
+              </div>
+              <div>
+                <dt>{t.licence}</dt>
+                <dd>{t.licenceValue}</dd>
+              </div>
+              <div>
+                <dt>{t.source}</dt>
+                <dd>
+                  <a href={SOURCE_URL} target="_blank" rel="noreferrer noopener">
+                    {SOURCE_URL.replace(/^https:\/\//, '')}
+                  </a>
+                </dd>
+              </div>
+            </dl>
+            <p className="muted">{t.disclaimer}</p>
+          </>
+        );
+      case 'resetAllSession':
+        return (
           <div className="list-setting">
             <span className="toggle-label">
-              <span>{t.signOutAll}</span>
-              <span className="toggle-hint">{t.signOutAllHint}</span>
+              <span>{tp.resetAllSession}</span>
+              <span className="toggle-hint">{tp.resetAllSessionHint}</span>
             </span>
             <button
               type="button"
               className="btn btn-small btn-danger-ghost"
-              data-action="sign-out-all"
-              onClick={() => setSignOut({ removeServers: false, busy: false })}
+              data-action="reset-all-session"
+              disabled={changed.size === 0}
+              onClick={() => update({ ...settings, sessionDefaults: {} })}
             >
-              {t.signOutConfirm}
+              {tp.reset}
             </button>
           </div>
-        </section>
-
-        <section className="settings-group" aria-labelledby="set-sessions">
-          <h2 id="set-sessions" className="section-title">
-            <Icon name="layers" size="1rem" /> {t.sessions}
-          </h2>
-          <RangeField
-            label={t.maxSessions}
-            value={settings.maxSessions}
-            min={MAX_SESSIONS_MIN}
-            max={MAX_SESSIONS_MAX}
-            step={1}
-            onChange={(v) => update({ ...settings, maxSessions: v })}
-            format={(v) => String(v)}
-          />
-          <p className="field-hint">{t.maxSessionsHint}</p>
-          <Segmented<string>
-            label={t.backgroundDisconnect}
-            value={String(settings.backgroundDisconnectSeconds)}
-            onChange={(v) =>
-              update({ ...settings, backgroundDisconnectSeconds: v === 'null' ? null : Number(v) })
-            }
-            options={BACKGROUND_DISCONNECT_CHOICES.map((s) => ({
-              value: String(s),
-              label: durationLabel(s),
-            }))}
-          />
-          <p className="field-hint">{t.backgroundDisconnectHint}</p>
-          {ios ? <p className="field-hint">{t.backgroundDisconnectIos}</p> : null}
-          <Segmented<string>
-            label={t.serverSignOut}
-            value={String(settings.serverSignOutAfterSeconds)}
-            onChange={(v) =>
-              update({ ...settings, serverSignOutAfterSeconds: v === 'null' ? null : Number(v) })
-            }
-            options={SERVER_SIGN_OUT_CHOICES.map((s) => ({
-              value: String(s),
-              label: durationLabel(s),
-            }))}
-          />
-          <p className="field-hint">{t.serverSignOutHint}</p>
-          <Toggle
-            label={t.keepAlive}
-            hint={android ? t.keepAliveHintAndroid : ios ? t.keepAliveHintIos : t.keepAliveHintWeb}
-            checked={settings.keepAliveBackground}
-            disabled={!android && !settings.keepAliveBackground}
-            onChange={setKeepAlive}
-          />
-          {android && settings.keepAliveBackground ? (
-            <>
-              {keepAliveDenied ? <p className="field-hint">{t.keepAliveDenied}</p> : null}
-              <p className="field-hint">{t.keepAliveBattery}</p>
-            </>
-          ) : null}
-          <Toggle
-            label={t.thumbnails}
-            hint={t.thumbnailsHint}
-            checked={settings.thumbnails}
-            onChange={(v) => {
-              update({ ...settings, thumbnails: v });
-              if (!v) void services.profiles.clearThumbnails();
-            }}
-          />
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() =>
-              void services.profiles.clearThumbnails().then(() => toast.show(t.thumbnailsCleared))
-            }
-          >
-            {t.clearThumbnails}
-          </button>
-        </section>
-
-        <section className="settings-group" aria-labelledby="set-keys">
-          <h2 id="set-keys" className="section-title">
-            <Icon name="key" size="1rem" /> {t.keysTitle}
-          </h2>
-          <p className="muted">{t.keysHint}</p>
+        );
+      case 'keySets':
+        return (
           <div className="list-setting">
             <span className="toggle-label">
               <span>{t.keySetsButton}</span>
               <span className="toggle-hint">
-                {t.keySetsSummary(settings.keys.sets.length)} ·{' '}
-                {keySetNameIn(settings.keys, session.keySet)}
+                {t.keySetsSummary(settings.keys.sets.length)} · {keySetName(session.keySet)}
               </span>
             </span>
             <button
@@ -456,6 +511,9 @@ export function SettingsScreen() {
               <Icon name="edit" /> {sessionStrings.options.edit}
             </button>
           </div>
+        );
+      case 'combos':
+        return (
           <div className="list-setting">
             <span className="toggle-label">
               <span>{t.combosButton}</span>
@@ -470,105 +528,319 @@ export function SettingsScreen() {
               <Icon name="edit" /> {sessionStrings.options.edit}
             </button>
           </div>
-        </section>
-
-        <section className="settings-group" aria-labelledby="set-session">
-          <h2 id="set-session" className="section-title">
-            <Icon name="monitor" size="1rem" /> {t.sessionDefaults}
-          </h2>
-          <p className="muted">{t.sessionDefaultsHint}</p>
-          <SessionDefaultsEditor
-            values={session}
-            changed={changed}
-            query={query}
-            onQuery={setQuery}
-            onChange={setSession}
-            onResetSection={(section) => {
-              const keys = new Set<string>(descriptorsIn(section).map((d) => d.key));
-              const rest = Object.fromEntries(
-                Object.entries(settings.sessionDefaults).filter(([k]) => !keys.has(k)),
-              );
-              update({ ...settings, sessionDefaults: rest });
+        );
+      case 'maxSessions':
+        return (
+          <>
+            <RangeField
+              label={t.maxSessions}
+              value={settings.maxSessions}
+              min={MAX_SESSIONS_MIN}
+              max={MAX_SESSIONS_MAX}
+              step={1}
+              onChange={(v) => update({ ...settings, maxSessions: v })}
+              format={(v) => String(v)}
+            />
+            <Hint text={t.maxSessionsHint} />
+          </>
+        );
+      case 'openAgain':
+        return (
+          <>
+            <Segmented<OpenAgain>
+              label={t.openAgain}
+              value={settings.openAgain}
+              onChange={(v) => update({ ...settings, openAgain: v })}
+              options={[
+                { value: 'ask', label: t.openAgainAsk },
+                { value: 'switch', label: t.openAgainSwitch },
+                { value: 'new', label: t.openAgainNew },
+              ]}
+            />
+            <Hint text={t.openAgainHint} />
+          </>
+        );
+      case 'backgroundDisconnect':
+        return (
+          <>
+            <Segmented<string>
+              label={t.backgroundDisconnect}
+              value={String(settings.backgroundDisconnectSeconds)}
+              onChange={(v) =>
+                update({
+                  ...settings,
+                  backgroundDisconnectSeconds: v === 'null' ? null : Number(v),
+                })
+              }
+              options={BACKGROUND_DISCONNECT_CHOICES.map((s) => ({
+                value: String(s),
+                label: durationLabel(s),
+              }))}
+            />
+            <Hint text={t.backgroundDisconnectHint} />
+            {ios ? <Hint text={t.backgroundDisconnectIos} /> : null}
+          </>
+        );
+      case 'keepAlive':
+        return (
+          <>
+            <LongToggle
+              label={t.keepAlive}
+              hint={
+                android ? t.keepAliveHintAndroid : ios ? t.keepAliveHintIos : t.keepAliveHintWeb
+              }
+              checked={settings.keepAliveBackground}
+              disabled={!android && !settings.keepAliveBackground}
+              onChange={setKeepAlive}
+            />
+            {android && settings.keepAliveBackground ? (
+              <>
+                {keepAliveDenied ? <p className="field-hint">{t.keepAliveDenied}</p> : null}
+                <p className="field-hint">{t.keepAliveBattery}</p>
+              </>
+            ) : null}
+          </>
+        );
+      case 'thumbnails':
+        return (
+          <Toggle
+            label={t.thumbnails}
+            hint={t.thumbnailsHint}
+            checked={settings.thumbnails}
+            onChange={(v) => {
+              update({ ...settings, thumbnails: v });
+              if (!v) void services.profiles.clearThumbnails();
             }}
-            onResetAll={() => update({ ...settings, sessionDefaults: {} })}
-            onEditList={setListEditor}
-            summaryContext={{ keySetName: (id) => keySetNameIn(settings.keys, id) }}
           />
-        </section>
-
-        <section className="settings-group" aria-labelledby="set-data">
-          <h2 id="set-data" className="section-title">
-            {t.data}
-          </h2>
-          <div className="link-list">
-            <button
-              type="button"
-              className="row-main link-row"
-              onClick={() => nav.push({ name: 'backup' })}
-            >
-              <Icon name="archive" /> <span className="row-text">{t.backup}</span>
-              <Icon name="chevron-right" className="row-chevron" />
-            </button>
-            <button
-              type="button"
-              className="row-main link-row"
-              onClick={() => nav.push({ name: 'diagnostics' })}
-            >
-              <Icon name="bug" /> <span className="row-text">{t.diagnostics}</span>
-              <Icon name="chevron-right" className="row-chevron" />
-            </button>
-            <button
-              type="button"
-              className="row-main link-row"
-              onClick={() => update({ ...settings, onboardingDone: false })}
-            >
-              <Icon name="info" /> <span className="row-text">{t.introduction}</span>
-            </button>
-          </div>
-        </section>
-
-        <section className="settings-group" aria-labelledby="set-about">
-          <h2 id="set-about" className="section-title">
-            {t.about}
-          </h2>
+        );
+      case 'clearThumbnails':
+        return (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            data-action="clear-thumbnails"
+            onClick={() =>
+              void services.profiles.clearThumbnails().then(() => toast.show(t.thumbnailsCleared))
+            }
+          >
+            {t.clearThumbnails}
+          </button>
+        );
+      case 'lock':
+        return (
+          <LongToggle
+            label={t.lockEnable}
+            hint={
+              biometry === 'web'
+                ? t.lockUnavailableWeb
+                : biometry === 'no-device-security'
+                  ? t.lockUnavailableDevice
+                  : biometry === 'error'
+                    ? t.lockUnavailableError
+                    : t.lockHint
+            }
+            checked={settings.lock.enabled && lockAvailable}
+            disabled={!lockAvailable}
+            onChange={(v) => void setLock(v)}
+          />
+        );
+      case 'lockAfter':
+        return settings.lock.enabled && lockAvailable ? (
+          <Segmented<string>
+            label={t.lockAfter}
+            value={String(settings.lock.afterSeconds)}
+            onChange={(v) =>
+              update({ ...settings, lock: { ...settings.lock, afterSeconds: Number(v) } })
+            }
+            options={LOCK_AFTER_CHOICES.map((s) => ({
+              value: String(s),
+              label: durationLabel(s),
+            }))}
+          />
+        ) : null;
+      case 'rememberPolicy':
+        return (
+          <>
+            <Segmented<RememberPolicy>
+              label={t.rememberConnection}
+              value={settings.rememberConnectionPasswords}
+              onChange={setRememberPolicy}
+              options={REMEMBER_POLICIES.map((p) => ({
+                value: p,
+                label: t.rememberConnectionOptions[p],
+              }))}
+            />
+            <Hint text={t.rememberConnectionHint} />
+            {settings.rememberConnectionPasswords === 'device' &&
+            services.secretStorage === 'memory' ? (
+              <p className="field-hint">{t.rememberConnectionMemoryOnly}</p>
+            ) : null}
+          </>
+        );
+      case 'rememberUnlock':
+        return settings.rememberConnectionPasswords !== 'never' ? (
+          <LongToggle
+            label={t.rememberConnectionUnlock(t.biometryMethods[method])}
+            hint={
+              lockAvailable || biometry === undefined
+                ? t.rememberConnectionUnlockHint
+                : t.rememberConnectionUnlockUnavailable
+            }
+            checked={rememberUnlockOn(
+              settings.rememberConnectionUnlock,
+              settings.rememberConnectionPasswords,
+              lockAvailable,
+            )}
+            disabled={!lockAvailable}
+            onChange={(v) => void setRememberUnlock(v)}
+          />
+        ) : null;
+      case 'serverSignOut':
+        return (
+          <>
+            <Segmented<string>
+              label={t.serverSignOut}
+              value={String(settings.serverSignOutAfterSeconds)}
+              onChange={(v) =>
+                update({
+                  ...settings,
+                  serverSignOutAfterSeconds: v === 'null' ? null : Number(v),
+                })
+              }
+              options={SERVER_SIGN_OUT_CHOICES.map((s) => ({
+                value: String(s),
+                label: durationLabel(s),
+              }))}
+            />
+            <Hint text={t.serverSignOutHint} />
+          </>
+        );
+      case 'privacy':
+        return <p className="muted">{t.privacy}</p>;
+      case 'storage':
+        return (
           <dl className="about">
-            <div>
-              <dt>{t.version}</dt>
-              <dd>{__APP_VERSION__}</dd>
-            </div>
-            <div>
-              <dt>{t.licence}</dt>
-              <dd>{t.licenceValue}</dd>
-            </div>
-            <div>
-              <dt>{t.source}</dt>
-              <dd>
-                <a href={SOURCE_URL} target="_blank" rel="noreferrer noopener">
-                  {SOURCE_URL.replace(/^https:\/\//, '')}
-                </a>
-              </dd>
-            </div>
             <div>
               <dt>{t.storageTitle}</dt>
               <dd>{storage}</dd>
             </div>
           </dl>
-          <Segmented<DemoVisibility>
-            label={t.showDemo}
-            value={settings.showDemo}
-            onChange={(showDemo) => update({ ...settings, showDemo })}
-            options={[
-              { value: 'auto', label: t.showDemoAuto },
-              { value: 'show', label: t.showDemoShow },
-              { value: 'hide', label: t.showDemoHide },
-            ]}
-          />
-          <p className="field-hint">{t.showDemoHint}</p>
-          <p className="muted">{t.disclaimer}</p>
-          <h3 className="subsection-title">{t.privacyTitle}</h3>
-          <p className="muted">{t.privacy}</p>
-        </section>
-      </div>
+        );
+      case 'forgetPasswords':
+        return (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            data-action="forget-connection-passwords"
+            onClick={() => void forgetConnectionPasswords()}
+          >
+            {t.forgetConnectionPasswords}
+          </button>
+        );
+      case 'signOutAll':
+        return (
+          <div className="list-setting">
+            <span className="toggle-label">
+              <span>{t.signOutAll}</span>
+              <span className="toggle-hint">{t.signOutAllHint}</span>
+            </span>
+            <button
+              type="button"
+              className="btn btn-small btn-danger-ghost"
+              data-action="sign-out-all"
+              onClick={() => setSignOut({ removeServers: false, busy: false })}
+            >
+              {t.signOutConfirm}
+            </button>
+          </div>
+        );
+    }
+  };
+
+  /** One line under each category: what is inside, or its key values. */
+  const summaryOf = (id: SettingsPageId): string => {
+    const opt = (key: SettingKey) => {
+      const d = descriptorOf(key);
+      return d?.control === 'choice' ? d.optionLabel(String(session[key])) : '';
+    };
+    const join = (...parts: string[]) => parts.filter(Boolean).join(' · ');
+    switch (id) {
+      case 'general':
+        return join(
+          { system: t.themeSystem, light: t.themeLight, dark: t.themeDark }[settings.theme],
+          settings.language === 'system' ? t.languageSystem : LOCALE_NAMES[settings.language],
+        );
+      case 'display':
+        return join(opt('fitMode'), opt('quality'));
+      case 'toolbar':
+        return join(
+          opt('toolbarStyle'),
+          sessionStrings.options.toolbarItemsSummary(
+            resolveToolbarItems(session.toolbarItems).length,
+          ),
+        );
+      case 'pointer': {
+        const speed = descriptorOf('pointerSpeed');
+        return speed?.control === 'range'
+          ? tp.summaries.pointer(opt('pointerMode'), speed.format(session.pointerSpeed))
+          : opt('pointerMode');
+      }
+      case 'gestures': {
+        const toggles = GESTURES.flatMap((g) => (g.toggle ? [g.toggle] : []));
+        return tp.summaries.gestures(
+          toggles.filter((k) => session[k] === true).length,
+          toggles.length,
+        );
+      }
+      case 'keyboard':
+        return tp.summaries.keyboard(keySetName(session.keySet), settings.keys.combos.length);
+      case 'sessions':
+        return join(
+          tp.summaries.sessions(settings.maxSessions),
+          { ask: t.openAgainAsk, switch: t.openAgainSwitch, new: t.openAgainNew }[
+            settings.openAgain
+          ],
+        );
+      case 'security':
+        return join(
+          settings.lock.enabled && lockAvailable ? tp.summaries.lockOn : tp.summaries.lockOff,
+          tp.summaries.remember(t.rememberConnectionOptions[settings.rememberConnectionPasswords]),
+        );
+      case 'backup':
+        return settings.autoBackup.enabled
+          ? tp.summaries.autoBackupOn(
+              strings.backup.frequencies[settings.autoBackup.frequency] ??
+                settings.autoBackup.frequency,
+            )
+          : tp.summaries.autoBackupOff;
+    }
+  };
+
+  const open = (id: SettingsPageId, from: string, focus?: string) => {
+    const c = categoryOf(id);
+    if (c.route) {
+      nav.push({ name: c.route });
+      return;
+    }
+    openPage(focus ? { id, focus } : { id }, from);
+  };
+
+  const openResult = (r: SearchResult) => {
+    const from = `r:${r.ref}`;
+    if (r.ref.startsWith('route:')) {
+      nav.push({ name: r.page === 'backup' ? 'backup' : 'diagnostics' });
+      return;
+    }
+    const focus = r.ref.startsWith('app:') ? r.ref.slice(4) : r.ref;
+    open(r.page, from, focus);
+  };
+
+  const results = query.trim()
+    ? searchSettings(query, { values: session, biometryLabel: t.biometryMethods[method] })
+    : [];
+
+  const editorAndDialogs = (
+    <>
       {listEditor ? (
         <SessionListEditor
           editor={listEditor}
@@ -681,6 +953,132 @@ export function SettingsScreen() {
           <p>{t.lockOffWithSeeds}</p>
         </Dialog>
       ) : null}
+    </>
+  );
+
+  if (page) {
+    const c = categoryOf(page.id);
+    const hasSession = c.groups.some((g) => g.items.some((r) => !r.startsWith('app:')));
+    const gestureHint = splitHint(sessionStrings.options.sectionHints.gestures);
+    return (
+      <Screen key={`page-${page.id}`} title={c.title()} onBack={closePage}>
+        <div ref={rootRef}>
+          <SettingsPageBody
+            page={page.id}
+            values={session}
+            changed={changed}
+            onChange={setSession}
+            onEditList={setListEditor}
+            summaryContext={{ keySetName }}
+            renderApp={renderApp}
+            onResetKeys={resetKeys}
+            intro={
+              hasSession ? (
+                <>
+                  <p className="muted">{t.sessionDefaultsHint}</p>
+                  {page.id === 'gestures' ? (
+                    <>
+                      <p className="field-hint">{gestureHint[0]}</p>
+                      <MoreHint text={gestureHint[1]} />
+                    </>
+                  ) : null}
+                </>
+              ) : null
+            }
+          />
+        </div>
+        {editorAndDialogs}
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen
+      key="settings-top"
+      title={t.title}
+      onBack={nav.back}
+      toolbar={
+        <div className="search" role="search">
+          <Icon name="search" className="search-icon" />
+          <input
+            type="search"
+            className="search-input"
+            value={query}
+            placeholder={tp.search}
+            aria-label={tp.search}
+            onChange={(e) => setQuery(e.target.value)}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            enterKeyHint="search"
+          />
+          {query ? (
+            <button
+              type="button"
+              className="icon-btn search-clear"
+              aria-label={strings.common.close}
+              onClick={() => setQuery('')}
+            >
+              <Icon name="close" />
+            </button>
+          ) : null}
+        </div>
+      }
+    >
+      <div ref={rootRef}>
+        {query.trim() ? (
+          <>
+            <p className="muted settings-results-count" role="status">
+              {results.length > 0 ? tp.resultCount(results.length) : tp.noMatch}
+            </p>
+            <ul className="settings-results">
+              {results.map((r) => (
+                <li key={r.ref}>
+                  <button
+                    type="button"
+                    className="row-main settings-result"
+                    data-opener={`r:${r.ref}`}
+                    data-result={r.ref}
+                    onClick={() => openResult(r)}
+                  >
+                    <span className="row-text">
+                      <span className="row-title">{r.label}</span>
+                      <span className="row-subtitle">{r.where}</span>
+                    </span>
+                    <Icon name="chevron-right" className="row-chevron" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <nav aria-label={t.title}>
+            <ul className="settings-cats">
+              {SETTINGS_CATEGORIES.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    className="row-main settings-cat"
+                    data-opener={`c:${c.id}`}
+                    data-category={c.id}
+                    onClick={() => open(c.id, `c:${c.id}`)}
+                  >
+                    <span className="row-icon">
+                      <Icon name={c.icon} />
+                    </span>
+                    <span className="row-text">
+                      <span className="row-title">{c.title()}</span>
+                      <span className="row-subtitle">{summaryOf(c.id)}</span>
+                    </span>
+                    <Icon name="chevron-right" className="row-chevron" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+      </div>
+      {editorAndDialogs}
     </Screen>
   );
 }

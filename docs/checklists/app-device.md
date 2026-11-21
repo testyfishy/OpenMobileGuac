@@ -30,6 +30,12 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
 
 - [ ] Open three sessions; a fourth asks to close the oldest. Switcher lists all; switching
       keeps each remote screen at its size (no resize flash on the remote).
+- [ ] MUL-4: tap a connection that is open (it shows "Open"): with Settings › Sessions ›
+      "When a connection is already open" = Ask, "<name> is already open" appears; Go to the
+      open session shows it, Open another adds a second one (on RDP note whether the first
+      is signed out). Tick "Don't ask again" + Go to: the next tap goes straight there and the
+      setting shows "Go to the open session". With a session "Disconnected to save battery",
+      Go to reconnects it instead of opening a duplicate. Same from "Jump back in".
 - [ ] Hardware keyboard typing reaches only the visible session.
 - [ ] Android back in a session: Keep open / Disconnect / Cancel.
 - [ ] Background > grace period (default 60 s): on return the session shows "Disconnected to

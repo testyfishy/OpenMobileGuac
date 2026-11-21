@@ -8,7 +8,7 @@ import { MemoryKeyValueStore } from '../../core/storage/KeyValueStore.ts';
 import { ProfileStore } from '../../core/storage/ProfileStore.ts';
 import type { AppServices } from '../services/AppServices.ts';
 import { ServicesContext } from '../services/context.ts';
-import { CertificatePanel } from './CertificatePanel.tsx';
+import { CertificatePanel, FirstUseOffer } from './CertificatePanel.tsx';
 import { CertificateRow } from './CertificateRow.tsx';
 import { tlsEn } from './tlsStrings.ts';
 
@@ -65,6 +65,36 @@ describe('certificate UI (SRV-8)', () => {
     const { tlsPin: _pin, ...unpinned } = profile;
     void _pin;
     expect(render(<CertificateRow profile={unpinned} />, true)).toContain(tlsEn.row.none);
+  });
+
+  it('first use: the casual offer, or a warning with a confirmation after system trust (R2)', () => {
+    const presented = { origin: 'https://guac.example.test:8443', sha256: SHA, details: undefined };
+    const offer = (seenWithSystemTrust: boolean, confirm = false) =>
+      render(
+        <FirstUseOffer
+          verdict={{ kind: 'first-use', presented, seenWithSystemTrust }}
+          origin={presented.origin}
+          now={0}
+          busy={false}
+          confirm={confirm}
+          setConfirm={() => undefined}
+          onTrust={() => undefined}
+        />,
+        true,
+      );
+    const casual = offer(false);
+    expect(casual).toContain(tlsEn.firstUse.trust);
+    expect(casual).not.toContain(tlsEn.firstUse.seenTitle);
+    const warned = offer(true);
+    expect(warned).toContain(tlsEn.firstUse.seenTitle);
+    expect(warned).toContain('A self-signed certificate now can mean someone is intercepting');
+    expect(warned).toContain(tlsEn.firstUse.seenTrust);
+    expect(warned).not.toContain(tlsEn.firstUse.trust);
+    // The trust action itself is only in the confirmation dialog (closed here; the Dialog
+    // needs the navigation context, which this static render does not provide).
+    expect(warned).not.toContain(tlsEn.firstUse.seenConfirmTitle);
+    expect(warned).not.toContain(`>${tlsEn.firstUse.seenConfirm}<`);
+    for (const html of [casual, warned]) expect(html).toContain(tlsEn.firstUse.passwordOnce);
   });
 
   it('starts by reading the certificate', () => {

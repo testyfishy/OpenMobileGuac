@@ -789,7 +789,7 @@
 
 .omg-session[data-split='on'] .omg-stage {
   bottom: auto;
-  height: var(--omg-split-top, 58%);
+  height: var(--omg-split-display, var(--omg-split-top, 58%));
 }
 
 .omg-trackpad {

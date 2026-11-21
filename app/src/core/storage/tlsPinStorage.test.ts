@@ -10,6 +10,7 @@ import { parseServerProfile } from '../models/ServerProfile.ts';
 import type { TlsPin } from '../tls/TlsPin.ts';
 import { MemoryKeyValueStore } from './KeyValueStore.ts';
 import { ProfileStore } from './ProfileStore.ts';
+import { MemorySecureStore, secretKeys } from './SecureStore.ts';
 
 /**
  * SRV-8 storage rules: a pin is bound to one scheme/host/port, follows the profile only on
@@ -131,15 +132,57 @@ describe('backup and restore of pins', () => {
     return parsed.backup;
   };
 
-  it('a backup carries the pin and a new server restores it on the same address', async () => {
+  it('a backup carries the pin; a new server restores it only when the sealed part vouches for it', async () => {
     const src = store();
-    await src.add({ name: 'A', baseUrl: `${ORIGIN}/g`, tlsPin: A });
+    const p = await src.add({ name: 'A', baseUrl: `${ORIGIN}/g`, tlsPin: A });
     const backup = roundTrip(await backupOf(src));
     expect(backup.servers[0]?.tlsPin).toEqual(A);
+    const sealed: BackupSecrets = { [p.id]: { baseUrl: `${ORIGIN}/g`, tlsPin: A.sha256 } };
     const dst = store();
-    const plan = planRestore([], backup, 'merge', () => 'fresh');
+    const plan = planRestore([], backup, 'merge', () => 'fresh', sealed);
+    expect(plan.pinsDropped).toBe(0);
     await dst.applyRestore(plan.entries, plan.removeIds);
     expect((await dst.list())[0]?.tlsPin).toEqual(A);
+  });
+
+  it('a pin only in the unauthenticated plain part is dropped (pre-release review R6)', async () => {
+    const src = store();
+    const p = await src.add({ name: 'A', baseUrl: `${ORIGIN}/g`, tlsPin: A });
+    const backup = roundTrip(await backupOf(src));
+    const cases: (BackupSecrets | undefined)[] = [
+      undefined, // no passphrase / no encrypted part
+      { [p.id]: { baseUrl: `${ORIGIN}/g`, tlsPin: B.sha256 } }, // another certificate sealed
+      { [p.id]: { tlsPin: A.sha256 } }, // no sealed address
+      { [p.id]: { baseUrl: 'https://other.example.test:8443/g', tlsPin: A.sha256 } },
+    ];
+    for (const secrets of cases) {
+      for (const mode of ['merge', 'replace'] as const) {
+        const dst = store();
+        const plan = planRestore([], backup, mode, () => 'fresh', secrets);
+        expect(plan.pinsDropped).toBe(1);
+        await dst.applyRestore(plan.entries, plan.removeIds);
+        expect((await dst.list())[0]?.tlsPin).toBeUndefined();
+      }
+    }
+  });
+
+  it('"Replace" keeps this device\'s trust state for an address it already knew', async () => {
+    const src = store();
+    const p = await src.add({ name: 'A', baseUrl: `${ORIGIN}/g`, tlsPin: A });
+    const backup = roundTrip(await backupOf(src));
+    // Even a sealed backup pin does not replace the device's own pin there.
+    const sealed: BackupSecrets = { [p.id]: { baseUrl: `${ORIGIN}/g`, tlsPin: A.sha256 } };
+    const dst = store();
+    await dst.add({ name: 'old', baseUrl: `${ORIGIN}/g`, tlsPin: B });
+    const plan = planRestore(await dst.list(), backup, 'replace', () => 'never', sealed);
+    await dst.applyRestore(plan.entries, plan.removeIds);
+    expect((await dst.list()).map((x) => x.tlsPin?.sha256)).toEqual([B.sha256]);
+    // ... and an address it knew without a pin stays without one.
+    const bare = store();
+    await bare.add({ name: 'old', baseUrl: `${ORIGIN}/x` });
+    const plan2 = planRestore(await bare.list(), backup, 'replace', () => 'never', sealed);
+    await bare.applyRestore(plan2.entries, plan2.removeIds);
+    expect((await bare.list())[0]?.tlsPin).toBeUndefined();
   });
 
   it('an edited address in the backup drops the pin (cannot repoint trust)', async () => {
@@ -222,9 +265,13 @@ describe('backup and restore of pins', () => {
         now: 0,
       }),
     );
+    const sealed: BackupSecrets = {
+      s1: { baseUrl: `${ORIGIN}/a`, tlsPin: A.sha256 },
+      s2: { baseUrl: `${ORIGIN}/b`, tlsPin: B.sha256 },
+    };
     const dst = store();
-    await dst.add({ name: 'old', baseUrl: `${ORIGIN}/a`, tlsPin: B });
-    const plan = planRestore(await dst.list(), backup, 'replace', () => 'never');
+    await dst.add({ name: 'old', baseUrl: 'https://elsewhere.example.test/a' });
+    const plan = planRestore(await dst.list(), backup, 'replace', () => 'never', sealed);
     await dst.applyRestore(plan.entries, plan.removeIds);
     expect((await dst.list()).map((p) => p.tlsPin?.sha256)).toEqual([A.sha256, A.sha256]);
   });
@@ -251,5 +298,73 @@ describe('backup and restore of pins', () => {
     expect(
       secretsToRestore(plan, backup, { [p.id]: { password: 'pw', baseUrl: `${ORIGIN}/g` } }),
     ).toHaveLength(1);
+  });
+});
+
+describe('systemTrustSeen (pre-release review R2)', () => {
+  function secureStoreAnd() {
+    const secure = new MemorySecureStore();
+    let n = 0;
+    const s = new ProfileStore(new MemoryKeyValueStore(), {
+      secureStore: secure,
+      generateId: () => `id${++n}`,
+    });
+    return { s, secure };
+  }
+
+  it('is kept per address: set on every profile there, inherited, dropped on a move', async () => {
+    const { s } = secureStoreAnd();
+    const a = await s.add({ name: 'A', baseUrl: `${ORIGIN}/a` });
+    expect(await s.setSystemTrustSeenForOrigin(ORIGIN, true)).toEqual([a.id]);
+    const b = await s.add({ name: 'B', baseUrl: `${ORIGIN}/b` });
+    expect(b.systemTrustSeen).toBe(true);
+    expect((await s.update(b.id, { baseUrl: `${ORIGIN}/c` })).systemTrustSeen).toBe(true);
+    const moved = await s.update(b.id, { baseUrl: 'https://other.example.test/g' });
+    expect(moved.systemTrustSeen).toBeUndefined();
+    expect(await s.systemTrustSeen(`${ORIGIN}/zzz`)).toBe(true);
+    expect(await s.systemTrustSeen('https://other.example.test/g')).toBe(false);
+    // Survives a store reload (parseServerProfile keeps it).
+    expect((await s.get(a.id))?.systemTrustSeen).toBe(true);
+  });
+
+  it('older profiles: https, no pin, and a stored token or password count as seen', async () => {
+    const { s, secure } = secureStoreAnd();
+    const p = await s.add({ name: 'A', baseUrl: `${ORIGIN}/g` });
+    expect(await s.systemTrustSeen(p.baseUrl)).toBe(false);
+    await secure.set(secretKeys.authToken(p.id), 'tok');
+    expect(await s.systemTrustSeen(p.baseUrl)).toBe(true);
+    // Exported with the resolved answer.
+    expect((await s.exportAll())[0]?.profile.systemTrustSeen).toBe(true);
+  });
+
+  it('a restore can set the flag but never clear it, also with "Replace"', async () => {
+    const src = store();
+    await src.add({ name: 'A', baseUrl: `${ORIGIN}/g` });
+    await src.setSystemTrustSeenForOrigin(ORIGIN, false);
+    const file = createBackup({ profiles: await src.exportAll(), appVersion: 't', now: 0 });
+    const parsed = parseBackup(JSON.stringify(file));
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.backup.servers[0]?.systemTrustSeen).toBe(false);
+    for (const mode of ['merge', 'replace'] as const) {
+      const { s, secure } = secureStoreAnd();
+      const old = await s.add({ name: 'old', baseUrl: `${ORIGIN}/g` });
+      // An older profile that signed in before: seen by the fallback only.
+      await secure.set(secretKeys.password(old.id), 'pw');
+      const plan = planRestore(await s.list(), parsed.backup, mode, () => 'fresh');
+      await s.applyRestore(plan.entries, plan.removeIds);
+      expect(await s.systemTrustSeen(`${ORIGIN}/g`), mode).toBe(true);
+    }
+    // And a "yes" in the backup is taken.
+    const yes = store();
+    await yes.add({ name: 'A', baseUrl: `${ORIGIN}/g` });
+    await yes.setSystemTrustSeenForOrigin(ORIGIN, true);
+    const yesFile = parseBackup(
+      JSON.stringify(createBackup({ profiles: await yes.exportAll(), appVersion: 't', now: 0 })),
+    );
+    if (!yesFile.ok) throw new Error(yesFile.error);
+    const dst = store();
+    const plan = planRestore([], yesFile.backup, 'merge', () => 'fresh');
+    await dst.applyRestore(plan.entries, plan.removeIds);
+    expect((await dst.list())[0]?.systemTrustSeen).toBe(true);
   });
 });

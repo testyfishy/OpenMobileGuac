@@ -20,6 +20,11 @@ export type GuacErrorInfo =
   | { readonly kind: 'tls'; readonly url: string }
   /** Something answered, but not like a Guacamole server (HTML, a proxy page, a 404). */
   | { readonly kind: 'not-guacamole'; readonly url: string; readonly status: number | undefined }
+  /**
+   * The server answered with a redirect, which is never followed (a token or password would
+   * go to the new address). `location` is absent when the platform hides it (browser).
+   */
+  | { readonly kind: 'redirected'; readonly url: string; readonly location: string | undefined }
   /** The URL is not usable at all (empty, bad syntax, unsupported scheme). */
   | { readonly kind: 'invalid-url'; readonly reason: 'empty' | 'invalid' | 'unsupported-scheme' }
   /**
@@ -124,6 +129,8 @@ function describe(info: GuacErrorInfo): string {
       return `Secure connection to ${info.url} failed`;
     case 'not-guacamole':
       return `${info.url} does not look like a Guacamole server`;
+    case 'redirected':
+      return `${info.url} redirected the request to another address`;
     case 'invalid-url':
       return `Invalid server URL (${info.reason})`;
     case 'invalid-response':

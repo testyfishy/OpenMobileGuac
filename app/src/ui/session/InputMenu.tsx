@@ -1,8 +1,9 @@
 import { useId, type ReactNode } from 'react';
 import { ChromeButton } from './ChromeButton.tsx';
 import type { ResolvedSessionSettings, SessionSettings } from './settings.ts';
+// By path: pure, already in the main chunk (Settings uses the same categories).
+import { SETTINGS_CATEGORIES, isAppRef } from '../settings/settingsCatalog.ts';
 import {
-  SETTING_SECTIONS,
   descriptorOf,
   descriptorsIn,
   rangeOf,
@@ -331,15 +332,23 @@ export function InputMenu({
           </ChromeButton>
         </div>
       )}
-      {SETTING_SECTIONS.map((section) => (
-        <Section key={section} title={o.sections[section]}>
-          {section === 'gestures' ? (
-            <GestureRows b={b} />
-          ) : (
-            descriptorsIn(section).map((d) => <SettingBlock key={d.key} d={d} b={b} />)
-          )}
-        </Section>
-      ))}
+      {/* Same categories as the app's Settings (session settings only). */}
+      {SETTINGS_CATEGORIES.map((c) => {
+        const keys = c.groups.flatMap((g) => g.items).filter((r) => !isAppRef(r));
+        if (keys.length === 0) return null;
+        return (
+          <Section key={c.id} title={c.title()}>
+            {c.id === 'gestures' ? (
+              <GestureRows b={b} />
+            ) : (
+              keys.map((k) => {
+                const d = isAppRef(k) ? undefined : descriptorOf(k);
+                return d ? <SettingBlock key={d.key} d={d} b={b} /> : null;
+              })
+            )}
+          </Section>
+        );
+      })}
     </Sheet>
   );
 }

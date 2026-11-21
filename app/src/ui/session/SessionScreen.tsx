@@ -81,7 +81,6 @@ import {
   NO_EDGES,
   addEdges,
   columnReserve,
-  cutoutSide,
   dockReserve,
   effectiveToolbarStyle,
   keyBarPlacement,
@@ -90,6 +89,14 @@ import {
   type Edges,
 } from './toolbarItems.ts';
 import { ViewMenu } from './ViewMenu.tsx';
+import {
+  classifyWindow,
+  cutoutFrom,
+  sameFold,
+  sameShape,
+  shapeOf,
+  type WindowShape,
+} from './deviceShape.ts';
 import './SessionScreen.css';
 
 export interface SessionLogEntry {
@@ -201,30 +208,30 @@ type Menu =
   | null;
 
 /**
- * Landscape from the viewport (so split screen and narrow windows count as portrait).
- * `fromScreen`: use the device orientation instead, for a rotation while a keyboard that
- * shrinks the WebView is open (the viewport would look landscape on a portrait phone).
+ * The window size now. The window, not `screen.*`: on a foldable the app moves between the
+ * cover and the inner screen without restarting, and Split View or a narrow window counts as
+ * portrait / phone-sized (see deviceShape.ts).
  */
-/** True when the device's short side is phone-sized (stable across rotation and keyboards). */
-function isPhoneSized(): boolean {
-  if (typeof window === 'undefined' || !window.screen) return true;
-  return Math.min(window.screen.width, window.screen.height) <= 540;
+function readWindowSize(): { width: number; height: number } {
+  if (typeof window === 'undefined') return { width: 0, height: 0 };
+  return { width: window.innerWidth, height: window.innerHeight };
 }
 
-function readCutout(): CutoutSide {
-  if (typeof window === 'undefined') return 'unknown';
-  return cutoutSide((window as { orientation?: unknown }).orientation);
-}
-
-function readLandscape(fromScreen = false): boolean {
-  if (typeof window === 'undefined') return false;
+function readOrientation(): 'landscape' | 'portrait' | undefined {
   const type = typeof screen !== 'undefined' ? screen.orientation?.type : undefined;
-  if (fromScreen && type) return type.startsWith('landscape');
-  try {
-    return window.matchMedia('(orientation: landscape)').matches;
-  } catch {
-    return window.innerWidth > window.innerHeight;
+  if (!type) return undefined;
+  return type.startsWith('landscape') ? 'landscape' : 'portrait';
+}
+
+function readCutout(probe: HTMLElement | null): CutoutSide {
+  if (typeof window === 'undefined') return 'unknown';
+  let insets: { left: number; right: number } | null = null;
+  if (probe) {
+    const cs = getComputedStyle(probe);
+    const px = (v: string) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0);
+    insets = { left: px(cs.paddingLeft), right: px(cs.paddingRight) };
   }
+  return cutoutFrom((window as { orientation?: unknown }).orientation, insets);
 }
 
 function sameEdges(a: Edges, b: Edges): boolean {
@@ -441,7 +448,10 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   // ---- Split layout (DSP-8): display above, trackpad surface + key bar below
   const [fold, setFold] = useState<FoldInfo>(() => readFold());
   useEffect(() => {
-    const sub = onFoldChange(() => setFold(readFold()));
+    const sub = onFoldChange(() => {
+      const next = readFold();
+      setFold((f) => (sameFold(f, next) ? f : next));
+    });
     return () => sub.dispose();
   }, []);
   const split =
@@ -464,43 +474,60 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
 
   // ---- Toolbar style: floating over the desktop, or docked (space reserved at an edge)
   const keyboardActive = snap.keyboardActive;
-  const [landscape, setLandscape] = useState(readLandscape);
-  const [cutout, setCutout] = useState(readCutout);
+  // Window shape (landscape, phone-sized), re-read on every resize: rotation, fold / unfold
+  // (cover ↔ inner screen), Split View. A keyboard that shrinks the WebView (Android, iOS
+  // `native` resize) only changes the height and is ignored; a width change while it is up
+  // (a rotation or a fold) applies at once (classifyWindow).
+  const [shape, setShape] = useState<WindowShape>(() => shapeOf(readWindowSize()));
+  const shapeRef = useRef<WindowShape>(shape);
+  const seenSizes = useRef(new Map<number, { width: number; height: number }>());
+  const [cutout, setCutout] = useState<CutoutSide>(() => readCutout(null));
   useEffect(() => {
-    // A keyboard that shrinks the WebView (Android) can make a phone look landscape: while
-    // it is up, size changes are ignored (re-read when it closes), but a real rotation
-    // (`orientationchange`, `screen.orientation` change) still applies at once.
-    const on = () => {
-      setLandscape(readLandscape());
-      setCutout(readCutout());
+    const read = () => {
+      const size = readWindowSize();
+      const key = Math.round(size.width);
+      if (!keyboardActive && size.width > 0 && size.height > 0) {
+        seenSizes.current.set(key, size);
+      }
+      const next = classifyWindow({
+        size,
+        prev: shapeRef.current,
+        keyboardUp: keyboardActive,
+        remembered: keyboardActive ? seenSizes.current.get(key) : undefined,
+        orientation: readOrientation(),
+        screenShortSide:
+          typeof screen !== 'undefined' ? Math.min(screen.width, screen.height) : undefined,
+      });
+      if (!sameShape(next, shapeRef.current)) {
+        shapeRef.current = next;
+        setShape(next);
+      }
+      setCutout(readCutout(probeRef.current));
     };
     const rotated = () => {
-      const read = () => {
-        setLandscape(readLandscape(keyboardActive));
-        setCutout(readCutout());
-      };
       read();
-      // Some WebViews report the new orientation a little after the event.
+      // Some WebViews report the new size a little after the event.
       setTimeout(read, 250);
     };
-    if (!keyboardActive) {
-      on();
-      window.addEventListener('resize', on);
-    }
+    read();
+    window.addEventListener('resize', read);
     window.addEventListener('orientationchange', rotated);
     const so = typeof screen !== 'undefined' ? screen.orientation : undefined;
     so?.addEventListener?.('change', rotated);
     return () => {
-      window.removeEventListener('resize', on);
+      window.removeEventListener('resize', read);
       window.removeEventListener('orientationchange', rotated);
       so?.removeEventListener?.('change', rotated);
     };
   }, [keyboardActive]);
+  const landscape = shape.landscape;
+  const phone = shape.compact;
   const toolbarStyle = effectiveToolbarStyle(
     settings.toolbarStyle,
     landscape,
-    // Phones only: a tablet in landscape has height to spare, so its dock stays put.
-    isPhoneSized() ? landscapeSide(settings.toolbarLandscape, cutout) : 'same',
+    // Phone-sized windows only: a tablet or a foldable's inner screen in landscape has
+    // height to spare, so its dock stays put (a side dock is still a Toolbar style choice).
+    phone ? landscapeSide(settings.toolbarLandscape, cutout) : 'same',
   );
   const docked = toolbarStyle !== 'floating';
   const dockBottom = toolbarStyle === 'dock-bottom';
@@ -532,7 +559,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const keyBarPlace = keyBarPlacement({
     setting: settings.keyBarLandscape,
     landscape,
-    phone: isPhoneSized(),
+    phone,
     split,
     toolbar: toolbarStyle,
     cutout,
@@ -780,13 +807,15 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
 
   const closeMenu = useCallback(() => setMenu(null), [setMenu]);
 
-  const splitTop =
-    fold.horizontalFold && fold.foldTop !== null && settings.splitLayout !== 'off'
-      ? `${fold.foldTop}px`
-      : `${Math.round(SPLIT_DISPLAY_SHARE * 100)}%`;
+  const atHinge = fold.horizontalFold && fold.foldTop !== null && settings.splitLayout !== 'off';
+  const splitTop = atHinge ? `${fold.foldTop}px` : `${Math.round(SPLIT_DISPLAY_SHARE * 100)}%`;
+  // The desktop ends at the upper segment's bottom: on a dual-screen device with a hinge gap
+  // nothing of it is drawn under the gap (seamless folding displays: the same as splitTop).
+  const splitDisplay = atHinge ? `${fold.foldBottom ?? fold.foldTop}px` : splitTop;
   const rootStyle = {
     '--omg-kb-cover': `${snap.keyboardCover}px`,
     '--omg-split-top': splitTop,
+    '--omg-split-display': splitDisplay,
     '--omg-dock-top': `${reserve.top}px`,
     '--omg-dock-bottom': `${reserve.bottom}px`,
     // Side toolbar + key column: what the bottom dock, sheets and toasts keep clear of.

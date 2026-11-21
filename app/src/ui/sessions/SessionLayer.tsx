@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon.tsx';
 import { useBackInterceptor, useNav } from '../nav/NavContext.ts';
 import { protocolIcon } from '../connections/treeView.ts';
 import { strings } from '../strings.ts';
+import { AlreadyOpenDialog } from './AlreadyOpenDialog.tsx';
 import type { OpenSession } from './sessionModel.ts';
 import { useSessions } from './SessionsContext.ts';
 
@@ -43,11 +44,27 @@ export function SessionLayer() {
       <p>{strings.session.limitBody(limit.max)}</p>
     </Dialog>
   ) : null;
-  if (list.length === 0) return limitDialog;
+  const ask = sessions.alreadyOpen;
+  const askDialog = ask ? (
+    <AlreadyOpenDialog
+      name={ask.name}
+      onGoToOpen={ask.goToOpen}
+      onOpenAnother={ask.openAnother}
+      onCancel={ask.cancel}
+    />
+  ) : null;
+  if (list.length === 0)
+    return (
+      <>
+        {limitDialog}
+        {askDialog}
+      </>
+    );
   const active = list.find((s) => s.id === activeId);
   return (
     <>
       {limitDialog}
+      {askDialog}
       <div className="session-layer" data-active={active ? 'true' : 'false'}>
         {list.map((s) => (
           <SessionSlot key={s.id} session={s} active={s.id === activeId} />

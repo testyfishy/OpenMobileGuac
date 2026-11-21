@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
   backupFileName,
+  countUnsealedSecrets,
   decryptSecrets,
   parseBackup,
   planRestore,
@@ -26,7 +27,7 @@ import { useNav } from '../nav/NavContext.ts';
 import { useAppSettings, useProfilesVersion, useServices } from '../services/context.ts';
 import { haptic, saveTextFile } from '../services/native.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
-import { settingsFromBackup } from '../settings/settingsModel.ts';
+import { settingsRestore } from '../settings/settingsModel.ts';
 import { strings } from '../strings.ts';
 import {
   buildBackup,
@@ -538,9 +539,17 @@ function ImportSection({
         }
       }
       const existing = await services.profiles.list();
-      const plan = planRestore(existing, backup, mode, () => globalThis.crypto.randomUUID());
+      // The decrypted part vouches for trusted certificates (pre-release review R6).
+      const plan = planRestore(
+        existing,
+        backup,
+        mode,
+        () => globalThis.crypto.randomUUID(),
+        secrets,
+      );
       for (const id of plan.removeIds) sessions.closeServer(id);
       await services.profiles.applyRestore(plan.entries, plan.removeIds);
+      const unsealed = secrets ? countUnsealedSecrets(secrets) : 0;
       if (secrets) {
         for (const s of secretsToRestore(plan, backup, secrets)) {
           if (s.password) await services.auth.savePassword(s.id, s.password);
@@ -549,17 +558,25 @@ function ImportSection({
           }
         }
       }
-      if (withSettings && backup.settings) update(settingsFromBackup(settings, backup.settings));
+      let settingsReset = false;
+      if (withSettings && backup.settings) {
+        const r = settingsRestore(settings, backup.settings);
+        settingsReset = r.securityReset;
+        update(r.settings);
+      }
       bump();
       services.log.info(
         'backup',
-        `restored (${plan.added} added, ${plan.updated} updated, ${plan.removed} removed, ${plan.addressChanged} address changed)`,
+        `restored (${plan.added} added, ${plan.updated} updated, ${plan.removed} removed, ${plan.addressChanged} address changed, ${plan.pinsDropped} pins not restored, ${unsealed} unsealed secrets skipped)`,
       );
       haptic('success');
       setDone(
         b.restored(plan.added, plan.updated, plan.removed) +
           (plan.addressChanged > 0 ? b.restoredAddressChanged(plan.addressChanged) : '') +
-          (backup.secrets && !secrets ? b.restoredSecretsSkipped : ''),
+          (backup.secrets && !secrets ? b.restoredSecretsSkipped : '') +
+          (unsealed > 0 ? b.restoredUnsealedSkipped(unsealed) : '') +
+          (plan.pinsDropped > 0 ? b.restoredPinsDropped(plan.pinsDropped) : '') +
+          (plan.securityReset > 0 || settingsReset ? b.restoredSecurityReset : ''),
       );
       setBackup(undefined);
       setPass('');

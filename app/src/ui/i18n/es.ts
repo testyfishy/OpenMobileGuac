@@ -8,7 +8,7 @@ import type { Strings } from './en.ts';
 const plural = (n: number, one: string, other: string) => (n === 1 ? one : other);
 
 export const es: Strings = {
-  appName: 'OpenMobileGuac',
+  appName: 'Open Mobile Guac',
 
   common: {
     back: 'Atrás',
@@ -203,6 +203,7 @@ export const es: Strings = {
       timeout: 'tiempo agotado',
       tls: 'certificado no fiable',
       'not-guacamole': 'no es Guacamole',
+      redirected: 'redirigido a otra dirección',
     } as Record<string, string>,
     websocketDetail: {
       error: 'la WebView no pudo abrirlo',
@@ -210,7 +211,7 @@ export const es: Strings = {
       closed: 'cerrado por el servidor o por un proxy',
     } as Record<string, string>,
     wsHintTls:
-      'La API funciona pero el túnel no. Con HTTPS suele significar que la WebView no confía en el certificado (consulta Ajustes › Diagnóstico y docs/tls.md); detrás de un proxy inverso, comprueba que reenvía las conexiones WebSocket.',
+      'La API funciona pero el túnel no. Con HTTPS suele significar que la WebView no confía en el certificado (consulta Ajustes › General e información › Diagnóstico y docs/tls.md); detrás de un proxy inverso, comprueba que reenvía las conexiones WebSocket.',
     allGood: 'Todo lo necesario para una sesión ha respondido.',
   },
 
@@ -237,6 +238,8 @@ export const es: Strings = {
     sessionExpired: 'Tu sesión ha caducado. Vuelve a iniciar sesión.',
     signedOutInBackground:
       'Se cerró la sesión porque la app estuvo en segundo plano (Ajustes › Cerrar sesión en los servidores tras). Escribe tu contraseña para continuar.',
+    newCertificatePassword:
+      'Has confiado en un certificado nuevo para este servidor. Escribe la contraseña una vez, para que una contraseña guardada nunca se envíe a un certificado con el que no has iniciado sesión.',
     logout: 'Cerrar sesión',
     signedInAs: (user: string) => `Sesión iniciada como ${user}`,
     anonymous: 'Sesión iniciada (anónima)',
@@ -314,6 +317,11 @@ export const es: Strings = {
       title: 'No es un servidor Guacamole',
       detail: 'Algo respondió en esa dirección, pero no es la aplicación web Apache Guacamole.',
       status: (status: number) => `El servidor respondió con HTTP ${status}.`,
+    },
+    redirected: {
+      title: 'El servidor redirigió la solicitud',
+      detail:
+        'El servidor redirigió la solicitud a otra dirección. Si delante de Guacamole hay una pasarela de inicio de sesión, usa el inicio de sesión único o abre la dirección del servidor a la que redirige.',
     },
     invalidUrl: {
       empty: 'Escribe la dirección del servidor.',
@@ -397,6 +405,7 @@ export const es: Strings = {
     linkCopied:
       'Enlace copiado. Añádelo como acceso directo en la pantalla de inicio con tu launcher o con la app Atajos.',
     openSessionBadge: 'Abierta',
+    openSessionLabel: 'Sesión abierta en la app',
     swipeHint: 'Desliza para ver acciones',
     linkConfirmTitle: (connection: string, server: string) =>
       `¿Abrir «${connection}» en ${server}?`,
@@ -454,6 +463,12 @@ export const es: Strings = {
     limitBody: (n: number) =>
       `Puede haber hasta ${n} ${plural(n, 'sesión abierta', 'sesiones abiertas')} a la vez (Ajustes › Sesiones). Desconecta una para abrir otra.`,
     closeOldest: (name: string) => `Desconectar ${name} y continuar`,
+    alreadyOpenTitle: (name: string) => `${name} ya está abierta`,
+    alreadyOpenBody: '¿Volver a la sesión abierta o abrir otra junto a ella?',
+    alreadyOpenGoTo: 'Ir a la sesión abierta',
+    alreadyOpenAnother: 'Abrir otra',
+    alreadyOpenDontAsk:
+      'No volver a preguntar (se cambia en Ajustes › Sesiones › Si una conexión ya está abierta)',
     suspendedTitle: 'Desconectada para ahorrar batería',
     suspendedBody:
       'La app estuvo en segundo plano más tiempo del indicado en Ajustes, así que esta sesión se cerró de forma ordenada.',
@@ -468,7 +483,7 @@ export const es: Strings = {
     body: 'Desbloquea con Face ID, tu huella o el código del dispositivo para continuar.',
     unlock: 'Desbloquear',
     failed: 'No se desbloqueó. Vuelve a intentarlo.',
-    reason: 'Desbloquear OpenMobileGuac',
+    reason: 'Desbloquear Open Mobile Guac',
     unavailable:
       'Face ID, la huella y el código del dispositivo no están disponibles ahora. Comprueba que hay un código configurado en los ajustes del dispositivo y vuelve a intentarlo.',
     retry: 'Reintentar',
@@ -486,6 +501,63 @@ export const es: Strings = {
   },
 
   settings: {
+    pages: {
+      search: 'Buscar ajustes',
+      noMatch: 'Ningún ajuste coincide con la búsqueda.',
+      resultCount: (n: number) => `${n} ${plural(n, 'ajuste encontrado', 'ajustes encontrados')}`,
+      advanced: 'Avanzado',
+      more: 'Más',
+      danger: 'Restablecer y eliminar',
+      resetPage: 'Restablecer esta página a los valores predeterminados',
+      resetPageHint:
+        'Solo los valores predeterminados de sesión de esta página. Las conexiones conservan sus propias elecciones.',
+      reset: 'Restablecer',
+      resetAllSession: 'Restablecer todos los valores de sesión',
+      resetAllSessionHint:
+        'Pantalla, barra de herramientas, puntero, gestos, teclado, portapapeles, archivos y sonido. Las conexiones conservan sus propias elecciones.',
+      categories: {
+        general: 'General e información',
+        display: 'Pantalla',
+        toolbar: 'Barra de herramientas y diseño',
+        pointer: 'Puntero y táctil',
+        gestures: 'Gestos',
+        keyboard: 'Teclado y teclas',
+        sessions: 'Sesiones',
+        security: 'Seguridad y privacidad',
+        backup: 'Copia de seguridad',
+      },
+      groups: {
+        serverList: 'Lista de servidores',
+        help: 'Ayuda',
+        picture: 'Imagen',
+        remoteSize: 'Tamaño del escritorio remoto',
+        screen: 'Esta pantalla',
+        layout: 'Horizontal y plegables',
+        mode: 'Modo del puntero',
+        trackpad: 'Puntero del trackpad',
+        feedback: 'Respuesta',
+        keyBar: 'Barra de teclas',
+        typing: 'Escritura',
+        openSessions: 'Sesiones abiertas',
+        background: 'En segundo plano',
+        thumbnails: 'Miniaturas',
+        appLock: 'Bloqueo de la app',
+        serverSignIn: 'Inicio de sesión en servidores',
+        connectionPasswords: 'Contraseñas de conexión',
+      },
+      summaries: {
+        gestures: (on: number, total: number) => `${on} de ${total} activados`,
+        lockOn: 'Bloqueo de la app activado',
+        lockOff: 'Bloqueo de la app desactivado',
+        sessions: (n: number) => `Hasta ${n} a la vez`,
+        autoBackupOn: (frequency: string) => `Automática: ${frequency}`,
+        autoBackupOff: 'Copias automáticas desactivadas',
+        pointer: (mode: string, speed: string) => `${mode} · velocidad ${speed}`,
+        keyboard: (set: string, combos: number) =>
+          `Conjunto: ${set} · ${combos} ${plural(combos, 'combinación guardada', 'combinaciones guardadas')}`,
+        remember: (policy: string) => `Contraseñas: ${policy}`,
+      },
+    },
     keysTitle: 'Teclas y combinaciones',
     keysHint:
       'Conjuntos para la barra de teclas extra y tus combinaciones de teclas guardadas, para todas las sesiones. Cada conexión recuerda el último conjunto que usó.',
@@ -582,6 +654,8 @@ export const es: Strings = {
       'Se pide al volver de segundo plano y antes de usar las credenciales guardadas. Mientras esté activado, el contenido de la app se oculta en el selector de apps.',
     lockUnavailableWeb: 'Solo disponible en la app móvil.',
     lockUnavailableDevice: 'Configura antes un código, Face ID o huella en el dispositivo.',
+    lockUnavailableError:
+      'El dispositivo no indicó si hay un código o biometría configurados. Vuelve a abrir la app e inténtalo de nuevo.',
     lockAfter: 'Bloquear cuando la app lleve en segundo plano',
     rememberConnection: 'Recordar las contraseñas de conexión',
     rememberConnectionOptions: {
@@ -619,6 +693,12 @@ export const es: Strings = {
     maxSessions: 'Sesiones abiertas a la vez',
     maxSessionsHint:
       'Cada sesión abierta consume memoria y datos. En dispositivos antiguos puede ser mejor 1 o 2.',
+    openAgain: 'Si una conexión ya está abierta',
+    openAgainAsk: 'Preguntar',
+    openAgainSwitch: 'Ir a la sesión abierta',
+    openAgainNew: 'Abrir otra',
+    openAgainHint:
+      'Qué hace tocar una conexión que ya tiene una sesión abierta en la app. Una sesión desconectada se vuelve a conectar. Una segunda sesión al mismo equipo puede cerrar la primera (por ejemplo con RDP). Unirse a la sesión de otra persona y los enlaces compartidos siempre van a la abierta.',
     backgroundDisconnect: 'Desconectar las sesiones cuando la app lleve en segundo plano',
     backgroundDisconnectIos:
       'En iPhone y iPad el sistema pausa la app poco después de salir de ella, así que no puede mantener una sesión: el servidor Guacamole la cierra unos 15 segundos después de que la app deja de responder, elijas lo que elijas aquí. Al volver, la sesión se reconecta sola.',
@@ -626,7 +706,7 @@ export const es: Strings = {
       'Ahorra batería y datos. No cierra tu sesión en el servidor: volver a conectar es un toque.',
     serverSignOut: 'Cerrar sesión en los servidores cuando la app lleve en segundo plano',
     serverSignOutHint:
-      'Pasado este tiempo, la app cierra la sesión en todos los servidores y el siguiente inicio de sesión pide la contraseña aunque esté guardada. «Nunca» mantiene la sesión hasta que el propio servidor la termine (por defecto, tras una hora sin uso). Es distinto de desconectar las sesiones (arriba) y del bloqueo de la app, que solo pide Face ID / huella / código del dispositivo. No se aplica mientras Android mantiene las sesiones conectadas en segundo plano.',
+      'Pasado este tiempo, la app cierra la sesión en todos los servidores y el siguiente inicio de sesión pide la contraseña aunque esté guardada. «Nunca» mantiene la sesión hasta que el propio servidor la termine (por defecto, tras una hora sin uso). Es distinto de desconectar las sesiones (Ajustes › Sesiones) y del bloqueo de la app, que solo pide Face ID / huella / código del dispositivo. No se aplica mientras Android mantiene las sesiones conectadas en segundo plano.',
     thumbnails: 'Guardar una miniatura de cada sesión',
     thumbnailsHint:
       'Una imagen pequeña de la última pantalla, que se muestra en recientes. Solo se guarda en este dispositivo.',
@@ -639,7 +719,7 @@ export const es: Strings = {
     about: 'Acerca de',
     version: 'Versión',
     licence: 'Licencia',
-    licenceValue: 'Apache License 2.0',
+    licenceValue: 'GNU GPL, versión 3 o posterior',
     source: 'Código fuente',
     disclaimer:
       'No oficial: sin relación con la Apache Software Foundation ni respaldada por ella. Apache Guacamole es una marca de la ASF.',
@@ -745,13 +825,19 @@ export const es: Strings = {
       ` ${n} ${n === 1 ? 'servidor guardado tiene' : 'servidores guardados tienen'} otra dirección en la copia, así que se ${n === 1 ? 'añadió como servidor nuevo' : 'añadieron como servidores nuevos'} sin contraseñas ni sesión guardadas. Vuelve a iniciar sesión si la dirección es correcta.`,
     restoredSecretsSkipped:
       ' Las contraseñas y claves TOTP de la copia no se restauraron (sin frase de contraseña).',
+    restoredUnsealedSkipped: (n: number) =>
+      ` No se restauraron las contraseñas o claves TOTP de ${n} ${n === 1 ? 'servidor' : 'servidores'}: la copia no indica a qué dirección pertenecen.`,
+    restoredPinsDropped: (n: number) =>
+      ` No se restauraron los certificados de confianza de ${n} ${n === 1 ? 'servidor' : 'servidores'}; se te volverá a preguntar.`,
+    restoredSecurityReset:
+      ' Algunos ajustes de seguridad no se restauraron y conservan los valores de este dispositivo o los valores seguros: «Cerrar sesión en los servidores tras», preguntar antes de que un enlace de la app conecte, aceptar archivos del equipo remoto y el micrófono.',
     restored: (added: number, updated: number, removed: number) =>
       `Restaurado: ${added} ${plural(added, 'añadido', 'añadidos')}, ${updated} ${plural(updated, 'actualizado', 'actualizados')}${removed ? `, ${removed} ${plural(removed, 'eliminado', 'eliminados')}` : ''}.`,
     replaceConfirmTitle: '¿Sustituir todos los servidores?',
     replaceConfirm: 'Sustituir',
     errors: {
       json: 'Ese archivo no es JSON válido.',
-      format: 'No es una copia de seguridad de OpenMobileGuac.',
+      format: 'No es una copia de seguridad de Open Mobile Guac.',
       version:
         'Esta copia la creó una versión más reciente de la app. Actualiza la app y vuelve a intentarlo.',
       shape: 'El archivo de copia está dañado.',

@@ -291,8 +291,15 @@ function ActiveDot({ count }: { count: number }) {
   );
 }
 
-function OpenBadge() {
-  return <span className="badge badge-open">{strings.connections.openSessionBadge}</span>;
+/** "Open": a session of this connection is open in the app (MUL-1). */
+export function OpenBadge() {
+  const c = strings.connections;
+  return (
+    <span className="badge badge-open" title={c.openSessionLabel}>
+      <span aria-hidden="true">{c.openSessionBadge}</span>
+      <span className="visually-hidden">{c.openSessionLabel}</span>
+    </span>
+  );
 }
 
 const SWIPE_OPEN_PX = 112;

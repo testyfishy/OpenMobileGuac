@@ -9,7 +9,21 @@ import {
   type ResolvedSessionSettings,
 } from '../session/settings.ts';
 import { SETTING_DESCRIPTORS, type SettingDescriptor } from '../session/settingsSchema.ts';
-import { SessionDefaultsEditor } from './SessionDefaultsEditor.tsx';
+import { SettingsPageBody } from './SettingsPageBody.tsx';
+import {
+  APP_ITEMS,
+  ROUTE_ITEMS,
+  SETTINGS_CATEGORIES,
+  SETTINGS_PAGES,
+  appItemText,
+  placedSessionKeys,
+  routeItemText,
+  searchSettings,
+  sessionItemText,
+  type SearchContext,
+  type SettingsPageId,
+} from './settingsCatalog.ts';
+import { setActiveLocale } from '../strings.ts';
 import {
   DEFAULT_APP_SETTINGS,
   demoVisible,
@@ -43,6 +57,23 @@ function nonDefault(d: SettingDescriptor): unknown {
   }
 }
 
+const CTX: SearchContext = { values: DEFAULT_SESSION_SETTINGS, biometryLabel: 'Face ID' };
+
+/** One Settings sub-page, app items stubbed with their marker only. */
+function renderPage(page: SettingsPageId): string {
+  return renderToStaticMarkup(
+    <SettingsPageBody
+      page={page}
+      values={DEFAULT_SESSION_SETTINGS}
+      changed={new Set()}
+      onChange={() => undefined}
+      onEditList={() => undefined}
+      renderApp={() => <span />}
+      onResetKeys={() => undefined}
+    />,
+  );
+}
+
 function keysIn(html: string): string[] {
   return [...html.matchAll(/data-setting-key="([^"]+)"/g)].map((m) => m[1] ?? '').sort();
 }
@@ -64,20 +95,9 @@ describe('session settings descriptor table', () => {
     }
   });
 
-  it('the Settings screen renders a control for every field', () => {
-    const html = renderToStaticMarkup(
-      <SessionDefaultsEditor
-        values={DEFAULT_SESSION_SETTINGS}
-        changed={new Set()}
-        query=""
-        onQuery={() => undefined}
-        onChange={() => undefined}
-        onResetSection={() => undefined}
-        onResetAll={() => undefined}
-        onEditList={() => undefined}
-      />,
-    );
-    expect(keysIn(html)).toEqual(KEYS);
+  it('the Settings pages render a control for every field, each exactly once', () => {
+    const keys = SETTINGS_PAGES.flatMap((page) => keysIn(renderPage(page)));
+    expect([...keys].sort()).toEqual(KEYS);
   });
 
   it('the in-session options sheet renders a control for every field', () => {
@@ -94,21 +114,90 @@ describe('session settings descriptor table', () => {
   });
 
   it('search narrows the Settings list', () => {
-    const html = renderToStaticMarkup(
-      <SessionDefaultsEditor
-        values={DEFAULT_SESSION_SETTINGS}
-        changed={new Set()}
-        query="toolbar"
-        onQuery={() => undefined}
-        onChange={() => undefined}
-        onResetSection={() => undefined}
-        onResetAll={() => undefined}
-        onEditList={() => undefined}
-      />,
+    const refs = searchSettings('toolbar', CTX).map((r) => r.ref);
+    expect(refs).toContain('toolbarStyle');
+    expect(refs).not.toContain('longPressMs');
+    expect(searchSettings('', CTX)).toEqual([]);
+  });
+});
+
+describe('Settings categories and search', () => {
+  it('has a short top level (6–9 rows) with unique ids', () => {
+    const ids = SETTINGS_CATEGORIES.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBeGreaterThanOrEqual(6);
+    expect(ids.length).toBeLessThanOrEqual(9);
+    expect(ids).toEqual([...SETTINGS_PAGES]);
+  });
+
+  it('every session setting belongs to exactly one category and group', () => {
+    const placed = placedSessionKeys();
+    expect(new Set(placed).size).toBe(placed.length);
+    expect([...placed].sort()).toEqual(KEYS);
+  });
+
+  it('every app-level item belongs to exactly one group and is rendered there', () => {
+    const refs = SETTINGS_CATEGORIES.flatMap((c) => c.groups.flatMap((g) => g.items)).filter((r) =>
+      r.startsWith('app:'),
     );
-    const keys = keysIn(html);
-    expect(keys).toContain('toolbarStyle');
-    expect(keys).not.toContain('longPressMs');
+    expect(new Set(refs).size).toBe(refs.length);
+    expect([...refs].sort()).toEqual(APP_ITEMS.map((id) => `app:${id}`).sort());
+    const rendered = SETTINGS_PAGES.flatMap((page) =>
+      [...renderPage(page).matchAll(/data-setting-id="([^"]+)"/g)].map((m) => m[1] ?? ''),
+    );
+    expect(rendered.sort()).toEqual([...APP_ITEMS].sort());
+  });
+
+  it('every group has items; Backup opens its own screen directly', () => {
+    for (const c of SETTINGS_CATEGORIES) {
+      if (c.route) expect(c.groups, c.id).toEqual([]);
+      for (const g of c.groups) expect(g.items.length, `${c.id}/${g.id}`).toBeGreaterThan(0);
+    }
+  });
+
+  it.each(['en', 'es'] as const)('finds every setting by its own label (%s)', (locale) => {
+    try {
+      setActiveLocale(locale);
+      for (const d of SETTING_DESCRIPTORS) {
+        const { label } = sessionItemText(d, DEFAULT_SESSION_SETTINGS);
+        expect(label.trim(), d.key).not.toBe('');
+        const refs = searchSettings(label, CTX).map((r) => r.ref);
+        expect(refs, `${locale}: ${d.key} "${label}"`).toContain(d.key);
+      }
+      for (const id of APP_ITEMS) {
+        const { label } = appItemText(id, CTX);
+        expect(label.trim(), id).not.toBe('');
+        const refs = searchSettings(label, CTX).map((r) => r.ref);
+        expect(refs, `${locale}: ${id} "${label}"`).toContain(`app:${id}`);
+      }
+      for (const id of ROUTE_ITEMS) {
+        const refs = searchSettings(routeItemText(id).label, CTX).map((r) => r.ref);
+        expect(refs, `${locale}: ${id}`).toContain(`route:${id}`);
+      }
+    } finally {
+      setActiveLocale('en');
+    }
+  });
+
+  it('search results name their category and are accent- and case-insensitive', () => {
+    const lock = searchSettings('face id', CTX).find((r) => r.ref === 'app:lock');
+    expect(lock?.where).toBe('Security & privacy › App lock');
+    expect(searchSettings('biometr', CTX).map((r) => r.ref)).toContain('app:rememberUnlock');
+    // The device check is found by any wording, whatever this device uses.
+    expect(
+      searchSettings('fingerprint', { ...CTX, biometryLabel: 'Face ID' }).map((r) => r.ref),
+    ).toContain('app:rememberUnlock');
+    const landscape = searchSettings('landscape', CTX).map((r) => r.ref);
+    expect(landscape).toEqual(expect.arrayContaining(['toolbarLandscape', 'keyBarLandscape']));
+    expect(searchSettings('scroll', CTX).map((r) => r.ref)).toEqual(
+      expect.arrayContaining(['naturalScroll', 'horizontalScroll']),
+    );
+    try {
+      setActiveLocale('es');
+      expect(searchSettings('BIOMETRIA', CTX).map((r) => r.ref)).toContain('app:rememberUnlock');
+    } finally {
+      setActiveLocale('en');
+    }
   });
 });
 
@@ -156,6 +245,15 @@ describe('Demo server visibility', () => {
     expect(demoVisible('show', 3)).toBe(true);
     expect(demoVisible('show', undefined)).toBe(true);
     expect(demoVisible('hide', 0)).toBe(false);
+  });
+
+  it('"When a connection is already open": defaults to ask, keeps valid choices', () => {
+    expect(DEFAULT_APP_SETTINGS.openAgain).toBe('switch');
+    expect(parseAppSettings({}).openAgain).toBe('switch');
+    expect(parseAppSettings({ openAgain: 'switch' }).openAgain).toBe('switch');
+    expect(parseAppSettings({ openAgain: 'new' }).openAgain).toBe('new');
+    expect(parseAppSettings({ openAgain: 'bogus' }).openAgain).toBe('switch');
+    expect(parseAppSettings({ openAgain: 1 }).openAgain).toBe('switch');
   });
 
   it('defaults to auto and survives parsing', () => {
