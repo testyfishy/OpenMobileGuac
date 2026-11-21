@@ -25,10 +25,14 @@ describe('release CSP', () => {
     expect(d.get('worker-src')).toEqual(["'none'"]);
   });
 
-  it('allows no eval and no inline script or style', () => {
+  it('allows no eval and no inline script or style element', () => {
     expect(policy).not.toContain("'unsafe-eval'");
     expect(policy).not.toContain("'wasm-unsafe-eval'");
-    expect(policy).not.toContain("'unsafe-inline'");
+    // Inline is allowed for style attributes only (they cannot run script).
+    for (const [name, sources] of d) {
+      if (name !== 'style-src-attr') expect(sources, name).not.toContain("'unsafe-inline'");
+    }
+    expect(d.get('style-src-attr')).toEqual(["'unsafe-inline'"]);
     expect(policy).not.toContain("'unsafe-hashes'");
     expect(policy).not.toContain("'strict-dynamic'");
     for (const [name, sources] of d) {

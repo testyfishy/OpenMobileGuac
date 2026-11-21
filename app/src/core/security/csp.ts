@@ -25,6 +25,10 @@
  * - style-src `'self'` without `'unsafe-inline'`: React `style={...}` props and the
  *   vendored library's `element.style.x = ...` go through the CSSOM, which CSP does not
  *   restrict; the bundle sets no `style` attribute from markup.
+ * - style-src-attr `'unsafe-inline'`: on a real iPhone something outside the bundle (the
+ *   system WebView or a native layer) sets a `style` attribute and was blocked. A style
+ *   attribute cannot run script, so attributes are allowed; `<style>` elements and
+ *   stylesheets stay limited to the app's own files.
  * - No `'unsafe-eval'`, no `'wasm-unsafe-eval'` (no WebAssembly), no workers, no frames
  *   (the SSO browser is native, not an iframe), no plugins, no `<base>`, no form posts
  *   (every form calls `preventDefault`).
@@ -51,6 +55,7 @@ export const RELEASE_CSP: CspDirectives = {
   'default-src': SELF,
   'script-src': SELF,
   'style-src': SELF,
+  'style-src-attr': ["'unsafe-inline'"],
   'img-src': [...SELF, 'data:', 'blob:'],
   'media-src': SELF,
   'font-src': SELF,
