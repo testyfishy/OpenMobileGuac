@@ -32,7 +32,9 @@ import {
   overriddenKeys,
   parseAppSettings,
   removeConnectionKeys,
+  resetSessionDefaults,
   sanitizeSessionPatch,
+  setSessionDefault,
   settingsFromBackup,
 } from './settingsModel.ts';
 
@@ -111,6 +113,43 @@ describe('session settings descriptor table', () => {
       />,
     );
     expect(keysIn(html)).toEqual(KEYS);
+  });
+
+  it('controls with no effect are shown disabled (remote size, Picture in Picture off iOS)', () => {
+    const page = (id: SettingsPageId, values: ResolvedSessionSettings) =>
+      renderToStaticMarkup(
+        <SettingsPageBody
+          page={id}
+          values={values}
+          changed={new Set()}
+          onChange={() => undefined}
+          onEditList={() => undefined}
+          renderApp={() => <span />}
+          onResetKeys={() => undefined}
+        />,
+      );
+    const inactive = (html: string, key: string) => {
+      const start = html.indexOf(`data-setting-key="${key}"`);
+      const next = html.indexOf('data-setting-key="', start + 10);
+      return html.slice(start, next < 0 ? undefined : next).includes('data-inactive="1"');
+    };
+    const auto = page('display', DEFAULT_SESSION_SETTINGS);
+    expect(inactive(auto, 'matchDeviceSize')).toBe(false);
+    expect(inactive(auto, 'remoteWidth')).toBe(true);
+    expect(inactive(auto, 'remoteHeight')).toBe(true);
+    expect(auto).toContain('Used when Remote resolution is Custom.');
+    expect(inactive(auto, 'fitMode')).toBe(false);
+    const fixed = page('display', { ...DEFAULT_SESSION_SETTINGS, remoteResolution: '1920x1080' });
+    expect(inactive(fixed, 'matchDeviceSize')).toBe(true);
+    const custom = page('display', { ...DEFAULT_SESSION_SETTINGS, remoteResolution: 'custom' });
+    expect(inactive(custom, 'matchDeviceSize')).toBe(true);
+    expect(inactive(custom, 'remoteWidth')).toBe(false);
+    // Tests run as the web app: no Picture in Picture, but a switch that is on can be turned off.
+    const sessions = page('sessions', DEFAULT_SESSION_SETTINGS);
+    expect(inactive(sessions, 'pictureInPicture')).toBe(true);
+    expect(sessions).toContain('iPhone and iPad app only');
+    const pipOn = page('sessions', { ...DEFAULT_SESSION_SETTINGS, pictureInPicture: true });
+    expect(inactive(pipOn, 'pictureInPicture')).toBe(false);
   });
 
   it('search narrows the Settings list', () => {
@@ -227,6 +266,22 @@ describe('defaults ← server ← connection with the new fields', () => {
       normalizeSessionSettings(mergeSessionSettings(DEFAULT_SESSION_SETTINGS, app, after))
         .toolbarStyle,
     ).toBe('dock-top');
+  });
+
+  it('Sound muted in the app defaults: unmuting or resetting the page brings the sound back', () => {
+    const audio = (patch: object) =>
+      normalizeSessionSettings(mergeSessionSettings(DEFAULT_SESSION_SETTINGS, patch, {})).audio;
+    const muted = setSessionDefault({}, { audio: 'muted' });
+    expect(audio(muted)).toBe('muted');
+    expect(audio(setSessionDefault(muted, { audio: 'on' }))).toBe('on');
+    const reset = resetSessionDefaults(muted, ['audio', 'microphone']);
+    expect(reset).toEqual({});
+    expect(audio(reset)).toBe('on');
+    // Stored by an earlier version, the legacy flag next to the new choice goes too.
+    expect(resetSessionDefaults({ audio: 'muted', audioMuted: true }, ['audio'])).toEqual({});
+    expect(audio(setSessionDefault({ audio: 'muted', audioMuted: true }, { audio: 'on' }))).toBe(
+      'on',
+    );
   });
 
   it('a built-in toolbar row (null) is not stored as a change', () => {

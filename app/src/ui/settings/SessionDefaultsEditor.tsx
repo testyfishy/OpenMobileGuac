@@ -5,6 +5,7 @@ import type { ResolvedSessionSettings, SessionSettings } from '../session/settin
 import {
   descriptorOf,
   rangeOf,
+  settingEnabled,
   settingPatch,
   DEFAULT_SUMMARY_CONTEXT,
   type ListEditor,
@@ -176,15 +177,31 @@ function Control({
 
 /** One session setting's control, marked when changed from the built-in default. */
 export function SessionSettingBlock({ d, p }: { d: SettingDescriptor; p: SessionBlockProps }) {
+  const control = (
+    <Control
+      d={d}
+      s={p.values}
+      onChange={p.onChange}
+      onEditList={p.onEditList}
+      ctx={p.summaryContext ?? DEFAULT_SUMMARY_CONTEXT}
+    />
+  );
   return (
     <div className={settingClass(p, d.key)} data-setting-key={d.key}>
-      <Control
-        d={d}
-        s={p.values}
-        onChange={p.onChange}
-        onEditList={p.onEditList}
-        ctx={p.summaryContext ?? DEFAULT_SUMMARY_CONTEXT}
-      />
+      {/* No effect with the current values (or on this platform): shown, but not editable. */}
+      {settingEnabled(d, p.values) ? (
+        control
+      ) : (
+        <>
+          <fieldset className="setting-inactive" disabled data-inactive="1">
+            {control}
+          </fieldset>
+          {/* A slider shows no hint of its own: say when it applies. */}
+          {d.control === 'range' && d.hint ? (
+            <p className="field-hint">{d.hint(p.values)}</p>
+          ) : null}
+        </>
+      )}
       <LayerNote d={d} p={p} />
       {p.below?.(d.key)}
     </div>

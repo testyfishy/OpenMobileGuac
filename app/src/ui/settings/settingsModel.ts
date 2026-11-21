@@ -12,7 +12,13 @@ import {
   type KeyLibrary,
 } from '../../session/keys/KeySets.ts';
 import type { SessionSettings } from '../integration/session.ts';
-import { INPUT_SETTING_KEYS, sanitizeSessionSettingsPatch } from '../session/settings.ts';
+import {
+  DEFAULT_SESSION_SETTINGS,
+  INPUT_SETTING_KEYS,
+  LEGACY_SESSION_KEYS,
+  normalizeSessionSettings,
+  sanitizeSessionSettingsPatch,
+} from '../session/settings.ts';
 import { parseLanguagePreference, type LanguagePreference } from '../i18n/locale.ts';
 import { parseThemePreference, type ThemePreference } from '../theme/theme.ts';
 import {
@@ -235,20 +241,26 @@ export function applyConnectionPatch(
   return { ...sanitizeSessionPatch(stored), ...sanitizeSessionPatch(patch) };
 }
 
-/** "Use app default": drops the connection's own value for these keys. */
+/** "Use default": drops the connection's own value for these keys. */
 export function removeConnectionKeys(
   stored: unknown,
   keys: readonly string[],
 ): SessionSettingsPatch {
-  const drop = new Set(keys);
+  const drop = new Set<string>(keys);
+  // A legacy `audioMuted` left behind would bring `audio: 'muted'` back on the next read.
+  if (drop.has('audio')) drop.add('audioMuted');
   return Object.fromEntries(
     Object.entries(sanitizeSessionPatch(stored)).filter(([k]) => !drop.has(k)),
   ) as SessionSettingsPatch;
 }
 
-/** Keys a stored per-connection patch overrides. */
+/**
+ * Keys with a control that a stored per-connection patch overrides. Legacy fields (an old
+ * key bar layout, saved combos) are not offered for "Use default", so they are not lost.
+ */
 export function overriddenKeys(stored: unknown): string[] {
-  return Object.keys(sanitizeSessionPatch(stored));
+  const legacy: readonly string[] = LEGACY_SESSION_KEYS;
+  return Object.keys(sanitizeSessionPatch(stored)).filter((k) => !legacy.includes(k));
 }
 
 /**
@@ -262,10 +274,31 @@ export function diffFromDefaults(
   const clean = sanitizeSessionPatch(values);
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(clean)) {
+    // Derived from `audio` on every read; stored, it would outlive a reset of `audio`.
+    if (k === 'audioMuted') continue;
     const d = defaults[k as keyof SessionSettings];
     if (JSON.stringify(d) !== JSON.stringify(v)) out[k] = v;
   }
   return out as SessionSettingsPatch;
+}
+
+/** Settings › one session default changed: the stored app defaults with it. */
+export function setSessionDefault(
+  current: SessionSettingsPatch,
+  patch: SessionSettingsPatch,
+): SessionSettingsPatch {
+  const values = normalizeSessionSettings(
+    mergeSessionSettings(DEFAULT_SESSION_SETTINGS, current, {}),
+  );
+  return diffFromDefaults(DEFAULT_SESSION_SETTINGS, { ...values, ...patch });
+}
+
+/** "Reset this page": the stored app defaults without these keys. */
+export function resetSessionDefaults(
+  current: SessionSettingsPatch,
+  keys: readonly string[],
+): SessionSettingsPatch {
+  return removeConnectionKeys(current, keys);
 }
 
 function pick<T>(raw: unknown, allowed: readonly T[], fallback: T): T {

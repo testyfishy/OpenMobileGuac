@@ -137,6 +137,7 @@ export const en = {
     clipboardBoth: 'Both ways',
     clipboardToDevice: 'Remote → device',
     clipboardOff: 'Manual only',
+    clipboardCustom: 'Custom (see Defaults for this server)',
     httpWarning: 'Warn before sending the password over http',
     httpWarningHint: 'Turn off only for a private network you trust.',
     hintsTitle: 'What this server reports',
@@ -161,6 +162,9 @@ export const en = {
         'The Base32 key or the otpauth:// link your administrator or authenticator app shows.',
       save: 'Save key',
       remove: 'Remove stored key',
+      removeTitle: 'Remove the stored key?',
+      removeBody:
+        'Codes are then no longer filled in for you. If this device holds the only copy of the key, the server may not show it again.',
       saved: 'Key saved on this device.',
       removed: 'Stored key removed.',
       present: 'A key is stored for this server.',
@@ -238,7 +242,7 @@ export const en = {
     savedPasswordRejected: 'The saved password was not accepted. Enter it again.',
     sessionExpired: 'Your session expired. Sign in again.',
     signedOutInBackground:
-      'Signed out because the app was in the background (Settings › Sign out of servers after). Enter your password to continue.',
+      'Signed out because the app was in the background (Settings › Security & privacy › Server sign-in). Enter your password to continue.',
     newCertificatePassword:
       'You trusted a new certificate for this server. Enter your password once, so a saved password is never sent to a certificate you have not signed in with.',
     logout: 'Sign out',
@@ -644,9 +648,6 @@ export const en = {
     themeDark: 'Dark',
     language: 'Language',
     languageSystem: 'Device language',
-    sessionDefaults: 'Session defaults',
-    sessionDefaultsHint:
-      'Used for connections you have not changed in-session. Each connection remembers its own choices.',
     fitMode: 'View mode',
     fitModes: {
       'fit-screen': 'Fit screen',
@@ -661,17 +662,6 @@ export const en = {
       trackpad: 'Trackpad',
       touch: 'Touch pass-through',
     } as Record<string, string>,
-    matchDeviceSize: 'Match remote size to device',
-    matchDeviceSizeHint: 'Ask the server to resize the remote desktop where supported.',
-    pointerSpeed: 'Trackpad pointer speed',
-    naturalScroll: 'Natural scrolling',
-    haptics: 'Haptic feedback',
-    clipboard: 'Clipboard',
-    clipboardRemoteToDevice: 'Copy remote clipboard to this device',
-    clipboardAutoSendOnFocus: 'Send device clipboard when returning to the app',
-    clipboardAutoSendHint: 'On iOS this may show a paste permission prompt.',
-    keepAwake: 'Keep screen awake during sessions',
-    resetDefaults: 'Reset session defaults',
     security: 'Security',
     lockEnable: 'Require Face ID / fingerprint / device passcode',
     lockHint:
@@ -691,7 +681,7 @@ export const en = {
       device: 'On this device',
     },
     rememberConnectionHint:
-      'When a remote computer asks for its own user name and password after you choose a connection, the app can answer by itself next time, also when it reconnects after being in the background. Time limits count from the last use. Every choice except “On this device” keeps them in memory only, at most until the app is closed; “On this device” saves them in the keychain / keystore, behind the app lock when it is on. The option below can also ask for a device check each time one is filled in. The prompt has a “Remember” box to say no for one connection.',
+      'When a remote computer asks for its own user name and password, the app can fill them in next time, also when it reconnects. Time limits count from the last use. Every choice except “On this device” keeps them in memory only, at most until the app is closed; “On this device” saves them in the keychain / keystore, behind the app lock when it is on. The prompt’s “Remember” box says no for one connection.',
     rememberConnectionMemoryOnly:
       'This build cannot save secrets on the device: “On this device” keeps them in memory until the app closes.',
     rememberConnectionUnlock: (method: string) =>
@@ -705,7 +695,7 @@ export const en = {
       generic: 'biometrics or the device passcode',
     },
     rememberConnectionUnlockHint:
-      'Each time a remembered connection password is about to be filled in, the device asks first (the device passcode also works). Cancel it to type the password instead; nothing is forgotten. One check covers what fills in during the next 30 seconds while the app stays in the foreground, and unlocking the app lock counts as a check. On by default for “On this device”.',
+      'Before a remembered connection password is filled in, the device asks first (the device passcode also works). Cancel it to type the password instead; nothing is forgotten. One check lasts a short while, and unlocking the app counts as one. On by default for “On this device”.',
     rememberConnectionUnlockUnavailable:
       'Needs Face ID, a fingerprint or a device passcode (mobile app only). Until then, remembered passwords are filled in without asking.',
     forgetConnectionPasswords: 'Forget remembered connection passwords',
@@ -735,7 +725,7 @@ export const en = {
       'Saves battery and data. This does not sign you out of the server: reconnecting takes one tap.',
     serverSignOut: 'Sign out of servers after the app is in the background for',
     serverSignOutHint:
-      'After this time the app signs out of every server, and the next sign-in asks for the password even if one is saved. “Never” keeps you signed in until the server itself ends the sign-in (by default after an hour without use). Separate from disconnecting sessions (Settings › Sessions), and from the app lock, which only asks for Face ID / fingerprint / device passcode. Does not apply while Android keeps sessions connected in the background.',
+      'After this time the app signs out of every server, and the next sign-in asks for the password even if one is saved. “Never” keeps you signed in until the server itself ends the sign-in. Separate from disconnecting sessions and from the app lock. Does not apply while Android keeps sessions connected in the background.',
     thumbnails: 'Save a thumbnail of each session',
     thumbnailsHint:
       'A small picture of the last screen, shown in recents. Stored on this device only.',
@@ -913,6 +903,9 @@ export const en = {
     setPass: 'Set passphrase',
     changePass: 'Change passphrase',
     removePass: 'Remove passphrase',
+    removePassTitle: 'Remove the passphrase?',
+    removePassBody:
+      'Later automatic backups will contain no saved passwords or two-factor keys. Backups already made keep theirs.',
     savePass: 'Save passphrase',
     passSaved: 'Passphrase saved.',
     passRemoved: 'Passphrase removed.',

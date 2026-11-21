@@ -272,13 +272,10 @@ export const sessionEs: SessionStrings = {
     title: 'Opciones de la sesión',
     savedForConnection:
       'Los cambios se guardan para esta conexión. Los valores predeterminados de la app están en Ajustes.',
-    overridden: 'Personalizado para esta conexión',
-    useDefault: 'Usar el valor de la app',
-    useDefaultFor: (label: string) => `Usar el valor predeterminado de la app para ${label}`,
-    resetConnection: 'Usar los valores de la app para todo',
-    search: 'Buscar ajustes',
-    noMatch: 'Ningún ajuste coincide.',
-    resetSection: 'Restablecer la sección',
+    overridden: 'Esta conexión',
+    useDefault: 'Usar predeterminado',
+    useDefaultFor: (label: string) => `Usar el valor predeterminado para ${label}`,
+    resetConnection: 'Usar los valores predeterminados para todo',
     resetAll: 'Restablecer todo',
     edit: 'Editar',
     builtIn: 'Integrado',
@@ -293,15 +290,8 @@ export const sessionEs: SessionStrings = {
       sound: 'Sonido',
     },
     sectionHints: {
-      toolbar: 'Dónde están los botones de la sesión y cuáles aparecen en la barra.',
-      pointer: 'Modo del puntero, velocidad del trackpad y cursor.',
       gestures:
         'Todos los gestos táctiles, qué hacen y su interruptor. Los gestos del escritorio valen en los modos táctil directo y trackpad; en el modo de paso táctil cada dedo va directo al remoto, que interpreta sus propios gestos.',
-      keyboard: 'Teclado en pantalla, escritura y conjuntos de teclas.',
-      display: 'Cómo se ajusta el escritorio remoto a esta pantalla.',
-      clipboard: 'Copiar y pegar entre este dispositivo y el remoto.',
-      files: 'Qué ocurre cuando el remoto envía un archivo.',
-      sound: 'Audio remoto y envío del micrófono de este dispositivo.',
     },
     toolbarStyle: 'Estilo de la barra',
     toolbarStyleHint:
@@ -376,8 +366,8 @@ export const sessionEs: SessionStrings = {
       'Conexiones RDP con la entrada de audio activada. Desactivado por defecto; el sistema pide acceso al micrófono la primera vez que se activa. Se detiene cuando la sesión se oculta o se desconecta.',
     keyBarCollapseButton: 'Botón de ocultar en la barra de teclas',
     keyBarCollapseButtonHint:
-      'Un botón al final de las teclas extra que las oculta. Desactivado deja más sitio para teclas; el botón de la barra de herramientas sigue mostrando y ocultando las teclas.',
-    keyBarSwipeDismiss: 'Deslizar hacia abajo en las teclas extra para ocultar el teclado',
+      'Un botón al final de la barra de teclas que la oculta. Desactivado deja más sitio para teclas; el botón de la barra de herramientas sigue mostrando y ocultando la barra de teclas.',
+    keyBarSwipeDismiss: 'Deslizar hacia abajo en la barra de teclas para ocultar el teclado',
     keyBarSwipeDismissHint:
       'Con el teclado oculto, el gesto oculta la barra de teclas. En una columna lateral (en horizontal), desliza hacia el borde de la pantalla.',
     keyBarLandscape: 'Teclas extra en horizontal',
@@ -403,6 +393,7 @@ export const sessionEs: SessionStrings = {
     pictureInPicture: 'Imagen dentro de imagen (experimental)',
     pictureInPictureHint:
       'iPhone y iPad: al salir de la app con una sesión abierta, la pantalla remota se muestra en una pequeña ventana flotante. Solo para ver. Por ahora es una prueba: puede congelarse o cerrarse.',
+    pictureInPictureIosOnly: 'Solo disponible en la app para iPhone y iPad.',
     sendPastes: 'Al enviar, pegar también',
     sendPastesHint:
       'Enviar pulsa el atajo de pegar del remoto cuando el portapapeles ya está allí: Ctrl+V, o Ctrl+Shift+V en un terminal. Desactivado: Enviar solo pone el texto en el portapapeles remoto. Un remoto Mac necesita ⌘V, que no se pulsa.',
@@ -434,7 +425,7 @@ export const sessionEs: SessionStrings = {
     remoteSizeHint: 'Se usa cuando la resolución remota es Personalizada.',
     remoteScale: 'Escala',
     remoteScaleHint:
-      'Por encima del 100 % la app pide un escritorio proporcionalmente más pequeño, así que todo se dibuja más grande. Guacamole 1.6.0 no pasa una escala de pantalla (DPI) a Windows, así que es la única forma de agrandar el texto desde el cliente.',
+      'Por encima del 100 % la app pide un escritorio proporcionalmente más pequeño, así que todo se dibuja más grande: la forma de agrandar el texto en un escritorio Windows.',
     viewOnly: 'Solo ver',
     viewOnlyHint:
       'Nada de lo que hagas llega al remoto: ni ratón, ni toques, ni teclas, ni portapapeles. Desactívalo desde la barra o Más.',
@@ -447,10 +438,6 @@ export const sessionEs: SessionStrings = {
     commandKeyHint:
       'Teclados de iPad y Mac. Control: ⌘C, ⌘V y ⌘Z copian, pegan y deshacen en Windows y Linux. Tecla Windows: como la app web de Guacamole (⌘ es la tecla Windows).',
     commandKeyOptions: { super: 'Tecla Windows', ctrl: 'Control' },
-    audioMuted: 'Silenciar el sonido remoto',
-    audioMutedHint: 'También se puede cambiar en la sesión (Más › Sonido)',
-    combosSummary: (n: number) => `${n} ${plural(n, 'combinación', 'combinaciones')}`,
-    pointerSpeedHint: 'Modo trackpad',
   },
 
   gestures: {
@@ -503,7 +490,7 @@ export const sessionEs: SessionStrings = {
       },
       pinch: {
         name: 'Pellizcar para hacer zoom',
-        desc: 'Separa o junta dos dedos para hacer zoom en la vista. Desactivado: los pellizcos no hacen nada (el menú Vista sigue haciendo zoom).',
+        desc: 'Separa o junta dos dedos para hacer zoom en la vista. Desactivado: los pellizcos no hacen zoom (el menú Vista sí); la opción de letra del terminal de abajo sigue funcionando.',
       },
       tapKeyboard: {
         name: 'Tocar mientras escribes',
@@ -522,7 +509,7 @@ export const sessionEs: SessionStrings = {
         desc: 'Abre la lista de conjuntos de teclas.',
       },
       holdPaste: {
-        name: 'Mantener Pegar',
+        name: 'Mantener Enviar',
         desc: 'Escribe el portapapeles del dispositivo como pulsaciones, para campos que no dejan pegar.',
       },
       sheetSwipe: {
@@ -701,10 +688,10 @@ export const sessionEs: SessionStrings = {
       'Si las letras llegan mal con tu app de teclado, prueba «Por palabras» o la barra de entrada de texto.',
     keyboardAutocorrect: 'Autocorrección',
     keyboardAutocorrectHint:
-      'Tu teclado corrige las palabras y convierte un doble espacio en un punto. Desactívala para contraseñas, comandos y código. Se aplica la próxima vez que se abra el teclado.',
+      'Tu teclado corrige las palabras y convierte un doble espacio en un punto. Desactívala para contraseñas, comandos y código. Se aplica la próxima vez que se abra el teclado. No en la barra de entrada de texto, que mantiene el comportamiento propio de tu teclado.',
     keyboardCapitals: 'Mayúsculas al empezar frase',
     keyboardCapitalsHint:
-      'Tu teclado empieza cada frase con mayúscula. Se aplica la próxima vez que se abra el teclado.',
+      'Tu teclado empieza cada frase con mayúscula. Se aplica la próxima vez que se abra el teclado. No en la barra de entrada de texto.',
     textInputBar: 'Barra de entrada de texto',
     textInputBarHint:
       'Un campo visible encima del teclado: escribe, dicta o pega, y luego pulsa Enviar',

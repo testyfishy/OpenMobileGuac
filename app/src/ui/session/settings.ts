@@ -192,7 +192,7 @@ export interface SessionSettings {
   sheetSwipeClose?: boolean;
   /** Holding the key bar's set button opens the list of sets. */
   keySetLongPress?: boolean;
-  /** Holding the toolbar's Paste button types the clipboard as keystrokes. */
+  /** Holding the toolbar's Send button types the clipboard as keystrokes. */
   pasteLongPress?: boolean;
 }
 

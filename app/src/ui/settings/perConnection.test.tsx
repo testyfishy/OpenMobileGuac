@@ -20,8 +20,10 @@ import {
   overrideNames,
   ownKeys,
   summaryLine,
+  withoutOwnValues,
   type ServerInput,
 } from './connectionLayers.ts';
+import { SessionListEditor } from './SessionListEditors.tsx';
 import {
   affectsConnection,
   newOrigin,
@@ -34,6 +36,7 @@ import { searchSettings } from './settingsCatalog.ts';
 import {
   DEFAULT_APP_SETTINGS,
   applyConnectionPatch,
+  overriddenKeys,
   parseAppSettings,
   removeConnectionKeys,
   settingsRestore,
@@ -344,6 +347,46 @@ describe('the layered editor (one connection’s own values)', () => {
     // What the editor then stores.
     const stored = applyConnectionPatch({ pointerMode: 'trackpad', haptics: false }, {});
     expect(removeConnectionKeys(stored, ['pointerMode'])).toEqual({ haptics: false });
+  });
+
+  it('legacy values are not own values: kept by "Reset all", a legacy mute goes with "Use default"', () => {
+    const stored = {
+      keyBarLayout: [['Tab']],
+      customCombos: ['Win+D'],
+      audioMuted: true,
+      haptics: false,
+    };
+    // What the session sheet offers "Use the defaults for everything" for.
+    expect(overriddenKeys(stored).sort()).toEqual(['audio', 'haptics']);
+    const unmuted = removeConnectionKeys(stored, ['audio']);
+    expect(effectiveValues(inheritedValues({}), unmuted).audio).toBe('on');
+    expect(withoutOwnValues(stored)).toEqual({ keyBarLayout: [['Tab']], customCombos: ['Win+D'] });
+  });
+
+  it('"Reset to default" in a layer’s toolbar editor uses the default, not the built-in row', () => {
+    const onChange = vi.fn();
+    const onReset = vi.fn();
+    const sheet = SessionListEditor({
+      editor: 'toolbar',
+      values: DEFAULT_SESSION_SETTINGS,
+      onChange,
+      onReset,
+      keys: { library: parseAppSettings({}).keys, onLibrary: () => undefined },
+      onClose: () => undefined,
+    }) as ReactElement<{ onReset: () => void }>;
+    sheet.props.onReset();
+    expect(onReset).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+    // The app defaults editor has no layer: the built-in row (not stored as a change).
+    const plain = SessionListEditor({
+      editor: 'toolbar',
+      values: DEFAULT_SESSION_SETTINGS,
+      onChange,
+      keys: { library: parseAppSettings({}).keys, onLibrary: () => undefined },
+      onClose: () => undefined,
+    }) as ReactElement<{ onReset: () => void }>;
+    plain.props.onReset();
+    expect(onChange).toHaveBeenCalledWith({ toolbarItems: null });
   });
 
   it('the app defaults pages are unchanged without a layer (no markers)', () => {

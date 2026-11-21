@@ -44,13 +44,14 @@ import {
   MAX_SESSIONS_MAX,
   MAX_SESSIONS_MIN,
   SERVER_SIGN_OUT_CHOICES,
-  diffFromDefaults,
   type DemoVisibility,
   type AskInUse,
   type OpenAgain,
   mergeSessionSettings,
   parseServerOptions,
+  resetSessionDefaults,
   serverOptionsToJson,
+  setSessionDefault,
 } from './settingsModel.ts';
 import {
   SETTINGS_CATEGORIES,
@@ -303,24 +304,12 @@ export function SettingsScreen() {
 
   const setSession = (patch: Partial<SessionSettings>) => {
     const cur = settingsRef.current;
-    const values = normalizeSessionSettings(
-      mergeSessionSettings(DEFAULT_SESSION_SETTINGS, cur.sessionDefaults, {}),
-    );
-    write({
-      ...cur,
-      sessionDefaults: diffFromDefaults(DEFAULT_SESSION_SETTINGS, { ...values, ...patch }),
-    });
+    write({ ...cur, sessionDefaults: setSessionDefault(cur.sessionDefaults, patch) });
   };
 
   const resetKeys = (keys: readonly SettingKey[]) => {
-    const drop = new Set<string>(keys);
     const cur = settingsRef.current;
-    write({
-      ...cur,
-      sessionDefaults: Object.fromEntries(
-        Object.entries(cur.sessionDefaults).filter(([k]) => !drop.has(k)),
-      ),
-    });
+    write({ ...cur, sessionDefaults: resetSessionDefaults(cur.sessionDefaults, keys) });
   };
 
   const setLock = async (on: boolean) => {

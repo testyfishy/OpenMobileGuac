@@ -35,12 +35,18 @@ export function SessionListEditor({
   editor,
   values,
   onChange,
+  onReset,
   keys,
   onClose,
 }: {
   editor: ListEditor;
   values: ResolvedSessionSettings;
   onChange: (patch: Partial<SessionSettings>) => void;
+  /**
+   * A connection's or server's own values: "Reset to default" drops its toolbar row, so it
+   * follows the default again (storing the built-in row would make it its own value).
+   */
+  onReset?: () => void;
   keys: KeyLibraryProps;
   onClose: () => void;
 }) {
@@ -50,6 +56,7 @@ export function SessionListEditor({
         <ToolbarItemsSheet
           items={values.toolbarItems}
           onChange={(items) => onChange({ toolbarItems: items })}
+          onReset={onReset ?? (() => onChange({ toolbarItems: null }))}
           onClose={onClose}
         />
       );
@@ -120,10 +127,12 @@ function MoveButtons({
 function ToolbarItemsSheet({
   items,
   onChange,
+  onReset,
   onClose,
 }: {
   items: readonly string[] | null;
   onChange: (items: string[] | null) => void;
+  onReset: () => void;
   onClose: () => void;
 }) {
   const t = sessionStrings.toolbarEditor;
@@ -188,7 +197,7 @@ function ToolbarItemsSheet({
         </div>
       ) : null}
       <div className="form-actions">
-        <button type="button" className="btn" onClick={() => onChange(null)}>
+        <button type="button" className="btn" onClick={onReset}>
           {t.reset}
         </button>
         <button type="button" className="btn btn-primary" onClick={onClose}>

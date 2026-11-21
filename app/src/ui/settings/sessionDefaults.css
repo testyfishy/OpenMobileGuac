@@ -45,6 +45,15 @@
   background: var(--omg-accent);
 }
 
+/* A setting with no effect right now (see `settingEnabled`): dimmed, not editable. */
+.setting-inactive {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0.55;
+}
+
 .list-setting {
   display: flex;
   align-items: center;

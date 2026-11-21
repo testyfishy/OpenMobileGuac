@@ -3,8 +3,8 @@
  * small groups, and one search index across all of them.
  *
  * Session settings are referenced by their `SettingKey` (their controls come from the
- * descriptor table, `session/settingsSchema.ts`, which keeps its own `section` for the
- * in-session sheet); app-level settings and the few read-only rows are `app:` items. Every
+ * descriptor table, `session/settingsSchema.ts`; the in-session sheet uses these categories
+ * too); app-level settings and the few read-only rows are `app:` items. Every
  * session key and every app item sits in exactly one category and group (tests check this),
  * so nothing is shown twice and nothing is left out.
  *

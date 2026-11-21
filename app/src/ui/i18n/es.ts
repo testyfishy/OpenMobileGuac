@@ -138,6 +138,7 @@ export const es: Strings = {
     clipboardBoth: 'En ambos sentidos',
     clipboardToDevice: 'Remoto → dispositivo',
     clipboardOff: 'Solo manual',
+    clipboardCustom: 'Personalizado (ver Valores predeterminados de este servidor)',
     httpWarning: 'Avisar antes de enviar la contraseña por http',
     httpWarningHint: 'Desactívalo solo en una red privada de confianza.',
     hintsTitle: 'Lo que informa este servidor',
@@ -162,6 +163,9 @@ export const es: Strings = {
         'La clave Base32 o el enlace otpauth:// que te muestra tu administrador o tu app de autenticación.',
       save: 'Guardar clave',
       remove: 'Quitar la clave guardada',
+      removeTitle: '¿Quitar la clave guardada?',
+      removeBody:
+        'Los códigos dejarán de rellenarse solos. Si este dispositivo tiene la única copia de la clave, puede que el servidor no vuelva a mostrarla.',
       saved: 'Clave guardada en este dispositivo.',
       removed: 'Clave guardada eliminada.',
       present: 'Hay una clave guardada para este servidor.',
@@ -239,7 +243,7 @@ export const es: Strings = {
     savedPasswordRejected: 'No se aceptó la contraseña guardada. Escríbela de nuevo.',
     sessionExpired: 'Tu sesión ha caducado. Vuelve a iniciar sesión.',
     signedOutInBackground:
-      'Se cerró la sesión porque la app estuvo en segundo plano (Ajustes › Cerrar sesión en los servidores tras). Escribe tu contraseña para continuar.',
+      'Se cerró la sesión porque la app estuvo en segundo plano (Ajustes › Seguridad y privacidad › Inicio de sesión en servidores). Escribe tu contraseña para continuar.',
     newCertificatePassword:
       'Has confiado en un certificado nuevo para este servidor. Escribe la contraseña una vez, para que una contraseña guardada nunca se envíe a un certificado con el que no has iniciado sesión.',
     logout: 'Cerrar sesión',
@@ -701,9 +705,6 @@ export const es: Strings = {
     themeDark: 'Oscuro',
     language: 'Idioma',
     languageSystem: 'Idioma del dispositivo',
-    sessionDefaults: 'Valores predeterminados de sesión',
-    sessionDefaultsHint:
-      'Se usan en las conexiones que no hayas cambiado durante la sesión. Cada conexión recuerda lo que elijas en ella.',
     fitMode: 'Modo de vista',
     fitModes: {
       'fit-screen': 'Ajustar a pantalla',
@@ -718,18 +719,6 @@ export const es: Strings = {
       trackpad: 'Trackpad',
       touch: 'Toque nativo',
     } as Record<string, string>,
-    matchDeviceSize: 'Ajustar el tamaño remoto al dispositivo',
-    matchDeviceSizeHint:
-      'Pide al servidor que cambie el tamaño del escritorio remoto cuando sea posible.',
-    pointerSpeed: 'Velocidad del puntero (trackpad)',
-    naturalScroll: 'Desplazamiento natural',
-    haptics: 'Respuesta háptica',
-    clipboard: 'Portapapeles',
-    clipboardRemoteToDevice: 'Copiar el portapapeles remoto a este dispositivo',
-    clipboardAutoSendOnFocus: 'Enviar el portapapeles del dispositivo al volver a la app',
-    clipboardAutoSendHint: 'En iOS puede aparecer un aviso de permiso para pegar.',
-    keepAwake: 'Mantener la pantalla encendida durante las sesiones',
-    resetDefaults: 'Restablecer valores de sesión',
     security: 'Seguridad',
     lockEnable: 'Pedir Face ID / huella / código del dispositivo',
     lockHint:
@@ -749,7 +738,7 @@ export const es: Strings = {
       device: 'En este dispositivo',
     },
     rememberConnectionHint:
-      'Cuando un equipo remoto pide su propio usuario y contraseña después de elegir una conexión, la app puede responder sola la próxima vez, también al reconectar después de estar en segundo plano. Los límites de tiempo cuentan desde el último uso. Todas las opciones salvo «En este dispositivo» los guardan solo en memoria, como mucho hasta que se cierra la app; «En este dispositivo» los guarda en el llavero / almacén de claves, detrás del bloqueo de la app si está activado. La opción de abajo también puede pedir una comprobación del dispositivo cada vez que se rellena una. El aviso tiene una casilla «Recordar» para decir que no en una conexión.',
+      'Cuando un equipo remoto pide su propio usuario y contraseña, la app puede rellenarlos la próxima vez, también al reconectar. Los límites de tiempo cuentan desde el último uso. Todas las opciones salvo «En este dispositivo» los guardan solo en memoria, como mucho hasta que se cierra la app; «En este dispositivo» los guarda en el llavero / almacén de claves, detrás del bloqueo de la app si está activado. La casilla «Recordar» del aviso dice que no en una conexión.',
     rememberConnectionMemoryOnly:
       'Esta versión no puede guardar secretos en el dispositivo: «En este dispositivo» los guarda en memoria hasta que se cierra la app.',
     rememberConnectionUnlock: (method: string) =>
@@ -763,7 +752,7 @@ export const es: Strings = {
       generic: 'la biometría o el código del dispositivo',
     },
     rememberConnectionUnlockHint:
-      'Cada vez que se va a rellenar una contraseña de conexión recordada, el dispositivo lo pide antes (también vale el código del dispositivo). Cancélalo para escribir la contraseña; no se olvida nada. Una comprobación vale para lo que se rellene en los 30 segundos siguientes mientras la app siga en primer plano, y desbloquear el bloqueo de la app cuenta como comprobación. Activado por defecto con «En este dispositivo».',
+      'Antes de rellenar una contraseña de conexión recordada, el dispositivo lo pide (también vale el código del dispositivo). Cancélalo para escribir la contraseña; no se olvida nada. Una comprobación vale un rato, y desbloquear la app cuenta como una. Activado por defecto con «En este dispositivo».',
     rememberConnectionUnlockUnavailable:
       'Necesita Face ID, una huella o un código del dispositivo (solo en la app móvil). Mientras tanto, las contraseñas recordadas se rellenan sin preguntar.',
     forgetConnectionPasswords: 'Olvidar las contraseñas de conexión recordadas',
@@ -794,7 +783,7 @@ export const es: Strings = {
       'Ahorra batería y datos. No cierra tu sesión en el servidor: volver a conectar es un toque.',
     serverSignOut: 'Cerrar sesión en los servidores cuando la app lleve en segundo plano',
     serverSignOutHint:
-      'Pasado este tiempo, la app cierra la sesión en todos los servidores y el siguiente inicio de sesión pide la contraseña aunque esté guardada. «Nunca» mantiene la sesión hasta que el propio servidor la termine (por defecto, tras una hora sin uso). Es distinto de desconectar las sesiones (Ajustes › Sesiones) y del bloqueo de la app, que solo pide Face ID / huella / código del dispositivo. No se aplica mientras Android mantiene las sesiones conectadas en segundo plano.',
+      'Pasado este tiempo, la app cierra la sesión en todos los servidores y el siguiente inicio de sesión pide la contraseña aunque esté guardada. «Nunca» mantiene la sesión hasta que el propio servidor la termine. Es distinto de desconectar las sesiones y del bloqueo de la app. No se aplica mientras Android mantiene las sesiones conectadas en segundo plano.',
     thumbnails: 'Guardar una miniatura de cada sesión',
     thumbnailsHint:
       'Una imagen pequeña de la última pantalla, que se muestra en recientes. Solo se guarda en este dispositivo.',
@@ -871,6 +860,9 @@ export const es: Strings = {
     setPass: 'Definir frase de contraseña',
     changePass: 'Cambiar la frase de contraseña',
     removePass: 'Quitar la frase de contraseña',
+    removePassTitle: '¿Quitar la frase de contraseña?',
+    removePassBody:
+      'Las próximas copias automáticas no incluirán contraseñas guardadas ni claves de doble factor. Las copias ya hechas conservan las suyas.',
     savePass: 'Guardar la frase de contraseña',
     passSaved: 'Frase de contraseña guardada.',
     passRemoved: 'Frase de contraseña quitada.',

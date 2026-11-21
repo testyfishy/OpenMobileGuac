@@ -1,12 +1,15 @@
 /**
- * One descriptor per `SessionSettings` field: section, control, label and hint. Both the
- * in-session "Session options" sheet and the app's Settings screen render from this table,
- * so a new field only needs a row here (a test fails when a field has none).
+ * One descriptor per `SessionSettings` field: control, label and hint. Both the in-session
+ * "Session options" sheet and the app's Settings screen render their controls from this
+ * table, so a new field only needs a row here (a test fails when a field has none). Where a
+ * setting is shown is decided by the Settings catalogue (`settings/settingsCatalog.ts`), for
+ * the sheet too; `section` only still groups the gesture tuning settings (`descriptorsIn`).
  *
  * Pure: no React, DOM or CSS. Labels are read from `sessionStrings` at call time, so they
  * follow the app language. Imported by path from the main chunk (Settings screen).
  */
 
+import { Capacitor } from '@capacitor/core';
 import {
   INPUT_RANGES,
   LEGACY_SESSION_KEYS,
@@ -63,6 +66,11 @@ interface Base {
   readonly section: SettingSection;
   readonly label: () => string;
   readonly hint?: (s: ResolvedSessionSettings) => string | undefined;
+  /**
+   * Whether the control does anything now (another setting, or the platform, decides). When
+   * false it is shown disabled; the hint says when it applies.
+   */
+  readonly enabled?: (s: ResolvedSessionSettings) => boolean;
 }
 
 export interface SwitchDescriptor extends Base {
@@ -102,6 +110,13 @@ export interface ListDescriptor extends Base {
 
 export type SettingDescriptor =
   SwitchDescriptor | ChoiceDescriptor | RangeDescriptor | ListDescriptor;
+
+/** Picture in Picture exists in the iOS app only (the same check as `pipAvailable`). */
+const pipPlatform = () => Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
+/** Match device size and the custom size only apply to some Remote resolutions. */
+const followsDevice = (s: ResolvedSessionSettings) =>
+  s.remoteResolution === 'auto' || s.remoteResolution === 'device';
+const customSize = (s: ResolvedSessionSettings) => s.remoteResolution === 'custom';
 
 const ms = (v: number) => `${Math.round(v)} ms`;
 const times = (v: number) => `${v.toFixed(2)}×`;
@@ -420,20 +435,26 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     hint: () => S().options.remoteResolutionHint,
     optionLabel: (v) => S().options.remoteResolutionOptions[v as RemoteResolution] ?? v,
   },
-  range(
-    'remoteWidth',
-    'display',
-    () => S().options.remoteWidth,
-    (v) => S().options.px(Math.round(v)),
-    () => S().options.remoteSizeHint,
-  ),
-  range(
-    'remoteHeight',
-    'display',
-    () => S().options.remoteHeight,
-    (v) => S().options.px(Math.round(v)),
-    () => S().options.remoteSizeHint,
-  ),
+  {
+    ...range(
+      'remoteWidth',
+      'display',
+      () => S().options.remoteWidth,
+      (v) => S().options.px(Math.round(v)),
+      () => S().options.remoteSizeHint,
+    ),
+    enabled: customSize,
+  },
+  {
+    ...range(
+      'remoteHeight',
+      'display',
+      () => S().options.remoteHeight,
+      (v) => S().options.px(Math.round(v)),
+      () => S().options.remoteSizeHint,
+    ),
+    enabled: customSize,
+  },
   range(
     'remoteScale',
     'display',
@@ -459,12 +480,15 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     hint: () => S().options.displayAlignHint,
     optionLabel: (v) => S().options.displayAlignOptions[v as 'left' | 'center' | 'right'] ?? v,
   },
-  sw(
-    'matchDeviceSize',
-    'display',
-    () => S().options.matchDeviceSize,
-    () => S().view.matchHint,
-  ),
+  {
+    ...sw(
+      'matchDeviceSize',
+      'display',
+      () => S().options.matchDeviceSize,
+      () => S().view.matchHint,
+    ),
+    enabled: followsDevice,
+  },
   {
     key: 'splitLayout',
     section: 'display',
@@ -500,12 +524,17 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     () => S().options.sendPastes,
     () => S().options.sendPastesHint,
   ),
-  sw(
-    'pictureInPicture',
-    'display',
-    () => S().options.pictureInPicture,
-    () => S().options.pictureInPictureHint,
-  ),
+  {
+    ...sw(
+      'pictureInPicture',
+      'display',
+      () => S().options.pictureInPicture,
+      () =>
+        pipPlatform() ? S().options.pictureInPictureHint : S().options.pictureInPictureIosOnly,
+    ),
+    // Like the Android keep-alive elsewhere: off the platform it can only be turned off.
+    enabled: (s) => pipPlatform() || s.pictureInPicture,
+  },
   sw(
     'clipboardSendOnConnect',
     'clipboard',
@@ -607,6 +636,11 @@ export function matchesGesture(g: GestureInfo, query: string, s: ResolvedSession
 /** The descriptor of a setting key (every key has one). */
 export function descriptorOf(key: SettingKey): SettingDescriptor | undefined {
   return SETTING_DESCRIPTORS.find((d) => d.key === key);
+}
+
+/** Whether a setting's control does anything with these values (shown disabled if not). */
+export function settingEnabled(d: SettingDescriptor, s: ResolvedSessionSettings): boolean {
+  return d.enabled?.(s) ?? true;
 }
 
 function fold(s: string): string {

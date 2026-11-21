@@ -276,13 +276,10 @@ export const sessionStringsEn = {
     title: 'Session options',
     savedForConnection:
       'Changes here are saved for this connection. App-wide defaults are in Settings.',
-    overridden: 'Custom for this connection',
-    useDefault: 'Use app default',
-    useDefaultFor: (label: string) => `Use the app default for ${label}`,
-    resetConnection: 'Use app defaults for everything',
-    search: 'Search settings',
-    noMatch: 'No setting matches.',
-    resetSection: 'Reset section',
+    overridden: 'This connection',
+    useDefault: 'Use default',
+    useDefaultFor: (label: string) => `Use the default for ${label}`,
+    resetConnection: 'Use the defaults for everything',
     resetAll: 'Reset all to defaults',
     edit: 'Edit',
     builtIn: 'Built-in',
@@ -297,15 +294,8 @@ export const sessionStringsEn = {
       sound: 'Sound',
     },
     sectionHints: {
-      toolbar: 'Where the session buttons sit and which ones are in the row.',
-      pointer: 'Pointer mode, trackpad speed and the cursor.',
       gestures:
         'Every touch gesture, what it does and its switch. Desktop gestures apply in direct touch and trackpad mode; in touch pass-through mode every finger goes straight to the remote, which handles its own gestures.',
-      keyboard: 'Soft keyboard, text entry and key sets.',
-      display: 'How the remote desktop fits this screen.',
-      clipboard: 'Copy and paste between this device and the remote.',
-      files: 'What happens when the remote sends a file.',
-      sound: 'Remote audio and sending this device’s microphone.',
     },
     toolbarStyle: 'Toolbar style',
     toolbarStyleHint:
@@ -379,7 +369,7 @@ export const sessionStringsEn = {
       'RDP connections with audio input enabled. Off by default; the system asks for microphone access the first time it is turned on. It stops when the session is hidden or disconnects.',
     keyBarCollapseButton: 'Hide button on the key bar',
     keyBarCollapseButtonHint:
-      'A button at the right end of the extra keys that hides them. Off leaves more room for keys; the toolbar button still shows and hides the key bar.',
+      'A button at the right end of the key bar that hides it. Off leaves more room for keys; the toolbar button still shows and hides the key bar.',
     keyBarSwipeDismiss: 'Swipe down on the key bar to hide the keyboard',
     keyBarSwipeDismissHint:
       'With the keyboard hidden, the swipe hides the key bar. On a side column (landscape), swipe towards the screen edge instead.',
@@ -405,6 +395,7 @@ export const sessionStringsEn = {
     pictureInPicture: 'Picture in picture (experimental)',
     pictureInPictureHint:
       'iPhone and iPad: leaving the app with a session open shows the remote screen in a small floating window. View only. A test for now: it may freeze or close.',
+    pictureInPictureIosOnly: 'Available in the iPhone and iPad app only.',
     sendPastes: 'Send also pastes',
     sendPastesHint:
       'Send presses the remote’s paste shortcut once the clipboard is there: Ctrl+V, or Ctrl+Shift+V in a terminal. Off: Send only puts the text on the remote clipboard. A Mac remote needs ⌘V, which is not pressed.',
@@ -436,7 +427,7 @@ export const sessionStringsEn = {
     remoteSizeHint: 'Used when Remote resolution is Custom.',
     remoteScale: 'Scale',
     remoteScaleHint:
-      'Above 100 % the app asks for a proportionally smaller desktop, so everything is drawn larger. Guacamole 1.6.0 does not pass a display scale (DPI) to Windows, so this is the only way to get larger text from the client.',
+      'Above 100 % the app asks for a proportionally smaller desktop, so everything is drawn larger: the way to get larger text on a Windows desktop.',
     viewOnly: 'View only',
     viewOnlyHint:
       'Nothing you do reaches the remote: no mouse, touch, keys or clipboard. Turn it off from the toolbar or More.',
@@ -449,10 +440,6 @@ export const sessionStringsEn = {
     commandKeyHint:
       'iPad and Mac keyboards. Control: ⌘C, ⌘V and ⌘Z copy, paste and undo on Windows and Linux. Windows key: as the Guacamole web app (⌘ is the Windows key).',
     commandKeyOptions: { super: 'Windows key', ctrl: 'Control' },
-    audioMuted: 'Mute remote sound',
-    audioMutedHint: 'Can also be switched in the session (More › Sound)',
-    combosSummary: (n: number) => `${n} ${plural(n, 'combo', 'combos')}`,
-    pointerSpeedHint: 'Trackpad mode',
   },
 
   gestures: {
@@ -504,7 +491,7 @@ export const sessionStringsEn = {
       },
       pinch: {
         name: 'Pinch to zoom',
-        desc: 'Spread or pinch two fingers to zoom the view. Off: pinches do nothing (the View menu still zooms).',
+        desc: 'Spread or pinch two fingers to zoom the view. Off: pinches do not zoom (the View menu still does); the terminal font option below still works.',
       },
       tapKeyboard: {
         name: 'Tap while typing',
@@ -523,7 +510,7 @@ export const sessionStringsEn = {
         desc: 'Opens the list of key sets.',
       },
       holdPaste: {
-        name: 'Hold Paste',
+        name: 'Hold Send',
         desc: 'Types the device clipboard as keystrokes, for fields that block pasting.',
       },
       sheetSwipe: {
@@ -696,10 +683,10 @@ export const sessionStringsEn = {
       'If letters arrive wrong with your keyboard app, try Commit on word or the text input bar.',
     keyboardAutocorrect: 'Autocorrect',
     keyboardAutocorrectHint:
-      'Your keyboard corrects words and turns a double space into a full stop. Turn it off for passwords, commands and code. Applies the next time the keyboard opens.',
+      'Your keyboard corrects words and turns a double space into a full stop. Turn it off for passwords, commands and code. Applies the next time the keyboard opens. Not in the text input bar, which keeps your keyboard’s own behaviour.',
     keyboardCapitals: 'Capitalise sentences',
     keyboardCapitalsHint:
-      'Your keyboard starts each sentence with a capital letter. Applies the next time the keyboard opens.',
+      'Your keyboard starts each sentence with a capital letter. Applies the next time the keyboard opens. Not in the text input bar.',
     textInputBar: 'Text input bar',
     textInputBarHint: 'A visible field above the keyboard: type, dictate or paste, then Send',
     editKeyBar: 'Edit key bar…',

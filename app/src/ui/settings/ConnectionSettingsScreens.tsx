@@ -24,6 +24,7 @@ import {
   ownKeys,
   ownPatch,
   summaryLine,
+  withoutOwnValues,
   type ConnectionEntry,
   type ServerGroup,
 } from './connectionLayers.ts';
@@ -372,6 +373,7 @@ export function LayerSettingsScreen({ target }: { target: LayerTarget }) {
           editor={listEditor}
           values={values}
           onChange={onChange}
+          onReset={() => onUseDefault(['toolbarItems'])}
           keys={{
             library: app.keys,
             onLibrary: (keys) => {
@@ -400,7 +402,7 @@ export function LayerSettingsScreen({ target }: { target: LayerTarget }) {
                 data-action="confirm-reset-layer"
                 onClick={() => {
                   setConfirmReset(false);
-                  mutate(() => ({}));
+                  mutate(withoutOwnValues);
                 }}
               >
                 {t.reset}

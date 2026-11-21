@@ -2,7 +2,7 @@
  * Settings per connection (SET-1): which connections keep their own session settings, what
  * they change, and how that reads in one line. The layers are
  * built-in ← app defaults (Settings) ← server defaults ← connection; a connection "has its
- * own value" for a key when that key is stored for it (as in the session's "Custom for this
+ * own value" for a key when that key is stored for it (as in the session's "This
  * connection"), whatever the value.
  *
  * Pure: no React, DOM or storage. Labels are read at call time (app language).
@@ -30,6 +30,7 @@ import {
 } from './settingsCatalog.ts';
 import {
   mergeSessionSettings,
+  removeConnectionKeys,
   sanitizeSessionPatch,
   type SessionSettingsPatch,
 } from './settingsModel.ts';
@@ -92,6 +93,14 @@ export function ownKeys(patch: unknown): SettingKey[] {
 export function ownPatch(patch: unknown): SessionSettingsPatch {
   const clean = sanitizeSessionPatch(patch) as Record<string, unknown>;
   return Object.fromEntries(ownKeys(clean).map((k) => [k, clean[k]])) as SessionSettingsPatch;
+}
+
+/**
+ * "Reset all": a stored patch without its own values. Legacy fields (an old key bar layout,
+ * saved combos) have no control to restore them from, so they are kept.
+ */
+export function withoutOwnValues(patch: unknown): SessionSettingsPatch {
+  return removeConnectionKeys(patch, ownKeys(patch));
 }
 
 /** What a layer inherits: built-in ← app defaults ← (server defaults). */
