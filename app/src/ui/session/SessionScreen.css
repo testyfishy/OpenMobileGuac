@@ -1984,3 +1984,58 @@
   border: 1px solid var(--_border);
   border-radius: 999px;
 }
+
+/* Session options › Gestures: one row per gesture (picture, name, what it does, switch). */
+.omg-gopt-area__title {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--_muted);
+}
+
+.omg-gopt {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--_border);
+  border-radius: var(--_radius);
+  min-width: 0;
+}
+
+.omg-gopt__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.omg-gopt__main {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.omg-gopt__main .omg-switch-row {
+  margin-top: 0;
+  padding: 4px 0;
+  border: 0;
+}
+
+.omg-gopt__text {
+  padding: 4px 0;
+}
+
+.omg-gopt__always {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 7px;
+  border: 1px solid var(--_border);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--_muted);
+  vertical-align: 1px;
+}
+
+.omg-gopt__why {
+  font-style: italic;
+}

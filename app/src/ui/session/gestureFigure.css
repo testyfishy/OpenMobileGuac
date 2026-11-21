@@ -1,0 +1,442 @@
+/*
+ * Gesture pictures (GestureFigure.tsx). Colours come from the app theme tokens, with
+ * fallbacks so the session folder also works standalone; they follow light and dark themes.
+ * Every animated element starts from a readable resting pose, which is what stays on screen
+ * under prefers-reduced-motion.
+ */
+
+.omg-gesture-fig {
+  --gf-ink: var(--omg-text-muted, #8a93a3);
+  --gf-accent: var(--omg-accent, #4c8dff);
+  --gf-paper: var(--omg-surface, #ffffff);
+  --gf-loop: 2.4s;
+  flex: none;
+  display: block;
+  width: 56px;
+  height: 56px;
+  overflow: visible;
+}
+
+.omg-gesture-fig .gf-frame {
+  fill: none;
+  stroke: var(--gf-ink);
+  stroke-width: 1.5;
+  opacity: 0.7;
+}
+
+.omg-gesture-fig .gf-screen {
+  fill: var(--gf-ink);
+  opacity: 0.12;
+}
+
+.omg-gesture-fig .gf-dot {
+  fill: var(--gf-accent);
+  stroke: var(--gf-paper);
+  stroke-width: 1;
+}
+
+.omg-gesture-fig .gf-ring {
+  fill: none;
+  stroke: var(--gf-accent);
+  stroke-width: 1.5;
+  opacity: 0;
+}
+
+.omg-gesture-fig .gf-progress {
+  fill: none;
+  stroke: var(--gf-accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 50.3;
+  stroke-dashoffset: 0;
+  opacity: 0.8;
+}
+
+.omg-gesture-fig .gf-trail {
+  fill: none;
+  stroke: var(--gf-accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 2.5 2.5;
+  opacity: 0.55;
+}
+
+.omg-gesture-fig .gf-kb,
+.omg-gesture-fig .gf-bar {
+  fill: var(--gf-ink);
+  opacity: 0.35;
+}
+
+.omg-gesture-fig .gf-key,
+.omg-gesture-fig .gf-line {
+  fill: var(--gf-ink);
+  opacity: 0.6;
+}
+
+.omg-gesture-fig .gf-key--on {
+  fill: var(--gf-accent);
+  opacity: 0.8;
+}
+
+.omg-gesture-fig .gf-content {
+  fill: var(--gf-ink);
+  opacity: 0.45;
+}
+
+.omg-gesture-fig .gf-popup {
+  fill: var(--gf-paper);
+  stroke: var(--gf-ink);
+  stroke-width: 1;
+}
+
+/* Animated elements scale about their own centre. */
+.omg-gesture-fig [class*='gf-a-'] {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation-duration: var(--gf-loop);
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+
+.omg-gesture-fig .gf-a-tap {
+  animation-name: gf-tap;
+}
+.omg-gesture-fig .gf-a-ring {
+  animation-name: gf-ring;
+}
+.omg-gesture-fig .gf-a-tap2 {
+  animation-name: gf-tap2;
+}
+.omg-gesture-fig .gf-a-ring2 {
+  animation-name: gf-ring2;
+}
+.omg-gesture-fig .gf-a-hold {
+  animation-name: gf-hold;
+}
+.omg-gesture-fig .gf-a-progress {
+  animation-name: gf-progress;
+  transform: rotate(-90deg);
+}
+.omg-gesture-fig .gf-a-move {
+  animation-name: gf-move;
+}
+.omg-gesture-fig .gf-a-tapfirst {
+  animation-name: gf-tapfirst;
+}
+.omg-gesture-fig .gf-a-move-late {
+  animation-name: gf-move-late;
+  opacity: 0;
+}
+.omg-gesture-fig .gf-a-zoom {
+  animation-name: gf-zoom;
+}
+.omg-gesture-fig .gf-a-unzoom {
+  animation-name: gf-unzoom;
+}
+.omg-gesture-fig .gf-a-kbhide {
+  animation-name: gf-kbhide;
+}
+.omg-gesture-fig .gf-a-kbhide-late {
+  animation-name: gf-kbhide-late;
+}
+.omg-gesture-fig .gf-a-popup {
+  animation-name: gf-popup;
+}
+.omg-gesture-fig .gf-a-sheetdown {
+  animation-name: gf-sheetdown;
+}
+
+@keyframes gf-tap {
+  0% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  8%,
+  28% {
+    opacity: 1;
+    transform: scale(0.8);
+  }
+  40%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+}
+
+@keyframes gf-ring {
+  0%,
+  10% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  12% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  45%,
+  100% {
+    opacity: 0;
+    transform: scale(3);
+  }
+}
+
+@keyframes gf-tap2 {
+  0% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  6%,
+  13% {
+    opacity: 1;
+    transform: scale(0.8);
+  }
+  18% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  24%,
+  34% {
+    opacity: 1;
+    transform: scale(0.8);
+  }
+  44%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+}
+
+@keyframes gf-ring2 {
+  0%,
+  6% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  7% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  21% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+  22%,
+  24% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  25% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  45%,
+  100% {
+    opacity: 0;
+    transform: scale(3);
+  }
+}
+
+@keyframes gf-hold {
+  0% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  8%,
+  75% {
+    opacity: 1;
+    transform: scale(0.8);
+  }
+  85%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+}
+
+@keyframes gf-progress {
+  0%,
+  8% {
+    stroke-dashoffset: 50.3;
+    opacity: 0.8;
+  }
+  55%,
+  75% {
+    stroke-dashoffset: 0;
+    opacity: 0.8;
+  }
+  85%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes gf-move {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(var(--dx, 0), var(--dy, 0));
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx, 0), var(--dy, 0));
+  }
+}
+
+@keyframes gf-tapfirst {
+  0% {
+    opacity: 0;
+  }
+  6%,
+  20% {
+    opacity: 1;
+  }
+  26%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes gf-move-late {
+  0%,
+  36% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  44% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+  84% {
+    opacity: 1;
+    transform: translate(var(--dx, 0), var(--dy, 0));
+  }
+  92%,
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx, 0), var(--dy, 0));
+  }
+}
+
+@keyframes gf-zoom {
+  0%,
+  10% {
+    transform: scale(1);
+  }
+  70%,
+  85% {
+    transform: scale(1.9);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes gf-unzoom {
+  0%,
+  36% {
+    transform: scale(1.6);
+  }
+  52%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes gf-kbhide {
+  0%,
+  28% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  48%,
+  86% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes gf-kbhide-late {
+  0%,
+  40% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  70%,
+  88% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes gf-popup {
+  0%,
+  52% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  62%,
+  90% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+@keyframes gf-sheetdown {
+  0%,
+  10% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  70% {
+    opacity: 0.2;
+    transform: translateY(16px);
+  }
+  80%,
+  90% {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Reduced motion: no animation at all (not the near-zero duration the app sets globally,
+   which would flicker); the resting pose shows where the fingers go. */
+@media (prefers-reduced-motion: reduce) {
+  .omg-gesture-fig *,
+  .omg-gesture-fig [class*='gf-a-'] {
+    animation: none !important;
+  }
+
+  .omg-gesture-fig .gf-a-move-late {
+    opacity: 1;
+  }
+
+  .omg-gesture-fig .gf-a-tapfirst {
+    opacity: 0;
+  }
+}

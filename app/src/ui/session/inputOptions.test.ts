@@ -85,13 +85,65 @@ describe('input settings (PTR-7)', () => {
       directPan: 'drag',
       twoFingerPan: 'viewport',
       horizontalScroll: false,
+      pinchZoom: true,
+      twoFingerTap: true,
+      threeFingerTap: true,
+      threeFingerDoubleTap: true,
     });
     expect(gestureConfigFromSettings({ ...BASE, longPressMs: 400, tapSlopPx: 20 })).toEqual({
       longPressMs: 400,
+      longPress: true,
       doubleTapWindowMs: 300,
       tapSlopPx: 20,
       tapMaxMs: 200,
       multiTouchSlopPx: 32,
+    });
+  });
+
+  it('gesture switches: on by default, kept when off, repaired when not boolean', () => {
+    const keys = [
+      'gestureLongPress',
+      'gestureTwoFingerTap',
+      'gestureThreeFingerTap',
+      'gestureZoomReset',
+      'gesturePinchZoom',
+      'sheetSwipeClose',
+      'keySetLongPress',
+      'pasteLongPress',
+    ] as const;
+    const d = normalizeSessionSettings(BASE);
+    for (const k of keys) expect(d[k], k).toBe(true);
+    const off = normalizeSessionSettings({
+      ...BASE,
+      ...Object.fromEntries(keys.map((k) => [k, false])),
+    });
+    for (const k of keys) expect(off[k], k).toBe(false);
+    const junk = normalizeSessionSettings({
+      ...BASE,
+      ...(Object.fromEntries(keys.map((k) => [k, 'no'])) as Partial<SessionSettings>),
+    });
+    for (const k of keys) expect(junk[k], k).toBe(true);
+    expect(sanitizeSessionSettingsPatch({ gesturePinchZoom: false, sheetSwipeClose: 0 })).toEqual({
+      gesturePinchZoom: false,
+      sheetSwipeClose: true,
+    });
+  });
+
+  it('gesture switches reach the recogniser and the pointer model', () => {
+    const s = {
+      ...BASE,
+      gestureLongPress: false,
+      gestureTwoFingerTap: false,
+      gestureThreeFingerTap: false,
+      gestureZoomReset: false,
+      gesturePinchZoom: false,
+    };
+    expect(gestureConfigFromSettings(s).longPress).toBe(false);
+    expect(pointerConfigFromSettings(s)).toMatchObject({
+      pinchZoom: false,
+      twoFingerTap: false,
+      threeFingerTap: false,
+      threeFingerDoubleTap: false,
     });
   });
 

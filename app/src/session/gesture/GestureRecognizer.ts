@@ -18,7 +18,8 @@
  * - **Long press** fires while held (`long-press` start) once `longPressMs` elapses with no
  *   slop exit. It is then closed by exactly one of: `long-press` end (released in place),
  *   `long-press` end with `cancelled` (second finger / cancel), or a `long-press-drag` start
- *   (moved out of slop).
+ *   (moved out of slop). With `longPress` off the timer never runs: a press held in place
+ *   for any time is a tap on release, and moving out of slop is a pan.
  * - **Double tap**: a second tap landing within `doubleTapSlopPx` of the first and within
  *   `doubleTapWindowMs` of the first release. A `double-tap` always follows the gesture(s)
  *   for the first tap, so consumers treat it as "one more click".
@@ -164,6 +165,12 @@ export interface GestureConfig {
   readonly doubleTapSlopPx: number;
   /** Hold time for a long press; a stationary release before it is a tap. */
   readonly longPressMs: number;
+  /**
+   * Recognise long presses. Off: a finger held in place never becomes a long press; it is a
+   * tap when it lifts within the slop and a pan when it moves out of it. `longPressMs` still
+   * bounds multi-finger taps.
+   */
+  readonly longPress: boolean;
   /** Tap-and-a-half drag: press on the first tap's release, release late (trackpad). */
   readonly tapDrag: boolean;
   /** Lower bound of the adaptive tap-drag window. */
@@ -188,6 +195,7 @@ export const DEFAULT_GESTURE_CONFIG: GestureConfig = {
   doubleTapWindowMs: 300,
   doubleTapSlopPx: 40,
   longPressMs: 500,
+  longPress: true,
   tapDrag: false,
   tapDragMinWindowMs: 150,
   tapDragInitialWindowMs: 180,
@@ -336,7 +344,7 @@ export class GestureRecognizer {
       const track = this.tracks.get(s.id);
       if (track) {
         if (s.secondTap && this.prevTap?.pending) consider(track.downTime + c.tapMaxMs);
-        consider(track.downTime + c.longPressMs);
+        if (c.longPress) consider(track.downTime + c.longPressMs);
       }
     } else if (s.kind === 'idle') {
       if (this.prevTap?.pending) consider(this.prevTap.upTime + this.tapDragWindowMs());
@@ -420,7 +428,7 @@ export class GestureRecognizer {
         this.emitDrag(out, 'double-tap-drag', 'start', track, track.downTime + c.tapMaxMs);
         return;
       }
-      if (t >= track.downTime + c.longPressMs) {
+      if (c.longPress && t >= track.downTime + c.longPressMs) {
         const at = track.downTime + c.longPressMs;
         this.flushMulti(out, at);
         if (this.prevTap?.pending) this.endPendingTap(out, at);
@@ -797,7 +805,8 @@ export class GestureRecognizer {
     const s = this.state;
     switch (s.kind) {
       case 'single': {
-        // Still 'single' means: within slop and released before the long press fired.
+        // Still 'single' means: within slop and released before the long press fired (or
+        // with long presses off, released in place after any hold).
         this.tracks.delete(e.id);
         this.state = IDLE;
         this.flushMulti(out, t);

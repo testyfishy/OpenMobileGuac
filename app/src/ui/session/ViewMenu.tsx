@@ -12,6 +12,8 @@ export interface ViewMenuProps {
   readonly onZoom: (factor: number) => void;
   readonly onMatchDeviceSize: (on: boolean) => void;
   readonly onClose: () => void;
+  /** The three-finger double tap resets the zoom here (shows the tip); default true. */
+  readonly zoomResetGesture?: boolean;
 }
 
 /** DSP-1 view modes, reset zoom (DSP-2) and "match device size" (DSP-4). */
@@ -24,6 +26,7 @@ export function ViewMenu({
   onZoom,
   onMatchDeviceSize,
   onClose,
+  zoomResetGesture = true,
 }: ViewMenuProps) {
   const t = sessionStrings.view;
   const fit = sessionStrings.fitModes;
@@ -62,7 +65,7 @@ export function ViewMenu({
           {t.resetZoom}
         </ChromeButton>
       </div>
-      <p className="omg-muted">{t.tip}</p>
+      {zoomResetGesture && <p className="omg-muted">{t.tip}</p>}
       <ChromeButton
         role="switch"
         aria-checked={matchDeviceSize}

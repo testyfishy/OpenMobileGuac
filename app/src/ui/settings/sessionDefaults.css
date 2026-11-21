@@ -123,3 +123,89 @@
   font-weight: 600;
   min-width: 1.5rem;
 }
+
+/* Settings › Gestures: one row per gesture (picture, name, what it does, switch). */
+.gesture-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gesture-area-title {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--omg-text-muted);
+}
+
+.gesture-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--omg-border);
+  border-radius: var(--omg-radius);
+  min-width: 0;
+}
+
+.gesture-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.gesture-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.gesture-main .toggle-row {
+  align-items: flex-start;
+}
+
+.gesture-main .toggle-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gesture-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-height: var(--omg-touch);
+  justify-content: center;
+  overflow-wrap: anywhere;
+}
+
+.gesture-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  font-weight: 600;
+}
+
+.gesture-always {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.0625rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--omg-border);
+  color: var(--omg-text-muted);
+}
+
+.gesture-why {
+  font-style: italic;
+}
+
+.gesture-warning {
+  color: var(--omg-warning, var(--omg-text-muted));
+}
+
+/* The changed-marker bar sits at the row's inner edge. */
+.gesture-row .setting-changed::before {
+  left: -0.5rem;
+}

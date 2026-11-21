@@ -276,8 +276,7 @@ export const sessionEs: SessionStrings = {
     sections: {
       toolbar: 'Barra de herramientas',
       pointer: 'Puntero',
-      scrolling: 'Desplazamiento',
-      timing: 'Tiempos táctiles',
+      gestures: 'Gestos',
       keyboard: 'Teclado',
       display: 'Pantalla',
       clipboard: 'Portapapeles',
@@ -286,10 +285,10 @@ export const sessionEs: SessionStrings = {
     },
     sectionHints: {
       toolbar: 'Dónde están los botones de la sesión y cuáles aparecen en la barra.',
-      pointer: 'Cómo los toques mueven el puntero remoto y hacen clic.',
-      scrolling: 'Gestos con dos dedos.',
-      timing: 'Cuánto puede durar una pulsación y cuánto puede moverse un toque.',
-      keyboard: 'Teclado en pantalla, conjuntos de teclas y cómo ocultar el teclado.',
+      pointer: 'Modo del puntero, velocidad del trackpad y cursor.',
+      gestures:
+        'Todos los gestos táctiles, qué hacen y su interruptor. Los gestos del escritorio valen en los modos táctil directo y trackpad; en el modo de paso táctil cada dedo va directo al remoto, que interpreta sus propios gestos.',
+      keyboard: 'Teclado en pantalla, escritura y conjuntos de teclas.',
       display: 'Cómo se ajusta el escritorio remoto a esta pantalla.',
       clipboard: 'Copiar y pegar entre este dispositivo y el remoto.',
       files: 'Qué ocurre cuando el remoto envía un archivo.',
@@ -405,6 +404,91 @@ export const sessionEs: SessionStrings = {
     audioMutedHint: 'También se puede cambiar en la sesión (Más › Sonido)',
     combosSummary: (n: number) => `${n} ${plural(n, 'combinación', 'combinaciones')}`,
     pointerSpeedHint: 'Modo trackpad',
+  },
+
+  gestures: {
+    areas: {
+      desktop: 'En el escritorio remoto',
+      chrome: 'En la barra de teclas, la barra de herramientas y los paneles',
+    },
+    alwaysOn: 'Siempre activo',
+    holdTime: 'Tiempo de pulsación',
+    doubleTapTime: 'Tiempo entre los toques',
+    tapToleranceHint: 'Cuánto puede moverse un dedo y seguir siendo un toque.',
+    noTrackpadDrag:
+      'Si desactivas esto y Toque y medio, el modo trackpad no puede arrastrar con un dedo.',
+    items: {
+      tap: {
+        name: 'Toque',
+        desc: 'Clic izquierdo. Táctil directo: donde tocas. Trackpad: en el puntero.',
+      },
+      doubleTap: {
+        name: 'Doble toque',
+        desc: 'Doble clic, en el punto del primer toque.',
+      },
+      longPress: {
+        name: 'Mantener pulsado',
+        desc: 'Táctil directo: clic derecho al levantar el dedo; desliza para arrastrar. Trackpad: mantiene pulsado el botón izquierdo, desliza para arrastrar. Desactivado: mantener es un toque normal.',
+      },
+      drag: {
+        name: 'Arrastrar con un dedo',
+        desc: 'Táctil directo: mueve la vista con zoom o arrastra en el remoto. Trackpad: mueve el puntero.',
+      },
+      tapDrag: {
+        name: 'Toque y medio (trackpad)',
+        desc: 'Toca, vuelve a tocar y desliza: arrastra con el botón izquierdo pulsado. Desactivado: cada toque es un clic inmediato. No se usa en táctil directo.',
+      },
+      twoFingerTap: {
+        name: 'Toque con dos dedos',
+        desc: 'Clic derecho, entre los dedos (táctil directo) o en el puntero (trackpad). Un segundo toque rápido se ignora.',
+      },
+      threeFingerTap: {
+        name: 'Toque con tres dedos',
+        desc: 'Clic central (en Linux suele pegar). Espera un momento por si sigue otro.',
+      },
+      zoomReset: {
+        name: 'Doble toque con tres dedos',
+        desc: 'Restablece el zoom al modo de vista.',
+      },
+      twoFingerDrag: {
+        name: 'Arrastrar con dos dedos',
+        desc: 'Desplaza el remoto, bajo los dedos (táctil directo) o en el puntero (trackpad), o mueve la vista.',
+      },
+      pinch: {
+        name: 'Pellizcar para hacer zoom',
+        desc: 'Separa o junta dos dedos para hacer zoom en la vista. Desactivado: los pellizcos no hacen nada (el menú Vista sigue haciendo zoom).',
+      },
+      tapKeyboard: {
+        name: 'Tocar mientras escribes',
+        desc: 'Un toque en el escritorio con el teclado en pantalla abierto puede ocultarlo.',
+      },
+      keyBarDown: {
+        name: 'Deslizar hacia abajo en la barra de teclas',
+        desc: 'Oculta el teclado; con el teclado oculto, oculta la barra de teclas.',
+      },
+      keyBarSide: {
+        name: 'Deslizar de lado en la barra de teclas',
+        desc: 'Cambia al conjunto de teclas siguiente o anterior, cuando la fila está desplazada hasta el final.',
+      },
+      holdSet: {
+        name: 'Mantener el botón de conjunto',
+        desc: 'Abre la lista de conjuntos de teclas.',
+      },
+      holdPaste: {
+        name: 'Mantener Pegar',
+        desc: 'Escribe el portapapeles del dispositivo como pulsaciones, para campos que no dejan pegar.',
+      },
+      sheetSwipe: {
+        name: 'Deslizar un panel hacia abajo',
+        desc: 'Arrastra hacia abajo la cabecera de un panel de la sesión (Más, opciones, teclas…) para cerrarlo. El botón de cerrar y un toque fuera siempre funcionan.',
+      },
+    },
+    why: {
+      tap: 'El clic básico.',
+      doubleTap: 'Dos toques son dos clics de todos modos.',
+      drag: 'Mueve la vista y el puntero del trackpad.',
+      twoFingerDrag: 'Es la forma de desplazarse; elige abajo qué hace.',
+    },
   },
 
   share: {

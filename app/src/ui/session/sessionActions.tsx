@@ -56,6 +56,8 @@ export interface SessionActionContext {
   readonly showCtrlAltDel: boolean;
   readonly canMinimize: boolean;
   readonly pasteHint: string;
+  /** Holding Paste types the clipboard instead (`pasteLongPress`); default on. */
+  readonly pasteLongPress?: boolean;
   readonly runningTransfers: number;
   readonly onTogglePointerMode: () => void;
   readonly onToggleKeyboard: () => void;
@@ -126,10 +128,14 @@ export function buildSessionActions(c: SessionActionContext): SessionActions {
       name: c.keyBarVisible ? t.extraKeysOn : t.extraKeysOff,
       pressed: c.keyBarVisible,
     }),
-    paste: a('paste', <IconPaste />, c.onPaste, {
-      name: t.pasteLongPress(c.pasteHint),
-      onLongPress: c.onTypeClipboard,
-    }),
+    paste: a(
+      'paste',
+      <IconPaste />,
+      c.onPaste,
+      c.pasteLongPress === false
+        ? { name: c.pasteHint }
+        : { name: t.pasteLongPress(c.pasteHint), onLongPress: c.onTypeClipboard },
+    ),
     view: a('view', <IconView />, c.onView, { name: t.viewLabel, opensSheet: true }),
     'zoom-reset': a('zoom-reset', <IconZoomReset />, c.onZoomReset),
     'zoom-in': a('zoom-in', <IconZoomIn />, () => c.onZoom(1.25)),

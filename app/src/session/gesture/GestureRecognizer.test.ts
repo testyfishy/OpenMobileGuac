@@ -974,3 +974,81 @@ describe('GestureRecognizer: payloads', () => {
     ]);
   });
 });
+
+describe('GestureRecognizer: long press switched off', () => {
+  const OFF = { longPress: false };
+
+  it('a hold released in place is a tap, at any length', () => {
+    const { out, r } = run([['d', 1, 100, 100, 0]], OFF);
+    expect(r.nextDeadline()).toBeNull();
+    const more = run(
+      [
+        ['t', 5000],
+        ['u', 1, 101, 100, 5000],
+      ],
+      OFF,
+      r,
+    ).out;
+    expect(names([...out, ...more])).toEqual(['tap']);
+  });
+
+  it('a hold then a move is a pan, never a long-press drag', () => {
+    const { out } = run(
+      [
+        ['d', 1, 100, 100, 0],
+        ['t', 2000],
+        ['m', 1, 140, 100, 2010],
+        ['u', 1, 160, 100, 2020],
+      ],
+      OFF,
+    );
+    expect(names(out)).toEqual(['pan:start', 'pan:move', 'pan:move', 'pan:end']);
+  });
+
+  it('still recognises two-finger taps within the long-press time', () => {
+    const { out } = run(
+      [
+        ['d', 1, 100, 100, 0],
+        ['d', 2, 160, 100, 10],
+        ['u', 1, 100, 100, 80],
+        ['u', 2, 160, 100, 90],
+      ],
+      OFF,
+    );
+    expect(names(out)).toEqual(['two-finger-tap']);
+  });
+
+  it('trackpad tap-and-a-half still drags with long presses off', () => {
+    const { out } = run(
+      [
+        ['d', 1, 100, 100, 0],
+        ['u', 1, 100, 100, 60],
+        ['d', 2, 102, 100, 120],
+        ['m', 2, 140, 100, 160],
+        ['u', 2, 140, 100, 200],
+      ],
+      { ...OFF, ...TAP_DRAG },
+    );
+    expect(names(out)).toEqual([
+      'pending-tap:start',
+      'double-tap-drag:start',
+      'double-tap-drag:move',
+      'double-tap-drag:end',
+    ]);
+  });
+
+  it('switching it back on restores the default', () => {
+    const r = new GestureRecognizer(OFF);
+    r.setConfig({ longPress: true });
+    expect(r.getConfig().longPress).toBe(C.longPress);
+    const { out } = run(
+      [
+        ['d', 1, 100, 100, 0],
+        ['t', C.longPressMs],
+      ],
+      {},
+      r,
+    );
+    expect(names(out)).toEqual(['long-press:start']);
+  });
+});

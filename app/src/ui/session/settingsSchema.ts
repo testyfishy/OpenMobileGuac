@@ -18,6 +18,7 @@ import {
   type ResolvedSessionSettings,
 } from './settings.ts';
 import { sessionStrings } from './sessionStrings.ts';
+import { gestureForKey, gestureKeys, type GestureInfo } from './gestures.ts';
 import {
   AUDIO_MODES,
   QUALITIES,
@@ -43,8 +44,7 @@ export type SettingKey = Exclude<
 export const SETTING_SECTIONS = [
   'toolbar',
   'pointer',
-  'scrolling',
-  'timing',
+  'gestures',
   'keyboard',
   'display',
   'clipboard',
@@ -179,12 +179,6 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     () => S().options.viewOnly,
     () => S().options.viewOnlyHint,
   ),
-  sw(
-    'terminalPinchFont',
-    'pointer',
-    () => S().options.terminalPinchFont,
-    () => S().options.terminalPinchFontHint,
-  ),
   {
     key: 'pointerMode',
     section: 'pointer',
@@ -201,21 +195,6 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     () => S().input.acceleration,
     (v) => (v === 0 ? S().input.off : times(v)),
   ),
-  sw(
-    'tapDrag',
-    'pointer',
-    () => S().input.tapDrag,
-    (s) => (s.tapDrag ? S().input.tapDragOn : S().input.tapDragOff),
-  ),
-  {
-    key: 'directOneFinger',
-    section: 'pointer',
-    control: 'choice',
-    options: ['pan', 'drag'],
-    label: () => S().input.directOneFinger,
-    hint: () => S().input.fitsAlwaysDrags,
-    optionLabel: (v) => (v === 'drag' ? S().input.dragRemote : S().input.panView),
-  },
   sw(
     'pointerLock',
     'pointer',
@@ -235,10 +214,58 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     () => S().options.hapticsHint,
   ),
 
-  // ---- Scrolling
+  // ---- Gestures (rendered as gesture rows: see gestures.ts)
+  range(
+    'tapSlopPx',
+    'gestures',
+    () => S().input.tapTolerance,
+    (v) => `${Math.round(v)} px`,
+    () => S().gestures.tapToleranceHint,
+  ),
+  range('doubleTapWindowMs', 'gestures', () => S().gestures.doubleTapTime, ms),
+  sw(
+    'gestureLongPress',
+    'gestures',
+    () => S().gestures.items.longPress.name,
+    () => S().gestures.items.longPress.desc,
+  ),
+  range('longPressMs', 'gestures', () => S().gestures.holdTime, ms),
+  {
+    key: 'directOneFinger',
+    section: 'gestures',
+    control: 'choice',
+    options: ['pan', 'drag'],
+    label: () => S().input.directOneFinger,
+    hint: () => S().input.fitsAlwaysDrags,
+    optionLabel: (v) => (v === 'drag' ? S().input.dragRemote : S().input.panView),
+  },
+  sw(
+    'tapDrag',
+    'gestures',
+    () => S().input.tapDrag,
+    (s) => (s.tapDrag ? S().input.tapDragOn : S().input.tapDragOff),
+  ),
+  sw(
+    'gestureTwoFingerTap',
+    'gestures',
+    () => S().gestures.items.twoFingerTap.name,
+    () => S().gestures.items.twoFingerTap.desc,
+  ),
+  sw(
+    'gestureThreeFingerTap',
+    'gestures',
+    () => S().gestures.items.threeFingerTap.name,
+    () => S().gestures.items.threeFingerTap.desc,
+  ),
+  sw(
+    'gestureZoomReset',
+    'gestures',
+    () => S().gestures.items.zoomReset.name,
+    () => S().gestures.items.zoomReset.desc,
+  ),
   {
     key: 'twoFingerDrag',
-    section: 'scrolling',
+    section: 'gestures',
     control: 'choice',
     options: ['scroll', 'pan'],
     label: () => S().input.twoFingerDrag,
@@ -246,25 +273,66 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
   },
   sw(
     'naturalScroll',
-    'scrolling',
+    'gestures',
     () => S().input.naturalScroll,
     () => S().input.naturalScrollHint,
   ),
   sw(
     'horizontalScroll',
-    'scrolling',
+    'gestures',
     () => S().input.horizontalScroll,
     () => S().input.horizontalScrollHint,
   ),
-
-  // ---- Timing
-  range('longPressMs', 'timing', () => S().input.longPress, ms),
-  range('doubleTapWindowMs', 'timing', () => S().input.doubleTap, ms),
-  range(
-    'tapSlopPx',
-    'timing',
-    () => S().input.tapTolerance,
-    (v) => `${Math.round(v)} px`,
+  sw(
+    'gesturePinchZoom',
+    'gestures',
+    () => S().gestures.items.pinch.name,
+    () => S().gestures.items.pinch.desc,
+  ),
+  sw(
+    'terminalPinchFont',
+    'gestures',
+    () => S().options.terminalPinchFont,
+    () => S().options.terminalPinchFontHint,
+  ),
+  {
+    key: 'tapDismissKeyboard',
+    section: 'gestures',
+    control: 'choice',
+    options: TAP_DISMISS_MODES,
+    label: () => S().options.tapDismissKeyboard,
+    hint: () => S().options.tapDismissKeyboardHint,
+    optionLabel: (v) => S().options.tapDismissModes[v as TapDismissMode] ?? v,
+  },
+  sw(
+    'keyBarSwipeDismiss',
+    'gestures',
+    () => S().options.keyBarSwipeDismiss,
+    () => S().options.keyBarSwipeDismissHint,
+  ),
+  sw(
+    'keySetSwipe',
+    'gestures',
+    () => S().options.keySetSwipe,
+    () => S().options.keySetSwipeHint,
+  ),
+  sw(
+    'keySetLongPress',
+    'gestures',
+    () => S().gestures.items.holdSet.name,
+    () => S().gestures.items.holdSet.desc,
+  ),
+  sw(
+    'pasteLongPress',
+    'gestures',
+    () => S().gestures.items.holdPaste.name,
+    () => S().gestures.items.holdPaste.desc,
+  ),
+  sw(
+    'sheetSwipeClose',
+    'gestures',
+    () => S().gestures.items.sheetSwipe.name,
+    () => S().gestures.items.sheetSwipe.desc,
   ),
 
   // ---- Keyboard
@@ -293,21 +361,6 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     () => S().input.textInputBarHint,
   ),
   {
-    key: 'tapDismissKeyboard',
-    section: 'keyboard',
-    control: 'choice',
-    options: TAP_DISMISS_MODES,
-    label: () => S().options.tapDismissKeyboard,
-    hint: () => S().options.tapDismissKeyboardHint,
-    optionLabel: (v) => S().options.tapDismissModes[v as TapDismissMode] ?? v,
-  },
-  sw(
-    'keyBarSwipeDismiss',
-    'keyboard',
-    () => S().options.keyBarSwipeDismiss,
-    () => S().options.keyBarSwipeDismissHint,
-  ),
-  {
     key: 'keySet',
     section: 'keyboard',
     control: 'list',
@@ -316,12 +369,6 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     hint: () => S().options.keySetHint,
     summary: (s, ctx) => ctx.keySetName(s.keySet),
   },
-  sw(
-    'keySetSwipe',
-    'keyboard',
-    () => S().options.keySetSwipe,
-    () => S().options.keySetSwipeHint,
-  ),
 
   // ---- Display
   {
@@ -460,7 +507,9 @@ export function matchesQuery(
 ): boolean {
   const q = fold(query.trim());
   if (q === '') return true;
+  const g = gestureForKey(d.key);
   const hay = [
+    ...(g ? gestureText(g) : []),
     d.label(),
     d.hint?.(s) ?? '',
     sessionStrings.options.sections[d.section],
@@ -469,6 +518,28 @@ export function matchesQuery(
     .map(fold)
     .join(' ');
   return q.split(/\s+/).every((w) => hay.includes(w));
+}
+
+function gestureText(g: GestureInfo): string[] {
+  const t = sessionStrings.gestures;
+  return [t.items[g.id].name, t.items[g.id].desc];
+}
+
+/** A gesture row matches when its own text or any of its settings matches. */
+export function matchesGesture(g: GestureInfo, query: string, s: ResolvedSessionSettings): boolean {
+  const q = fold(query.trim());
+  if (q === '') return true;
+  const hay = [...gestureText(g), sessionStrings.options.sections.gestures].map(fold).join(' ');
+  if (q.split(/\s+/).every((w) => hay.includes(w))) return true;
+  return gestureKeys(g).some((k) => {
+    const d = SETTING_DESCRIPTORS.find((x) => x.key === k);
+    return d !== undefined && matchesQuery(d, query, s);
+  });
+}
+
+/** The descriptor of a setting key (every key has one). */
+export function descriptorOf(key: SettingKey): SettingDescriptor | undefined {
+  return SETTING_DESCRIPTORS.find((d) => d.key === key);
 }
 
 function fold(s: string): string {

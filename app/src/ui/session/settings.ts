@@ -137,6 +137,24 @@ export interface SessionSettings {
   tapDismissKeyboard?: TapDismissMode;
   /** Swiping down on the extra key bar hides the keyboard (or the key bar). */
   keyBarSwipeDismiss?: boolean;
+
+  // ---- Gesture switches (Settings › Gestures; optional for compatibility, all on by default)
+  /** Touch and hold: right click (direct) or drag (trackpad). Off: a hold is a tap. */
+  gestureLongPress?: boolean;
+  /** Two-finger tap = right click. */
+  gestureTwoFingerTap?: boolean;
+  /** Three-finger tap = middle click. */
+  gestureThreeFingerTap?: boolean;
+  /** Three-finger double tap = reset the zoom. */
+  gestureZoomReset?: boolean;
+  /** Pinch zooms the view (the terminal font option is separate). */
+  gesturePinchZoom?: boolean;
+  /** A downward swipe on a session panel's header closes it. */
+  sheetSwipeClose?: boolean;
+  /** Holding the key bar's set button opens the list of sets. */
+  keySetLongPress?: boolean;
+  /** Holding the toolbar's Paste button types the clipboard as keystrokes. */
+  pasteLongPress?: boolean;
 }
 
 export type TapDismissMode = 'off' | 'hide-click' | 'hide-only';
@@ -197,6 +215,14 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   toolbarAutoHide: true,
   tapDismissKeyboard: 'off',
   keyBarSwipeDismiss: true,
+  gestureLongPress: true,
+  gestureTwoFingerTap: true,
+  gestureThreeFingerTap: true,
+  gestureZoomReset: true,
+  gesturePinchZoom: true,
+  sheetSwipeClose: true,
+  keySetLongPress: true,
+  pasteLongPress: true,
   keySet: GENERAL_SET_ID,
   keySetSwipe: false,
   remoteFiles: 'ask',
@@ -321,6 +347,14 @@ export function normalizeSessionSettings(
     toolbarAutoHide: bool(raw['toolbarAutoHide'], d.toolbarAutoHide),
     tapDismissKeyboard: tapDismiss(raw['tapDismissKeyboard']),
     keyBarSwipeDismiss: bool(raw['keyBarSwipeDismiss'], d.keyBarSwipeDismiss),
+    gestureLongPress: bool(raw['gestureLongPress'], d.gestureLongPress),
+    gestureTwoFingerTap: bool(raw['gestureTwoFingerTap'], d.gestureTwoFingerTap),
+    gestureThreeFingerTap: bool(raw['gestureThreeFingerTap'], d.gestureThreeFingerTap),
+    gestureZoomReset: bool(raw['gestureZoomReset'], d.gestureZoomReset),
+    gesturePinchZoom: bool(raw['gesturePinchZoom'], d.gesturePinchZoom),
+    sheetSwipeClose: bool(raw['sheetSwipeClose'], d.sheetSwipeClose),
+    keySetLongPress: bool(raw['keySetLongPress'], d.keySetLongPress),
+    pasteLongPress: bool(raw['pasteLongPress'], d.pasteLongPress),
     keySet: isKeySetId(raw['keySet']) ? raw['keySet'] : d.keySet,
     keySetSwipe: bool(raw['keySetSwipe'], d.keySetSwipe),
     remoteFiles: oneOf(raw['remoteFiles'], REMOTE_FILES_POLICIES, d.remoteFiles),
@@ -366,6 +400,14 @@ export const INPUT_SETTING_KEYS = [
   'toolbarAutoHide',
   'tapDismissKeyboard',
   'keyBarSwipeDismiss',
+  'gestureLongPress',
+  'gestureTwoFingerTap',
+  'gestureThreeFingerTap',
+  'gestureZoomReset',
+  'gesturePinchZoom',
+  'sheetSwipeClose',
+  'keySetLongPress',
+  'pasteLongPress',
   'keySet',
   'keySetSwipe',
   'remoteFiles',
@@ -406,6 +448,10 @@ export function pointerConfigFromSettings(s: SessionSettings): Partial<PointerCo
     directPan: r.directOneFinger === 'drag' ? 'drag' : 'auto',
     twoFingerPan: r.twoFingerDrag === 'pan' ? 'viewport' : 'scroll',
     horizontalScroll: r.horizontalScroll,
+    pinchZoom: r.gesturePinchZoom,
+    twoFingerTap: r.gestureTwoFingerTap,
+    threeFingerTap: r.gestureThreeFingerTap,
+    threeFingerDoubleTap: r.gestureZoomReset,
   };
 }
 
@@ -414,6 +460,7 @@ export function gestureConfigFromSettings(s: SessionSettings): Partial<GestureCo
   const r = normalizeSessionSettings(s);
   return {
     longPressMs: r.longPressMs,
+    longPress: r.gestureLongPress,
     doubleTapWindowMs: r.doubleTapWindowMs,
     tapSlopPx: r.tapSlopPx,
     // Hold that arms a tap-and-a-half drag: well inside the long press.

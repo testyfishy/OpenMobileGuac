@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { ChromeButton } from './ChromeButton.tsx';
 import { IconBack, IconClose } from './icons.tsx';
-import { SheetBackContext } from './sheetBack.ts';
+import { SheetBackContext, SheetSwipeContext } from './sheetBack.ts';
 import { sessionStrings } from './sessionStrings.ts';
 
 /** Downward drag (px) on the header that closes the sheet. */
@@ -9,7 +9,8 @@ const SWIPE_CLOSE_PX = 72;
 
 /**
  * A bottom sheet / popover for session menus. Escape, the close button or (when
- * `dismissible`, the default) a backdrop tap or a downward swipe on the header closes it.
+ * `dismissible`, the default) a backdrop tap or a downward swipe on the header closes it
+ * (the swipe can be switched off: `SheetSwipeContext`).
  */
 export function Sheet({
   title,
@@ -28,6 +29,8 @@ export function Sheet({
   className?: string;
 }) {
   const onBack = useContext(SheetBackContext);
+  const swipeSetting = useContext(SheetSwipeContext);
+  const swipeClose = dismissible && swipeSetting;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -42,7 +45,7 @@ export function Sheet({
   const drag = useRef<{ id: number; y: number } | null>(null);
   const [offset, setOffset] = useState(0);
   const onDown = (e: PointerEvent<HTMLElement>) => {
-    if (!dismissible || !e.isPrimary) return;
+    if (!swipeClose || !e.isPrimary) return;
     if ((e.target as HTMLElement).closest('button')) return;
     drag.current = { id: e.pointerId, y: e.clientY };
     e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -81,7 +84,7 @@ export function Sheet({
       >
         <header
           className={
-            (dismissible ? 'omg-sheet__header omg-sheet__header--drag' : 'omg-sheet__header') +
+            (swipeClose ? 'omg-sheet__header omg-sheet__header--drag' : 'omg-sheet__header') +
             (onBack ? ' omg-sheet__header--back' : '')
           }
           onPointerDown={onDown}
@@ -89,7 +92,7 @@ export function Sheet({
           onPointerUp={onUp}
           onPointerCancel={onCancel}
         >
-          {dismissible && <span className="omg-sheet__grip" aria-hidden="true" />}
+          {swipeClose && <span className="omg-sheet__grip" aria-hidden="true" />}
           {onBack && (
             <ChromeButton
               className="omg-btn--icon omg-sheet__back"

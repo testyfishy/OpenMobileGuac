@@ -281,8 +281,7 @@ export const sessionStringsEn = {
     sections: {
       toolbar: 'Toolbar',
       pointer: 'Pointer',
-      scrolling: 'Scrolling',
-      timing: 'Touch timing',
+      gestures: 'Gestures',
       keyboard: 'Keyboard',
       display: 'Display',
       clipboard: 'Clipboard',
@@ -291,10 +290,10 @@ export const sessionStringsEn = {
     },
     sectionHints: {
       toolbar: 'Where the session buttons sit and which ones are in the row.',
-      pointer: 'How touches move and click the remote pointer.',
-      scrolling: 'Two-finger gestures.',
-      timing: 'How long a press may take and how far a tap may move.',
-      keyboard: 'Soft keyboard, key sets and how to hide the keyboard.',
+      pointer: 'Pointer mode, trackpad speed and the cursor.',
+      gestures:
+        'Every touch gesture, what it does and its switch. Desktop gestures apply in direct touch and trackpad mode; in touch pass-through mode every finger goes straight to the remote, which handles its own gestures.',
+      keyboard: 'Soft keyboard, text entry and key sets.',
       display: 'How the remote desktop fits this screen.',
       clipboard: 'Copy and paste between this device and the remote.',
       files: 'What happens when the remote sends a file.',
@@ -408,6 +407,90 @@ export const sessionStringsEn = {
     audioMutedHint: 'Can also be switched in the session (More › Sound)',
     combosSummary: (n: number) => `${n} ${plural(n, 'combo', 'combos')}`,
     pointerSpeedHint: 'Trackpad mode',
+  },
+
+  gestures: {
+    areas: {
+      desktop: 'On the remote desktop',
+      chrome: 'On the key bar, toolbar and panels',
+    },
+    alwaysOn: 'Always on',
+    holdTime: 'Hold time',
+    doubleTapTime: 'Time between the taps',
+    tapToleranceHint: 'How far a finger may move and still tap.',
+    noTrackpadDrag: 'With this and Tap and a half both off, trackpad mode has no one-finger drag.',
+    items: {
+      tap: {
+        name: 'Tap',
+        desc: 'Left click. Direct touch: where you tap. Trackpad: at the pointer.',
+      },
+      doubleTap: {
+        name: 'Double tap',
+        desc: 'Double click, on the spot of the first tap.',
+      },
+      longPress: {
+        name: 'Touch and hold',
+        desc: 'Direct touch: right click when you lift; slide instead to drag. Trackpad: holds the left button down, slide to drag. Off: a hold is a plain tap.',
+      },
+      drag: {
+        name: 'One-finger drag',
+        desc: 'Direct touch: pans the view when zoomed in, or drags on the remote. Trackpad: moves the pointer.',
+      },
+      tapDrag: {
+        name: 'Tap and a half (trackpad)',
+        desc: 'Tap, then touch again and slide: drags with the left button held. Off: every tap is an instant click. Not used in direct touch.',
+      },
+      twoFingerTap: {
+        name: 'Two-finger tap',
+        desc: 'Right click, between the fingers (direct touch) or at the pointer (trackpad). A quick second one is ignored.',
+      },
+      threeFingerTap: {
+        name: 'Three-finger tap',
+        desc: 'Middle click (on Linux this often pastes). Waits a moment in case a second one follows.',
+      },
+      zoomReset: {
+        name: 'Three-finger double tap',
+        desc: 'Resets the zoom to the view mode.',
+      },
+      twoFingerDrag: {
+        name: 'Two-finger drag',
+        desc: 'Scrolls the remote, under the fingers (direct touch) or at the pointer (trackpad), or pans the view.',
+      },
+      pinch: {
+        name: 'Pinch to zoom',
+        desc: 'Spread or pinch two fingers to zoom the view. Off: pinches do nothing (the View menu still zooms).',
+      },
+      tapKeyboard: {
+        name: 'Tap while typing',
+        desc: 'A tap on the desktop while the soft keyboard is up can hide the keyboard.',
+      },
+      keyBarDown: {
+        name: 'Swipe down on the key bar',
+        desc: 'Hides the keyboard; with the keyboard hidden, hides the key bar.',
+      },
+      keyBarSide: {
+        name: 'Swipe sideways on the key bar',
+        desc: 'Switches to the next or previous key set, once the row is scrolled to its end.',
+      },
+      holdSet: {
+        name: 'Hold the key set button',
+        desc: 'Opens the list of key sets.',
+      },
+      holdPaste: {
+        name: 'Hold Paste',
+        desc: 'Types the device clipboard as keystrokes, for fields that block pasting.',
+      },
+      sheetSwipe: {
+        name: 'Swipe a panel down',
+        desc: 'Drag the header of a session panel (More, options, keys…) down to close it. The close button and a tap outside always work.',
+      },
+    },
+    why: {
+      tap: 'The basic click.',
+      doubleTap: 'Two taps are two clicks anyway.',
+      drag: 'Moves the view and the trackpad pointer.',
+      twoFingerDrag: 'The way to scroll; choose what it does below.',
+    },
   },
 
   share: {

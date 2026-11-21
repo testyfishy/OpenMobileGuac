@@ -44,7 +44,7 @@ import { KeySetManager, KeySetPicker, type SaveTextFile } from './KeySetManager.
 import { keySetName, keySetNameIn } from './keySetNames.ts';
 import { MoreSheet, type TerminalControls } from './MoreSheet.tsx';
 import { ShareSheet, type SessionSharing } from './ShareSheet.tsx';
-import { SheetBackContext } from './sheetBack.ts';
+import { SheetBackContext, SheetSwipeContext } from './sheetBack.ts';
 import { nextColorScheme, parseFontSize, stepFontSize } from '../../session/terminalFont.ts';
 import {
   enterImmersive,
@@ -719,6 +719,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     showCtrlAltDel,
     canMinimize: onMinimize !== undefined,
     pasteHint: terminal ? t.screen.pasteHintTerminal : t.screen.pasteHint,
+    pasteLongPress: settings.pasteLongPress,
     runningTransfers,
     onTogglePointerMode: togglePointerMode,
     onToggleKeyboard: () => {
@@ -806,7 +807,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
           combos={library.combos}
           setName={keySetName(activeSet)}
           onNextSet={() => chooseSet(stepSet(sets, activeSet.id, 1).id, true)}
-          onPickSet={() => setMenu('keypicker')}
+          {...(settings.keySetLongPress ? { onPickSet: () => setMenu('keypicker') } : {})}
           {...(settings.keySetSwipe
             ? { onSwipeSet: (d: -1 | 1) => chooseSet(stepSet(sets, activeSet.id, d).id, true) }
             : {})}
@@ -827,347 +828,352 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   );
 
   return (
-    <div
-      ref={rootRef}
-      className="omg-session"
-      style={rootStyle}
-      data-pointer-mode={effectiveMode}
-      data-keyboard={snap.keyboardActive ? 'open' : 'closed'}
-      data-split={split ? 'on' : 'off'}
-      data-immersive={settings.immersive ? 'on' : 'off'}
-      data-toolbar={toolbarStyle}
-      data-active={active ? 'true' : 'false'}
-      aria-hidden={active ? undefined : true}
-    >
-      <div ref={probeRef} className="omg-safe-probe" aria-hidden="true" />
-      <div ref={stageRef} className="omg-stage">
-        <div ref={displayRef} className="omg-display" />
-        <div ref={cursorRef} className="omg-cursor" aria-hidden="true">
-          <div data-cursor-image="" />
-          <div data-cursor-fallback="">
-            <CursorArrow />
-          </div>
-        </div>
-        <div
-          ref={gestureRef}
-          className="omg-gesture"
-          role="application"
-          aria-label={t.screen.remoteDesktop(title)}
-          aria-roledescription={t.screen.remoteDesktopRole}
-        />
-      </div>
-      {split && (
-        <div
-          ref={surfaceRef}
-          className="omg-trackpad"
-          role="application"
-          aria-label={t.screen.trackpadSurface}
-          aria-roledescription={t.screen.trackpadRole}
-        >
-          <span className="omg-trackpad__hint" aria-hidden="true">
-            {t.common.trackpad}
-          </span>
-        </div>
-      )}
-
-      <textarea
-        ref={fieldRef}
-        className="omg-text-input"
-        aria-label={t.screen.keyboardInput}
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        inputMode="text"
-        rows={1}
-        tabIndex={active ? undefined : -1}
-        data-gramm="false"
-        data-1p-ignore=""
-        data-lpignore="true"
-      />
-
-      <div ref={chromeRef} className="omg-chrome" hidden={!active}>
-        {active && (
-          <>
-            {isDemo && <div className="omg-badge">{t.common.demo}</div>}
-            {docked && !dockBottom && toolbar}
-            <div ref={dockRef} className="omg-dock">
-              {dockBottom ? (
-                <>
-                  {keyBarSlot}
-                  {toolbar}
-                </>
-              ) : (
-                <>
-                  {!docked && toolbar}
-                  {keyBarSlot}
-                </>
-              )}
+    <SheetSwipeContext.Provider value={settings.sheetSwipeClose}>
+      <div
+        ref={rootRef}
+        className="omg-session"
+        style={rootStyle}
+        data-pointer-mode={effectiveMode}
+        data-keyboard={snap.keyboardActive ? 'open' : 'closed'}
+        data-split={split ? 'on' : 'off'}
+        data-immersive={settings.immersive ? 'on' : 'off'}
+        data-toolbar={toolbarStyle}
+        data-active={active ? 'true' : 'false'}
+        aria-hidden={active ? undefined : true}
+      >
+        <div ref={probeRef} className="omg-safe-probe" aria-hidden="true" />
+        <div ref={stageRef} className="omg-stage">
+          <div ref={displayRef} className="omg-display" />
+          <div ref={cursorRef} className="omg-cursor" aria-hidden="true">
+            <div data-cursor-image="" />
+            <div data-cursor-fallback="">
+              <CursorArrow />
             </div>
+          </div>
+          <div
+            ref={gestureRef}
+            className="omg-gesture"
+            role="application"
+            aria-label={t.screen.remoteDesktop(title)}
+            aria-roledescription={t.screen.remoteDesktopRole}
+          />
+        </div>
+        {split && (
+          <div
+            ref={surfaceRef}
+            className="omg-trackpad"
+            role="application"
+            aria-label={t.screen.trackpadSurface}
+            aria-roledescription={t.screen.trackpadRole}
+          >
+            <span className="omg-trackpad__hint" aria-hidden="true">
+              {t.common.trackpad}
+            </span>
+          </div>
+        )}
 
-            <SheetBackContext.Provider value={menuBack}>
-              {menu === 'more' && (
-                <MoreSheet
-                  context={actionContext}
-                  pointerMode={effectiveMode}
-                  audioActive={snap.audioStreams > 0}
-                  hasFilesystem={transferSnap.filesystems.length > 0}
-                  toggles={{
-                    naturalScroll: settings.naturalScroll,
-                    tapDrag: settings.tapDrag,
-                    largeCursor: settings.largeCursor,
-                    textInputBar: settings.textInputBar,
-                    split,
-                    immersive: settings.immersive,
-                  }}
-                  onToggle={(key, on) => {
-                    if (key === 'split') onSettingsChange({ splitLayout: on ? 'on' : 'off' });
-                    else onSettingsChange({ [key]: on });
-                  }}
-                  onEditToolbar={() => setMenu('toolbar')}
-                  quality={settings.quality}
-                  audio={settings.audio}
-                  viewOnly={settings.viewOnly}
-                  reconnectToApply={snap.reconnectToApply}
-                  onQuality={(q) => onSettingsChange({ quality: q })}
-                  onAudio={(a) => onSettingsChange({ audio: a })}
-                  onReconnect={() => {
-                    setMenu(null);
-                    controller.reconnect();
-                  }}
-                  terminal={
-                    terminal
-                      ? terminalControls(snap.mutableArguments, (n, v) =>
-                          controller.setArgument(n, v),
-                        )
-                      : null
-                  }
-                  {...(props.sharing ? { onShare: () => setMenu('share') } : {})}
-                  onClose={closeMenu}
-                />
-              )}
-              {menu === 'toolbar' && (
-                <ToolbarEditor
-                  items={settings.toolbarItems}
-                  style={settings.toolbarStyle}
-                  labels={settings.toolbarLabels}
-                  context={actionContext}
-                  onItems={(items) => onSettingsChange({ toolbarItems: items })}
-                  onStyle={(s) => onSettingsChange({ toolbarStyle: s })}
-                  onLabels={(l) => onSettingsChange({ toolbarLabels: l })}
-                  onClose={closeMenu}
-                />
-              )}
-              {menu === 'files' && (
-                <FilesSheet
-                  transfers={controller.transfers}
-                  connected={connected}
-                  onClose={closeMenu}
-                />
-              )}
-              {menu === 'clipboard' && (
-                <ClipboardSheet
-                  history={clipHistory}
-                  terminal={terminal}
-                  onSend={sendToRemote}
-                  onType={typeText}
-                  onCopyToDevice={(text) => {
-                    void writeDeviceClipboard(text).then((ok) =>
+        <textarea
+          ref={fieldRef}
+          className="omg-text-input"
+          aria-label={t.screen.keyboardInput}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          inputMode="text"
+          rows={1}
+          tabIndex={active ? undefined : -1}
+          data-gramm="false"
+          data-1p-ignore=""
+          data-lpignore="true"
+        />
+
+        <div ref={chromeRef} className="omg-chrome" hidden={!active}>
+          {active && (
+            <>
+              {isDemo && <div className="omg-badge">{t.common.demo}</div>}
+              {docked && !dockBottom && toolbar}
+              <div ref={dockRef} className="omg-dock">
+                {dockBottom ? (
+                  <>
+                    {keyBarSlot}
+                    {toolbar}
+                  </>
+                ) : (
+                  <>
+                    {!docked && toolbar}
+                    {keyBarSlot}
+                  </>
+                )}
+              </div>
+
+              <SheetBackContext.Provider value={menuBack}>
+                {menu === 'more' && (
+                  <MoreSheet
+                    context={actionContext}
+                    pointerMode={effectiveMode}
+                    audioActive={snap.audioStreams > 0}
+                    hasFilesystem={transferSnap.filesystems.length > 0}
+                    toggles={{
+                      naturalScroll: settings.naturalScroll,
+                      tapDrag: settings.tapDrag,
+                      largeCursor: settings.largeCursor,
+                      textInputBar: settings.textInputBar,
+                      split,
+                      immersive: settings.immersive,
+                    }}
+                    onToggle={(key, on) => {
+                      if (key === 'split') onSettingsChange({ splitLayout: on ? 'on' : 'off' });
+                      else onSettingsChange({ [key]: on });
+                    }}
+                    onEditToolbar={() => setMenu('toolbar')}
+                    quality={settings.quality}
+                    audio={settings.audio}
+                    viewOnly={settings.viewOnly}
+                    reconnectToApply={snap.reconnectToApply}
+                    onQuality={(q) => onSettingsChange({ quality: q })}
+                    onAudio={(a) => onSettingsChange({ audio: a })}
+                    onReconnect={() => {
+                      setMenu(null);
+                      controller.reconnect();
+                    }}
+                    terminal={
+                      terminal
+                        ? terminalControls(snap.mutableArguments, (n, v) =>
+                            controller.setArgument(n, v),
+                          )
+                        : null
+                    }
+                    {...(props.sharing ? { onShare: () => setMenu('share') } : {})}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'toolbar' && (
+                  <ToolbarEditor
+                    items={settings.toolbarItems}
+                    style={settings.toolbarStyle}
+                    labels={settings.toolbarLabels}
+                    context={actionContext}
+                    onItems={(items) => onSettingsChange({ toolbarItems: items })}
+                    onStyle={(s) => onSettingsChange({ toolbarStyle: s })}
+                    onLabels={(l) => onSettingsChange({ toolbarLabels: l })}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'files' && (
+                  <FilesSheet
+                    transfers={controller.transfers}
+                    connected={connected}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'clipboard' && (
+                  <ClipboardSheet
+                    history={clipHistory}
+                    terminal={terminal}
+                    onSend={sendToRemote}
+                    onType={typeText}
+                    onCopyToDevice={(text) => {
+                      void writeDeviceClipboard(text).then((ok) =>
+                        showToast(
+                          ok
+                            ? sessionStrings.toasts.copiedToDevice
+                            : sessionStrings.toasts.copyFailed,
+                        ),
+                      );
+                    }}
+                    onReadDevice={async () => {
+                      const r = await readDeviceClipboard();
+                      if (!r.ok) {
+                        showToast(r.reason);
+                        return null;
+                      }
+                      return r.text;
+                    }}
+                    onClear={() => clipDispatch({ type: 'clear' })}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'share' && props.sharing && (
+                  <ShareSheet
+                    sharing={props.sharing}
+                    tunnelUuid={controller.tunnelUuid()}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'info' && (
+                  <InfoSheet
+                    title={title}
+                    protocol={protocol}
+                    isDemo={isDemo}
+                    settings={settings}
+                    getInfo={controller.getInfo}
+                    keepAwake={
+                      settings.keepAwake
+                        ? t.info.keepAwake[keepAwakeState]
+                        : t.info.keepAwakeOffInSettings
+                    }
+                    mutableArguments={snap.mutableArguments}
+                    {...(props.onEditConnection
+                      ? { onEditConnection: props.onEditConnection }
+                      : {})}
+                    onSetArgument={(name, value) => {
+                      const ok = controller.setArgument(name, value);
                       showToast(
                         ok
-                          ? sessionStrings.toasts.copiedToDevice
-                          : sessionStrings.toasts.copyFailed,
-                      ),
-                    );
-                  }}
-                  onReadDevice={async () => {
-                    const r = await readDeviceClipboard();
-                    if (!r.ok) {
-                      showToast(r.reason);
-                      return null;
+                          ? sessionStrings.toasts.argumentSent
+                          : sessionStrings.toasts.argumentLocked,
+                      );
+                      return ok;
+                    }}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'view' && (
+                  <ViewMenu
+                    zoomResetGesture={settings.gestureZoomReset && effectiveMode !== 'touch'}
+                    fitMode={settings.fitMode}
+                    matchDeviceSize={settings.matchDeviceSize}
+                    protocol={protocol}
+                    onFitMode={(m) => {
+                      onSettingsChange({ fitMode: m });
+                      showToast(
+                        m === settings.fitMode
+                          ? t.toasts.viewReset
+                          : t.toasts.view(t.fitModes.labels[m].toLowerCase()),
+                      );
+                      if (m === settings.fitMode) controller.resetZoom();
+                    }}
+                    onResetZoom={() => {
+                      controller.resetZoom();
+                      showToast(t.toasts.zoomReset);
+                    }}
+                    onZoom={(f) => controller.zoomBy(f)}
+                    onMatchDeviceSize={(on) => {
+                      onSettingsChange({ matchDeviceSize: on });
+                      showToast(on ? t.toasts.matchOn : t.toasts.matchOff);
+                    }}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'input' && (
+                  <InputMenu
+                    settings={settings}
+                    touchSupport={snap.touchSupport}
+                    overridden={overridden}
+                    onChange={onSettingsChange}
+                    {...(props.onUseDefault ? { onUseDefault: useDefault } : {})}
+                    onEditList={(editor) =>
+                      setMenu(
+                        editor === 'toolbar'
+                          ? 'toolbar'
+                          : editor === 'keySets'
+                            ? 'keysets'
+                            : 'combos',
+                      )
                     }
-                    return r.text;
+                    summaryContext={{ keySetName: () => keySetName(activeSet) }}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'keypicker' && (
+                  <KeySetPicker
+                    sets={sets}
+                    activeId={activeSet.id}
+                    onUse={(id) => chooseSet(id, true)}
+                    onManage={() => setMenu('keysets')}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'keysets' && (
+                  <KeySetManager
+                    library={library}
+                    onLibrary={setLibrary}
+                    activeId={activeSet.id}
+                    onUse={(id) => chooseSet(id)}
+                    legacy={legacy}
+                    onCombos={() => setMenu('combos')}
+                    {...(props.saveTextFile ? { saveFile: props.saveTextFile } : {})}
+                    onClose={closeMenu}
+                  />
+                )}
+                {menu === 'combos' && (
+                  <ComboMenu
+                    combos={library.combos}
+                    legacy={settings.customCombos}
+                    onRun={runSteps}
+                    onLibrary={libraryAction}
+                    newId={() => newComboId(library)}
+                    onTypeClipboard={typeClipboard}
+                    onClose={closeMenu}
+                  />
+                )}
+              </SheetBackContext.Provider>
+
+              {transferSnap.prompts[0] && !prompt && (
+                <IncomingFileSheet
+                  prompt={transferSnap.prompts[0]}
+                  waiting={transferSnap.prompts.length - 1}
+                  onAnswer={(accept) => {
+                    const pr = transferSnap.prompts[0];
+                    if (!pr) return;
+                    controller.transfers.answerIncoming(pr.id, accept);
+                    if (!accept) showToast(t.files.declined(pr.filename));
                   }}
-                  onClear={() => clipDispatch({ type: 'clear' })}
-                  onClose={closeMenu}
                 />
               )}
-              {menu === 'share' && props.sharing && (
-                <ShareSheet
-                  sharing={props.sharing}
-                  tunnelUuid={controller.tunnelUuid()}
-                  onClose={closeMenu}
-                />
-              )}
-              {menu === 'info' && (
-                <InfoSheet
+              {prompt ? (
+                <CredentialSheet
                   title={title}
-                  protocol={protocol}
-                  isDemo={isDemo}
-                  settings={settings}
-                  getInfo={controller.getInfo}
-                  keepAwake={
-                    settings.keepAwake
-                      ? t.info.keepAwake[keepAwakeState]
-                      : t.info.keepAwakeOffInSettings
-                  }
-                  mutableArguments={snap.mutableArguments}
-                  {...(props.onEditConnection ? { onEditConnection: props.onEditConnection } : {})}
-                  onSetArgument={(name, value) => {
-                    const ok = controller.setArgument(name, value);
-                    showToast(
-                      ok
-                        ? sessionStrings.toasts.argumentSent
-                        : sessionStrings.toasts.argumentLocked,
-                    );
-                    return ok;
+                  fields={prompt}
+                  onSubmit={(values) => controller.submitCredentials(values)}
+                  onCancel={() => {
+                    // As the web client: disconnect; the overlay then offers Reconnect.
+                    controller.cancelCredentials();
+                    nativeHideKeyboard();
                   }}
-                  onClose={closeMenu}
+                />
+              ) : snap.quietReconnect ? null : (
+                <StatusOverlay
+                  phase={snap.phase}
+                  title={title}
+                  onRetry={() => controller.retry()}
+                  onClose={exit}
                 />
               )}
-              {menu === 'view' && (
-                <ViewMenu
-                  fitMode={settings.fitMode}
-                  matchDeviceSize={settings.matchDeviceSize}
-                  protocol={protocol}
-                  onFitMode={(m) => {
-                    onSettingsChange({ fitMode: m });
-                    showToast(
-                      m === settings.fitMode
-                        ? t.toasts.viewReset
-                        : t.toasts.view(t.fitModes.labels[m].toLowerCase()),
-                    );
-                    if (m === settings.fitMode) controller.resetZoom();
-                  }}
-                  onResetZoom={() => {
-                    controller.resetZoom();
-                    showToast(t.toasts.zoomReset);
-                  }}
-                  onZoom={(f) => controller.zoomBy(f)}
-                  onMatchDeviceSize={(on) => {
-                    onSettingsChange({ matchDeviceSize: on });
-                    showToast(on ? t.toasts.matchOn : t.toasts.matchOff);
-                  }}
-                  onClose={closeMenu}
-                />
-              )}
-              {menu === 'input' && (
-                <InputMenu
-                  settings={settings}
-                  touchSupport={snap.touchSupport}
-                  overridden={overridden}
-                  onChange={onSettingsChange}
-                  {...(props.onUseDefault ? { onUseDefault: useDefault } : {})}
-                  onEditList={(editor) =>
-                    setMenu(
-                      editor === 'toolbar'
-                        ? 'toolbar'
-                        : editor === 'keySets'
-                          ? 'keysets'
-                          : 'combos',
-                    )
-                  }
-                  summaryContext={{ keySetName: () => keySetName(activeSet) }}
-                  onClose={closeMenu}
-                />
-              )}
-              {menu === 'keypicker' && (
-                <KeySetPicker
-                  sets={sets}
-                  activeId={activeSet.id}
-                  onUse={(id) => chooseSet(id, true)}
-                  onManage={() => setMenu('keysets')}
-                  onClose={closeMenu}
-                />
-              )}
-              {menu === 'keysets' && (
-                <KeySetManager
-                  library={library}
-                  onLibrary={setLibrary}
-                  activeId={activeSet.id}
-                  onUse={(id) => chooseSet(id)}
-                  legacy={legacy}
-                  onCombos={() => setMenu('combos')}
-                  {...(props.saveTextFile ? { saveFile: props.saveTextFile } : {})}
-                  onClose={closeMenu}
-                />
-              )}
-              {menu === 'combos' && (
-                <ComboMenu
-                  combos={library.combos}
-                  legacy={settings.customCombos}
-                  onRun={runSteps}
-                  onLibrary={libraryAction}
-                  newId={() => newComboId(library)}
-                  onTypeClipboard={typeClipboard}
-                  onClose={closeMenu}
-                />
-              )}
-            </SheetBackContext.Provider>
 
-            {transferSnap.prompts[0] && !prompt && (
-              <IncomingFileSheet
-                prompt={transferSnap.prompts[0]}
-                waiting={transferSnap.prompts.length - 1}
-                onAnswer={(accept) => {
-                  const pr = transferSnap.prompts[0];
-                  if (!pr) return;
-                  controller.transfers.answerIncoming(pr.id, accept);
-                  if (!accept) showToast(t.files.declined(pr.filename));
-                }}
-              />
-            )}
-            {prompt ? (
-              <CredentialSheet
-                title={title}
-                fields={prompt}
-                onSubmit={(values) => controller.submitCredentials(values)}
-                onCancel={() => {
-                  // As the web client: disconnect; the overlay then offers Reconnect.
-                  controller.cancelCredentials();
-                  nativeHideKeyboard();
-                }}
-              />
-            ) : snap.quietReconnect ? null : (
-              <StatusOverlay
-                phase={snap.phase}
-                title={title}
-                onRetry={() => controller.retry()}
-                onClose={exit}
-              />
-            )}
-
-            {snap.viewOnly || snap.reconnectToApply || snap.quietReconnect ? (
-              <div className="omg-pills">
-                {snap.quietReconnect ? (
-                  <span className="omg-pill" role="status">
-                    {t.screen.resuming}
-                  </span>
-                ) : null}
-                {snap.viewOnly ? (
-                  <ChromeButton className="omg-pill omg-pill--viewonly" onClick={toggleViewOnly}>
-                    <IconEye off={false} /> {t.screen.viewOnlyPill}
-                  </ChromeButton>
-                ) : null}
-                {snap.reconnectToApply ? (
-                  <ChromeButton className="omg-pill" onClick={() => controller.reconnect()}>
-                    {t.screen.reconnectToApply}
-                  </ChromeButton>
-                ) : null}
-              </div>
-            ) : null}
-
-            <div className="omg-toast-region" role="status" aria-live="polite">
-              {toast && (
-                <div key={toast.id} className="omg-toast">
-                  {toast.text}
+              {snap.viewOnly || snap.reconnectToApply || snap.quietReconnect ? (
+                <div className="omg-pills">
+                  {snap.quietReconnect ? (
+                    <span className="omg-pill" role="status">
+                      {t.screen.resuming}
+                    </span>
+                  ) : null}
+                  {snap.viewOnly ? (
+                    <ChromeButton className="omg-pill omg-pill--viewonly" onClick={toggleViewOnly}>
+                      <IconEye off={false} /> {t.screen.viewOnlyPill}
+                    </ChromeButton>
+                  ) : null}
+                  {snap.reconnectToApply ? (
+                    <ChromeButton className="omg-pill" onClick={() => controller.reconnect()}>
+                      {t.screen.reconnectToApply}
+                    </ChromeButton>
+                  ) : null}
                 </div>
-              )}
-            </div>
-          </>
-        )}
+              ) : null}
+
+              <div className="omg-toast-region" role="status" aria-live="polite">
+                {toast && (
+                  <div key={toast.id} className="omg-toast">
+                    {toast.text}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </SheetSwipeContext.Provider>
   );
 }
 

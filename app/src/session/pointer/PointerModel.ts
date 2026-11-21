@@ -34,6 +34,9 @@
  *   after a pinch), it is first brought to the nearest visible point.
  * - both: three-finger double tap = reset zoom; two-finger double tap = nothing (its first
  *   tap already right-clicked; the second is swallowed so it never double right-clicks).
+ *   Pinch zoom, the two- and three-finger taps and the zoom reset can each be switched off
+ *   (`pinchZoom`, `twoFingerTap`, `threeFingerTap`, `threeFingerDoubleTap`): the gesture is
+ *   then ignored.
  * - touch: raw multi-touch pass-through is done by the host (`TouchPassthrough`); gestures
  *   handed to this model in that mode behave as in direct mode.
  *
@@ -105,6 +108,14 @@ export interface PointerConfig {
   readonly trackpadLongPress: 'drag' | 'right-click';
   /** Margin (screen px) kept around the pointer by follow-pointer. */
   readonly followMarginPx: number;
+  /** Pinch zooms the view; off = pinches are ignored. */
+  readonly pinchZoom: boolean;
+  /** Two-finger tap = right click; off = ignored. */
+  readonly twoFingerTap: boolean;
+  /** Three-finger tap = middle click; off = ignored. */
+  readonly threeFingerTap: boolean;
+  /** Three-finger double tap = reset the zoom; off = ignored. */
+  readonly threeFingerDoubleTap: boolean;
 }
 
 export const DEFAULT_POINTER_CONFIG: PointerConfig = {
@@ -119,6 +130,10 @@ export const DEFAULT_POINTER_CONFIG: PointerConfig = {
   pointerAcceleration: 1,
   trackpadLongPress: 'drag',
   followMarginPx: 48,
+  pinchZoom: true,
+  twoFingerTap: true,
+  threeFingerTap: true,
+  threeFingerDoubleTap: true,
 };
 
 /** Finger speeds (screen px/ms) between which the acceleration ramps in. */
@@ -423,15 +438,22 @@ export class PointerModel {
     // Gestures common to all modes.
     switch (g.type) {
       case 'pinch':
-        this.pinch(g, out);
+        if (this.config.pinchZoom) this.pinch(g, out);
         return out;
       case 'two-finger-pan':
         this.twoFingerPan(g, viewport, out, mode);
         return out;
       case 'three-finger-double-tap':
+        if (!this.config.threeFingerDoubleTap) return out;
         out.viewport.push({ type: 'reset' });
         out.haptics.push('click');
         return out;
+      case 'two-finger-tap':
+        if (!this.config.twoFingerTap) return out;
+        break;
+      case 'three-finger-tap':
+        if (!this.config.threeFingerTap) return out;
+        break;
       case 'two-finger-double-tap':
         // The first two-finger tap already right-clicked; never send a second one.
         return out;

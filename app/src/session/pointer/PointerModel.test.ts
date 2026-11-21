@@ -766,3 +766,71 @@ describe('hardware mouse bypass (PTR-5)', () => {
     ).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------------------
+// Gesture switches (Settings › Gestures)
+
+describe('gesture switches', () => {
+  it('pinchZoom off: a pinch leaves the zoom alone and sends nothing', () => {
+    const h = new Harness({ pinchZoom: false }).down(1, 400, 250, 0).down(2, 600, 250, 0);
+    h.move(1, 300, 250, 30).move(2, 700, 250, 40).up(1, 300, 250, 50).up(2, 700, 250, 50);
+    expect(h.gestures.some((g) => g.type === 'pinch')).toBe(true);
+    expect(h.mouse).toEqual([]);
+    expect(h.vp.zoom).toBe(1);
+  });
+
+  it('twoFingerTap off: no right click (direct and trackpad)', () => {
+    for (const mode of ['direct', 'trackpad'] as const) {
+      const h = new Harness({ mode, twoFingerTap: false })
+        .down(1, 100, 100, 0)
+        .down(2, 200, 100, 10)
+        .up(1, 100, 100, 60)
+        .up(2, 200, 100, 70)
+        .tick(2000);
+      expect(
+        h.mouse.some((s) => s.right),
+        mode,
+      ).toBe(false);
+      expect(h.haptics, mode).toEqual([]);
+    }
+  });
+
+  it('threeFingerTap off: no middle click', () => {
+    const h = new Harness({ threeFingerTap: false })
+      .down(1, 100, 200, 0)
+      .down(2, 200, 200, 10)
+      .down(3, 300, 200, 20)
+      .up(1, 100, 200, 60)
+      .up(2, 200, 200, 65)
+      .up(3, 300, 200, 70)
+      .tick(2000);
+    expect(h.gestures.some((g) => g.type === 'three-finger-tap')).toBe(true);
+    expect(h.mouse).toEqual([]);
+  });
+
+  it('threeFingerDoubleTap off: the zoom stays', () => {
+    const h = new Harness({ threeFingerDoubleTap: false });
+    h.vp = zoomAt(h.vp, 3, { x: 500, y: 250 });
+    let t = 0;
+    for (let i = 0; i < 2; i++) {
+      h.down(1, 100, 100, t)
+        .down(2, 200, 100, t + 5)
+        .down(3, 300, 100, t + 10);
+      h.up(1, 100, 100, t + 60)
+        .up(2, 200, 100, t + 62)
+        .up(3, 300, 100, t + 64);
+      t += 150;
+    }
+    h.tick(5000);
+    expect(h.gestures.some((g) => g.type === 'three-finger-double-tap')).toBe(true);
+    expect(h.vp.zoom).toBeCloseTo(3, 6);
+    expect(h.mouse).toEqual([]);
+  });
+
+  it('long press off (recogniser): a hold is a left click, not a right click', () => {
+    const h = new Harness({}, VP, { longPress: false }).down(1, 300, 200, 0).tick(900);
+    expect(h.haptics).toEqual([]);
+    h.up(1, 300, 200, 1000);
+    expect(fmt(h.mouse)).toEqual(['600,400', '600,400L', '600,400']);
+  });
+});
