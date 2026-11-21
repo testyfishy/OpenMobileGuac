@@ -314,6 +314,14 @@ export const sessionStringsEn = {
     toolbarLandscape: 'Docked toolbar in landscape',
     toolbarLandscapeHint:
       'With the phone on its side, a toolbar docked at the top or bottom moves to this side, leaving the full height for the desktop. The side away from the camera gives the narrowest column.',
+    displayAlign: 'Desktop position',
+    displayAlignHint:
+      'Where the desktop sits when it is narrower than the screen, such as 1:1 pixels in landscape. Centre is the middle of the space beside a side toolbar.',
+    displayAlignOptions: {
+      left: 'Left',
+      center: 'Centre',
+      right: 'Right',
+    },
     toolbarLandscapeOptions: {
       same: 'Keep in place',
       away: 'Side away from the camera',
@@ -345,7 +353,7 @@ export const sessionStringsEn = {
       'The keys shown above the keyboard. Create and edit sets in Settings › Keys & combos or from the key bar.',
     keySetSwipe: 'Swipe sideways on the key bar to switch sets',
     keySetSwipeHint:
-      'Works once the row is scrolled to its end. Off: use the switch button at the end of the bar.',
+      'Works once the row is scrolled to its end (not on a side column). Off: use the switch button at the end of the bar.',
     remoteFiles: 'Files from the remote',
     remoteFilesHint: 'Files and RDP print jobs that the remote computer sends to this device.',
     remoteFilesOptions: {
@@ -367,7 +375,17 @@ export const sessionStringsEn = {
     keyBarCollapseButtonHint:
       'A button at the right end of the extra keys that hides them. Off leaves more room for keys; the toolbar button still shows and hides the key bar.',
     keyBarSwipeDismiss: 'Swipe down on the key bar to hide the keyboard',
-    keyBarSwipeDismissHint: 'With the keyboard hidden, the swipe hides the key bar.',
+    keyBarSwipeDismissHint:
+      'With the keyboard hidden, the swipe hides the key bar. On a side column (landscape), swipe towards the screen edge instead.',
+    keyBarLandscape: 'Extra keys in landscape',
+    keyBarLandscapeHint:
+      'Phones on their side: a column at a side uses the spare width instead of pushing the desktop up. Free side: the side a side toolbar leaves free, or the side away from the camera.',
+    keyBarLandscapeOptions: {
+      side: 'Free side',
+      bottom: 'Bottom row',
+      left: 'Left side',
+      right: 'Right side',
+    },
     haptics: 'Haptic feedback',
     hapticsHint: 'A light vibration on clicks, right clicks and drags',
     keepAwake: 'Keep the screen awake',

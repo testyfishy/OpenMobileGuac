@@ -141,6 +141,15 @@ export class AuthService {
   }
 
   /**
+   * The wait of `mayUseStoredSecret` without the credential gate: start-up check and app
+   * lock. SRV-11 waits on it before its own named prompt, so it never asks for Face ID for
+   * a value the start-up sign-out is about to delete.
+   */
+  storedSecretsReady(): Promise<void> {
+    return this.ready();
+  }
+
+  /**
    * Called when the app signs out of a server: `logout`, "Clear saved credentials", an
    * address change or deletion (`reset`), "Sign out of all servers" and the background
    * sign-out. Used to drop what is remembered in memory for that server.

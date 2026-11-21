@@ -15,8 +15,11 @@ import { parseLanguagePreference, type LanguagePreference } from '../i18n/locale
 import { parseThemePreference, type ThemePreference } from '../theme/theme.ts';
 import {
   DEFAULT_REMEMBER_POLICY,
+  DEFAULT_REMEMBER_UNLOCK,
   parseRememberPolicy,
+  parseRememberUnlock,
   type RememberPolicy,
+  type RememberUnlock,
 } from '../../session/credentials/rememberedParams.ts';
 
 /**
@@ -58,6 +61,11 @@ export interface AppSettings {
    * settings); the prompt's own "Remember" box decides per connection.
    */
   readonly rememberConnectionPasswords: RememberPolicy;
+  /**
+   * SRV-11: ask for biometrics / the device passcode before a remembered connection
+   * password is filled in (`rememberUnlockOn`). `auto` = on for "On this device" only.
+   */
+  readonly rememberConnectionUnlock: RememberUnlock;
   /** MUL-1: how many sessions may be open at once. */
   readonly maxSessions: number;
   /** CON-4: keep a small picture of the last screen per connection. */
@@ -106,6 +114,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   backgroundDisconnectSeconds: 60,
   serverSignOutAfterSeconds: null,
   rememberConnectionPasswords: DEFAULT_REMEMBER_POLICY,
+  rememberConnectionUnlock: DEFAULT_REMEMBER_UNLOCK,
   maxSessions: 3,
   thumbnails: true,
   connectionSort: 'server',
@@ -290,6 +299,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
       d.serverSignOutAfterSeconds as null,
     ),
     rememberConnectionPasswords: parseRememberPolicy(raw['rememberConnectionPasswords']),
+    rememberConnectionUnlock: parseRememberUnlock(raw['rememberConnectionUnlock']),
     maxSessions:
       typeof max === 'number' && Number.isInteger(max)
         ? Math.min(MAX_SESSIONS_MAX, Math.max(MAX_SESSIONS_MIN, max))
@@ -316,7 +326,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
 /**
  * Settings restored from a backup: everything except what is device-specific (the lock,
  * which needs this device's biometrics, whether the introduction was seen, and what this
- * device may keep of connection passwords).
+ * device may keep of connection passwords and how it releases them).
  */
 export function settingsFromBackup(current: AppSettings, raw: unknown): AppSettings {
   const parsed = parseAppSettings(raw);
@@ -325,6 +335,7 @@ export function settingsFromBackup(current: AppSettings, raw: unknown): AppSetti
     lock: current.lock,
     onboardingDone: current.onboardingDone,
     rememberConnectionPasswords: current.rememberConnectionPasswords,
+    rememberConnectionUnlock: current.rememberConnectionUnlock,
   };
 }
 

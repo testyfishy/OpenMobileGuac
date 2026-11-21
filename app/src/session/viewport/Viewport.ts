@@ -39,6 +39,10 @@ export const FIT_MODES: readonly FitMode[] = [
   'css-pixels',
 ];
 
+/** Where content narrower than the free width sits (DSP: the user's choice). */
+export type AlignX = 'left' | 'center' | 'right';
+export const ALIGN_X: readonly AlignX[] = ['left', 'center', 'right'];
+
 export interface Point {
   readonly x: number;
   readonly y: number;
@@ -90,6 +94,14 @@ export interface ViewportState {
   readonly insets: Insets;
   /** Height in screen px covered by the soft keyboard, measured from the screen bottom. */
   readonly keyboardInset: number;
+  /**
+   * Space taken by app chrome alone (a docked toolbar), without the safe area. Content
+   * smaller than the free area is centred in the screen minus this (so it looks centred
+   * next to a side toolbar), then kept inside the safe area. Absent: same as `insets`.
+   */
+  readonly frame?: Insets;
+  /** Horizontal position of content narrower than the free width. Absent: centre. */
+  readonly alignX?: AlignX;
   readonly mode: FitMode;
   /** Device pixels per CSS pixel (`window.devicePixelRatio`); used by `one-to-one`. */
   readonly pixelRatio: number;
@@ -109,6 +121,8 @@ export interface CreateViewportOptions {
   readonly screen: Size;
   readonly insets?: Insets;
   readonly keyboardInset?: number;
+  readonly frame?: Insets;
+  readonly alignX?: AlignX;
   readonly mode?: FitMode;
   /** Default 1. */
   readonly pixelRatio?: number;
@@ -308,10 +322,25 @@ interface AxisBounds {
  * range collapses to the centred position; otherwise content edges may not enter the
  * visible area.
  */
-function axisBounds(contentSize: number, start: number, extent: number): AxisBounds {
+function axisBounds(
+  contentSize: number,
+  start: number,
+  extent: number,
+  /** The wider area to centre in (see `ViewportState.frame`); default: the visible one. */
+  frameStart = start,
+  frameExtent = extent,
+  align: AlignX = 'center',
+): AxisBounds {
   if (contentSize <= extent) {
-    const centred = start + (extent - contentSize) / 2;
-    return { min: centred, max: centred };
+    const last = start + extent - contentSize;
+    const wanted =
+      align === 'left'
+        ? start
+        : align === 'right'
+          ? last
+          : frameStart + (frameExtent - contentSize) / 2;
+    const at = clamp(wanted, start, last);
+    return { min: at, max: at };
   }
   return { min: start + extent - contentSize, max: start };
 }
@@ -319,9 +348,24 @@ function axisBounds(contentSize: number, start: number, extent: number): AxisBou
 export function offsetBounds(state: ViewportState): { x: AxisBounds; y: AxisBounds } {
   const scale = scaleOf(state);
   const vis = visibleRect(state);
+  const f = state.frame ? sanitizeInsets(state.frame) : state.insets;
+  const fBottom = Math.max(f.bottom, state.keyboardInset);
   return {
-    x: axisBounds(state.remote.width * scale, vis.x, vis.width),
-    y: axisBounds(state.remote.height * scale, vis.y, vis.height),
+    x: axisBounds(
+      state.remote.width * scale,
+      vis.x,
+      vis.width,
+      f.left,
+      Math.max(0, state.screen.width - f.left - f.right),
+      state.alignX,
+    ),
+    y: axisBounds(
+      state.remote.height * scale,
+      vis.y,
+      vis.height,
+      f.top,
+      Math.max(0, state.screen.height - f.top - fBottom),
+    ),
   };
 }
 
@@ -353,6 +397,8 @@ export function createViewport(options: CreateViewportOptions): ViewportState {
     screen: sanitizeSize(options.screen),
     insets: sanitizeInsets(options.insets ?? ZERO_INSETS),
     keyboardInset: nonNegative(options.keyboardInset ?? 0),
+    ...(options.frame ? { frame: sanitizeInsets(options.frame) } : {}),
+    ...(options.alignX ? { alignX: options.alignX } : {}),
     mode: options.mode ?? 'fit-screen',
     pixelRatio:
       options.pixelRatio !== undefined &&
@@ -378,6 +424,11 @@ export function resetToMode(state: ViewportState): ViewportState {
   const s: ViewportState = { ...state, zoom: clampZoom({ ...state, zoom: 1 }, 1) };
   const vis = visibleRect(s);
   return clampPan({ ...s, offsetX: vis.x, offsetY: vis.y, velocityX: 0, velocityY: 0 });
+}
+
+/** Change where narrow content sits; the view is re-clamped (no zoom change). */
+export function setAlignX(state: ViewportState, alignX: AlignX): ViewportState {
+  return clampPan({ ...state, alignX });
 }
 
 export function setMode(state: ViewportState, mode: FitMode): ViewportState {
@@ -493,6 +544,7 @@ export interface LayoutChange {
   readonly insets?: Insets;
   readonly keyboardInset?: number;
   readonly remote?: Size;
+  readonly frame?: Insets;
 }
 
 /**
@@ -509,7 +561,10 @@ export function relayout(state: ViewportState, change: LayoutChange): ViewportSt
   const keyboardInset =
     change.keyboardInset === undefined ? state.keyboardInset : nonNegative(change.keyboardInset);
   const onlyKeyboard =
-    change.screen === undefined && change.insets === undefined && change.remote === undefined;
+    change.screen === undefined &&
+    change.insets === undefined &&
+    change.remote === undefined &&
+    change.frame === undefined;
   if (onlyKeyboard) return clampPan({ ...state, keyboardInset });
 
   const oldVis = visibleRect(state);
@@ -527,6 +582,7 @@ export function relayout(state: ViewportState, change: LayoutChange): ViewportSt
     remote,
     screen: change.screen ? sanitizeSize(change.screen) : state.screen,
     insets: change.insets ? sanitizeInsets(change.insets) : state.insets,
+    ...(change.frame ? { frame: sanitizeInsets(change.frame) } : {}),
     keyboardInset,
     velocityX: 0,
     velocityY: 0,

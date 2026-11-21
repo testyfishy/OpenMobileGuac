@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { LockService } from '../lock/LockService.ts';
 import { GuacApi } from '../../core/api/GuacApi.ts';
 import { MemoryKeyValueStore } from '../../core/storage/KeyValueStore.ts';
 import { ProfileStore } from '../../core/storage/ProfileStore.ts';
@@ -159,6 +160,126 @@ describe('ConnectionSecrets (saved on this device)', () => {
     await store.forgetAll(['p1', 'p2']);
     expect(await secure.get(secretKeys.connectionPasswords('p1'))).toBeNull();
     expect(await secure.get(secretKeys.connectionPasswords('p2'))).toBeNull();
+  });
+});
+
+describe('ConnectionSecrets with the device check ("Ask for Face ID …")', () => {
+  function checked(answers: boolean[], gate: () => Promise<boolean> = async () => true) {
+    const secure = new MemorySecureStore();
+    const order: string[] = [];
+    const store = new ConnectionSecrets({
+      secure,
+      storedReady: async () => {
+        order.push('ready');
+      },
+      mayUseStored: async () => {
+        order.push('gate');
+        return gate();
+      },
+      confirm: async (label) => {
+        order.push(`check:${label}`);
+        return answers.shift() ?? false;
+      },
+    });
+    return { store, secure, order };
+  }
+
+  it('device: waits for start-up, then the named check, then the lock gate', async () => {
+    const { store, order } = checked([true]);
+    await store.remember('device', 'p1', CONN, NAMES, VALUES);
+    expect(await store.recall('device', 'p1', CONN, NAMES, 'Lab desktop')).toEqual(VALUES);
+    expect(order).toEqual(['ready', 'check:Lab desktop', 'gate']);
+  });
+
+  it('a cancelled check returns null (the prompt is shown) and keeps the value', async () => {
+    for (const policy of ['device', 'app', '15m'] as const) {
+      const { store, order } = checked([false, true]);
+      await store.remember(policy, 'p1', CONN, NAMES, VALUES);
+      expect(await store.recall(policy, 'p1', CONN, NAMES, 'Lab')).toBeNull();
+      expect(order).not.toContain('gate');
+      expect(await store.recall(policy, 'p1', CONN, NAMES, 'Lab')).toEqual(VALUES);
+    }
+  });
+
+  it('no check when nothing is remembered for the connection', async () => {
+    const { store, order } = checked([true]);
+    expect(await store.recall('device', 'p1', CONN, NAMES, 'Lab')).toBeNull();
+    expect(await store.recall('app', 'p1', CONN, NAMES, 'Lab')).toBeNull();
+    expect(order.filter((o) => o.startsWith('check'))).toEqual([]);
+  });
+
+  it('memory policies: the check applies too; without confirmAs nothing is asked', async () => {
+    const { store, order } = checked([true]);
+    await store.remember('app', 'p1', CONN, NAMES, VALUES);
+    expect(await store.recall('app', 'p1', CONN, NAMES)).toEqual(VALUES);
+    expect(order).toEqual([]);
+    expect(await store.recall('app', 'p1', CONN, NAMES, 'Lab')).toEqual(VALUES);
+    expect(order).toEqual(['check:Lab']);
+  });
+
+  it('a value forgotten while the check was showing is not returned', async () => {
+    const secure = new MemorySecureStore();
+    const ref: { store?: ConnectionSecrets } = {};
+    const store = new ConnectionSecrets({
+      secure,
+      mayUseStored: async () => true,
+      confirm: async () => {
+        await ref.store?.forgetAll(['p1']);
+        return true;
+      },
+    });
+    ref.store = store;
+    await store.remember('device', 'p1', CONN, NAMES, VALUES);
+    expect(await store.recall('device', 'p1', CONN, NAMES, 'Lab')).toBeNull();
+    await store.remember('app', 'p1', CONN, NAMES, VALUES);
+    expect(await store.recall('app', 'p1', CONN, NAMES, 'Lab')).toBeNull();
+  });
+
+  it('a check that throws counts as cancelled', async () => {
+    const secure = new MemorySecureStore();
+    const store = new ConnectionSecrets({
+      secure,
+      mayUseStored: async () => true,
+      confirm: () => Promise.reject(new Error('plugin')),
+    });
+    await store.remember('app', 'p1', CONN, NAMES, VALUES);
+    expect(await store.recall('app', 'p1', CONN, NAMES, 'Lab')).toBeNull();
+  });
+
+  it('bind passes the connection name to the check', async () => {
+    const { store, order } = checked([true]);
+    const bound = store.bind({
+      profileId: 'p1',
+      policy: 'device',
+      server: () => BASE,
+      connection: { dataSource: 'postgresql', type: 'c', identifier: '7' },
+      confirmAs: 'Lab desktop',
+    });
+    await store.remember('device', 'p1', CONN, NAMES, VALUES);
+    expect(await bound.recall(NAMES)).toEqual(VALUES);
+    expect(order).toContain('check:Lab desktop');
+  });
+});
+
+describe('ConnectionSecrets with the real LockService', () => {
+  it('lock on, device policy: one prompt, naming the connection, satisfies both gates', async () => {
+    const authenticate = vi.fn<(reason: string) => Promise<'ok'>>(async () => 'ok');
+    const lock = new LockService({ authenticate, availability: async () => 'available' });
+    lock.setEnabled(true);
+    const secure = new MemorySecureStore();
+    const store = new ConnectionSecrets({
+      secure,
+      mayUseStored: () => lock.ensureUnlocked('Use saved credentials', 'Cancel'),
+      confirm: (label) => lock.confirmPresence(`Unlock the saved password for ${label}`, 'Cancel'),
+    });
+    await store.remember('device', 'p1', CONN, NAMES, VALUES);
+    const all = await Promise.all([
+      store.recall('device', 'p1', CONN, NAMES, 'Lab'),
+      store.recall('device', 'p1', CONN, NAMES, 'Lab'),
+    ]);
+    expect(all).toEqual([VALUES, VALUES]);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    expect(authenticate.mock.calls[0]?.[0]).toBe('Unlock the saved password for Lab');
   });
 });
 

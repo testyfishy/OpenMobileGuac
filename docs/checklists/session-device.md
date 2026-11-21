@@ -51,8 +51,9 @@ them in Settings › Session defaults, or for one connection in More › Session
       above it; all buttons reachable; the desktop does not shrink or jump in size.
 - [ ] Docked top: the row sits below the notch / status bar; the desktop starts below it;
       toasts and the Demo badge are not hidden behind it.
-- [ ] Landscape: Left and Right put a column at that edge (the desktop fits beside it, the
-      key bar spans the rest); in portrait they fall back to the bottom row.
+- [ ] Landscape: Left and Right put a column at that edge (the desktop fits beside it; the key
+      bar is a column too on phones, see "Key column in landscape", or spans the rest with
+      Extra keys in landscape = Bottom row); in portrait they fall back to the bottom row.
 - [ ] Floating: the old collapsible bar still works (hide, handle, auto-hide after 5 s; no
       auto-hide while the keyboard is up; immersive turns the handle into an edge grip).
 - [ ] More › Toolbar buttons: add Files and Disconnect, move them, remove one, "Reset to
@@ -91,6 +92,35 @@ them in Settings › Session defaults, or for one connection in More › Session
       on a Windows remote (S1).
 - [ ] Add a custom combo (e.g. `Ctrl+Shift+T`), reorder, delete; leave and reopen the
       connection: the list is remembered and the combo fires.
+
+### Key column in landscape (KEY-5, "Extra keys in landscape")
+
+Default: Free side. Phone only (a tablet, portrait and the split layout keep the bottom row).
+
+- [ ] iPhone landscape, toolbar defaults (docked, side away from the camera): open the
+      keyboard. The keys are a column on the camera side, the toolbar on the other side; the
+      desktop is not pushed up (its top stays where it was) and nothing covers it.
+- [ ] Rotate the phone the other way (camera on the other side): toolbar and column swap sides.
+- [ ] The column's keys never sit under the Dynamic Island / punch-hole; on the side without
+      the cutout the column hugs the edge (narrow margin), as the side toolbar does.
+- [ ] Keyboard up: the column ends right above the keyboard and scrolls vertically, with a fade
+      at the edge that has more keys; set button and accent "hide keyboard" stay pinned at the
+      bottom and reachable; every key is at least a finger wide.
+- [ ] Scrolling the column up and down never hides the keyboard or presses a key; a swipe
+      towards the screen edge hides the keyboard (with the keyboard hidden: the column).
+- [ ] Ctrl tap + `c` copies; Shift double tap locks; arrows, combos, text and saved-combo keys
+      work; Fn shows F1–F12 right below the Fn key without widening the column.
+- [ ] Set button: tap = next set (toast), hold = list. Long labels wrap inside the column.
+- [ ] Toolbar > Keys with the keyboard hidden: the column shows down to the home indicator;
+      the desktop fits beside it; hiding it restores the full width.
+- [ ] Keyboard open / close several times with "Match device size" on: no resize is sent while
+      the keyboard opens or is up (session log), and the remote ends at the same size each time.
+- [ ] Session options › Extra keys in landscape: Bottom row brings back the old row; Left /
+      Right put the column there, next to a toolbar docked on the same side (toolbar at the
+      edge, keys beside it, the desktop fitted beside both).
+- [ ] Toolbar floating or docked top / bottom ("Keep in place"): the column goes to the side
+      away from the camera; the floating bar / bottom row and sheets stay clear of it.
+- [ ] Portrait, a tablet in landscape and the split layout: unchanged bottom row.
 
 ## Clipboard (CLP-1..CLP-4)
 
@@ -264,9 +294,34 @@ only fakes the server side.
 - [ ] 5 min: connect, wait 6 min with the app closed to the background, reopen: prompt.
       Use the session every few minutes for 10 min: no prompt (time counts from last use).
 - [ ] Until closed: force-quit the app and reopen: prompt (nothing was written to disk).
-- [ ] On this device: connect once, force-quit, reopen and connect: no prompt. With the app
-      lock on, Face ID / fingerprint is asked first (unless just unlocked). Cancel it: the
-      prompt appears instead.
+- [ ] On this device, "Ask for … before filling" off: connect once, force-quit, reopen and
+      connect: no prompt. With the app lock on, Face ID / fingerprint is asked first (unless
+      just unlocked). Cancel it: the prompt appears instead.
+
+#### Device check before filling ("Ask for Face ID / fingerprint …", SRV-11)
+
+- [ ] Settings › Security: the toggle names the device's method (iPhone with Face ID:
+      "Ask for Face ID …"; Touch ID; Android fingerprint; a device with only a passcode:
+      "biometrics or the device passcode"). Spanish: same, translated. Simulator / device
+      without a passcode: toggle disabled with the "Needs Face ID …" hint, and remembered
+      values fill in without asking.
+- [ ] Default with "On this device": toggle on. With "Until closed" etc.: off. Turning it on
+      for a memory choice works; turning it off shows a device prompt first (cancel: stays on).
+- [ ] On this device + toggle on, app lock off: force-quit, reopen, connect: the system
+      prompt reads "Unlock the saved password for <connection>"; pass it: connects without
+      the password prompt. Cancel it: the password prompt appears (no error, no second
+      Face ID prompt); connect, then reconnect later: the saved value is still used.
+- [ ] App lock on: open the app (unlock), connect within 30 s: one prompt only (the unlock
+      counts). Connect again a minute later: one prompt naming the connection.
+- [ ] Android: the prompt's own pause/resume does not lock the app, cover it or start a
+      second prompt; the session continues after it.
+- [ ] Two or three sessions open, background the app until the tunnels drop (iPhone), come
+      back: one prompt for all of them (or the app-lock prompt only, if it is due). Cancel it:
+      each session shows its password prompt, no further Face ID prompts.
+- [ ] A drop and automatic reconnect while the app stays in the foreground, within 30 s of
+      a check: no new prompt.
+- [ ] No prompt appears while the app is in the background; one that is due shows after
+      returning (and after the app lock, if that is showing).
 - [ ] Settings › Security › "Forget remembered connection passwords": the next connect asks.
       Switching the setting from "On this device" to any other choice deletes the saved
       values; switching to Never forgets everything.

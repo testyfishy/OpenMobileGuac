@@ -22,9 +22,18 @@ import {
  *   return; `uncover()` lifts it without a prompt when the lock is not due yet.
  * - `whenUnlocked()` is what every use of a stored token, password or TOTP seed (sign-in,
  *   silent re-login, reconnect, deep link) waits on, so nothing runs behind the lock screen.
+ * - `confirmPresence()` is the separate SRV-11 check before a remembered connection
+ *   password is filled in; it works whether or not the lock is on.
  */
 
 const RECENT_MS = 30_000;
+
+/**
+ * SRV-11: after the connection-password check was cancelled or failed, further checks in
+ * this window are not shown (the password prompt appears instead), so several sessions
+ * reconnecting at once never stack prompts after the user said no.
+ */
+export const DECLINE_MS = 10_000;
 
 /**
  * Whether the lock is enforced for a stored setting and the device's reported support.
@@ -57,6 +66,13 @@ export class LockService {
   private readonly now: () => number;
   /** Set when the prompt finishes, so a resume caused by the prompt itself is ignored. */
   private promptEndedAt = Number.NEGATIVE_INFINITY;
+  /** In the foreground (fed by `setActive`, whether or not the lock is on). */
+  private active = true;
+  private activeWaiters: (() => void)[] = [];
+  /** Last real move to the background (not one caused by the prompt). */
+  private backgroundedAt = Number.NEGATIVE_INFINITY;
+  /** Last cancelled / failed connection-password check (`DECLINE_MS`). */
+  private declinedAt = Number.NEGATIVE_INFINITY;
 
   constructor(deps: LockDeps = {}) {
     this.authenticate = deps.authenticate ?? authenticateUser;
@@ -158,6 +174,69 @@ export class LockService {
     if (!this.enabled) return true;
     if (!this.isLocked() && this.now() - this.lastUnlockAt < RECENT_MS) return true;
     return (await this.prompt(reason, cancel)) === 'ok';
+  }
+
+  /**
+   * The app went to the background (false) or came back (true). Callers skip transitions
+   * caused by the system prompt itself (`promptActive()`), as LockGate does.
+   */
+  setActive(active: boolean): void {
+    if (!active) {
+      if (this.active) this.backgroundedAt = this.now();
+      this.active = false;
+      return;
+    }
+    this.active = true;
+    const ws = this.activeWaiters;
+    this.activeWaiters = [];
+    for (const w of ws) w();
+  }
+
+  isActive(): boolean {
+    return this.active;
+  }
+
+  /** Resolves at once in the foreground, otherwise when the app comes back. */
+  whenActive(): Promise<void> {
+    if (this.active) return Promise.resolve();
+    return new Promise((resolve) => this.activeWaiters.push(resolve));
+  }
+
+  /**
+   * A successful device check (any prompt: app lock, saved credentials, a connection
+   * password) within `RECENT_MS`, with the app in the foreground the whole time since.
+   * Unlike `recentlyUnlocked()`, this does not count "the lock is off" as a check.
+   */
+  verifiedRecently(): boolean {
+    const at = this.lastUnlockAt;
+    return (
+      this.active && !this.isLocked() && at > this.backgroundedAt && this.now() - at < RECENT_MS
+    );
+  }
+
+  /**
+   * SRV-11: the check before a remembered connection password is filled in, independent of
+   * the app lock. True = the value may be used now.
+   *
+   * - No biometrics or passcode on the device (or the web build): no check, true.
+   * - Waits until the app lock is passed and the app is in the foreground, so the prompt is
+   *   never shown behind the lock screen or while in the background.
+   * - Grace: a successful check of any kind within `RECENT_MS`, without going to the
+   *   background since, counts (no second prompt).
+   * - One prompt at a time: concurrent callers share it (`prompt`).
+   * - After a cancel or failure, checks within `DECLINE_MS` return false without a prompt.
+   *   False never deletes anything: the caller shows the normal password prompt.
+   */
+  async confirmPresence(reason: string, cancel: string): Promise<boolean> {
+    const availability = await this.availabilityFn().catch(() => 'no-device-security' as const);
+    if (availability !== 'available') return true;
+    await this.whenUnlocked();
+    await this.whenActive();
+    if (this.verifiedRecently()) return true;
+    if (!this.inFlight && this.now() - this.declinedAt < DECLINE_MS) return false;
+    const outcome = await this.prompt(reason, cancel);
+    if (outcome !== 'ok') this.declinedAt = this.now();
+    return outcome === 'ok';
   }
 
   subscribe = (fn: () => void): (() => void) => {

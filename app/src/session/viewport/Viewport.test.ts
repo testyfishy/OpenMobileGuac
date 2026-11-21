@@ -6,6 +6,7 @@ import {
   canPan,
   clampToRemotePixel,
   createViewport,
+  setAlignX,
   ensureVisible,
   fitScreenScale,
   isFlinging,
@@ -521,5 +522,38 @@ describe('applyViewportCommands', () => {
       { type: 'ensure-visible', x: 1900, y: 1000, margin: 10 },
     ]);
     expect(remoteToScreen(s4, { x: 1900, y: 1000 }).x).toBeLessThanOrEqual(844 - 10 + 1e-6);
+  });
+});
+
+describe('content narrower than the free area', () => {
+  // A landscape phone: safe area 59 px on both sides, a 62 px toolbar docked on the right.
+  const base = {
+    remote: { width: 300, height: 400 },
+    screen: { width: 874, height: 402 },
+    insets: { top: 0, right: 62, bottom: 0, left: 59 },
+    mode: 'css-pixels' as const,
+  };
+
+  it('centres in the screen minus the toolbar, not in the safe area', () => {
+    const plain = createViewport(base);
+    expect(plain.offsetX).toBe(59 + (874 - 59 - 62 - 300) / 2);
+    const framed = createViewport({ ...base, frame: { top: 0, right: 62, bottom: 0, left: 0 } });
+    expect(framed.offsetX).toBe((874 - 62 - 300) / 2);
+  });
+
+  it('keeps the content inside the safe area', () => {
+    const wide = createViewport({
+      ...base,
+      remote: { width: 740, height: 400 },
+      frame: { top: 0, right: 62, bottom: 0, left: 0 },
+    });
+    expect(wide.offsetX).toBe(59);
+  });
+
+  it('aligns left or right on request', () => {
+    const v = createViewport({ ...base, frame: { top: 0, right: 62, bottom: 0, left: 0 } });
+    expect(setAlignX(v, 'left').offsetX).toBe(59);
+    expect(setAlignX(v, 'right').offsetX).toBe(874 - 62 - 300);
+    expect(setAlignX(v, 'center').offsetX).toBe(v.offsetX);
   });
 });

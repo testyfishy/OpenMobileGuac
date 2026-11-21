@@ -476,6 +476,8 @@ export const en = {
     resetConfirm: 'Delete and turn off',
     offReason: 'Turn off the app lock',
     credentialReason: 'Use saved credentials',
+    connectionReason: (name: string) => `Unlock the saved password for ${name}`,
+    connectionUnlockOffReason: 'Stop asking before filling saved connection passwords',
     cancel: 'Cancel',
   },
 
@@ -533,9 +535,23 @@ export const en = {
       device: 'On this device',
     },
     rememberConnectionHint:
-      'When a remote computer asks for its own user name and password after you choose a connection, the app can answer by itself next time, also when it reconnects after being in the background. Time limits count from the last use. Every choice except “On this device” keeps them in memory only, at most until the app is closed; “On this device” saves them in the keychain / keystore, behind the app lock when it is on. The prompt has a “Remember” box to say no for one connection.',
+      'When a remote computer asks for its own user name and password after you choose a connection, the app can answer by itself next time, also when it reconnects after being in the background. Time limits count from the last use. Every choice except “On this device” keeps them in memory only, at most until the app is closed; “On this device” saves them in the keychain / keystore, behind the app lock when it is on. The option below can also ask for a device check each time one is filled in. The prompt has a “Remember” box to say no for one connection.',
     rememberConnectionMemoryOnly:
       'This build cannot save secrets on the device: “On this device” keeps them in memory until the app closes.',
+    rememberConnectionUnlock: (method: string) =>
+      `Ask for ${method} before filling a remembered password`,
+    biometryMethods: {
+      'face-id': 'Face ID',
+      'touch-id': 'Touch ID',
+      fingerprint: 'your fingerprint',
+      face: 'face unlock',
+      iris: 'an iris scan',
+      generic: 'biometrics or the device passcode',
+    },
+    rememberConnectionUnlockHint:
+      'Each time a remembered connection password is about to be filled in, the device asks first (the device passcode also works). Cancel it to type the password instead; nothing is forgotten. One check covers what fills in during the next 30 seconds while the app stays in the foreground, and unlocking the app lock counts as a check. On by default for “On this device”.',
+    rememberConnectionUnlockUnavailable:
+      'Needs Face ID, a fingerprint or a device passcode (mobile app only). Until then, remembered passwords are filled in without asking.',
     forgetConnectionPasswords: 'Forget remembered connection passwords',
     connectionPasswordsForgotten: 'Remembered connection passwords forgotten.',
     lockOffWithSeeds:

@@ -1,9 +1,10 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { Fragment, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { SavedCombo } from '../../session/keys/ComboLibrary.ts';
 import type { Modifier, ModifierState } from '../../session/keys/KeyModel.ts';
 import { ChromeButton } from './ChromeButton.tsx';
 import { IconArrow, IconChevronDown, IconKeySets, IconKeyboardHide } from './icons.tsx';
 import {
+  columnGroups,
   parseToken,
   tokenLabel,
   tokenSpokenLabel,
@@ -36,8 +37,16 @@ export interface KeyBarProps {
   /** The soft keyboard is up: show the pinned "hide keyboard" button. */
   readonly keyboardActive?: boolean;
   readonly onHideKeyboard?: () => void;
-  /** A downward swipe on the bar: hide the keyboard (or, with it hidden, the bar). */
+  /**
+   * A downward swipe on the bar (on a side column: a sideways swipe towards the screen
+   * edge): hide the keyboard (or, with it hidden, the bar).
+   */
   readonly onSwipeDown?: () => void;
+  /**
+   * Landscape phones: a vertical column at this side of the screen instead of a row. The keys
+   * scroll vertically; the pinned buttons sit at the bottom; the sideways set swipe is off.
+   */
+  readonly column?: 'left' | 'right';
 }
 
 const ARROWS: Readonly<Record<string, 'left' | 'up' | 'down' | 'right'>> = {
@@ -61,7 +70,9 @@ const LONG_PRESS_MS = 500;
  * tap = next key only, tap again = locked, again = off. The rows scroll sideways; the set
  * switcher, "hide keyboard" and "hide extra keys" are pinned at the right edge. A downward
  * swipe hides the keyboard (opt-out); a sideways swipe at a row's end switches the set
- * (opt-in).
+ * (opt-in). As a side `column` (landscape phones) the keys scroll vertically, the pinned
+ * buttons sit at the bottom, a swipe towards the screen edge is the dismiss swipe and the
+ * set swipe is off (the set button's tap and long press still switch sets).
  */
 export function KeyBar({
   modifiers,
@@ -80,10 +91,13 @@ export function KeyBar({
   keyboardActive,
   onHideKeyboard,
   onSwipeDown,
+  column,
 }: KeyBarProps) {
   const [fnOn, setFnOn] = useState(false);
   const rows = visibleRows(layout, fnOn);
   const lastIndex = rows.length - 1;
+  // A column scrolls vertically: a set swipe there would fight the scrolling.
+  const swipeSet = column ? undefined : onSwipeSet;
   const s = sessionStrings.keyBar;
   const swipe = useRef<{
     id: number;
@@ -101,7 +115,7 @@ export function KeyBar({
 
   // The finger (or mouse) may leave the bar while swiping: follow it on the window.
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if ((!onSwipeDown && !onSwipeSet) || !e.isPrimary) return;
+    if ((!onSwipeDown && !swipeSet) || !e.isPrimary) return;
     const row = (e.target as HTMLElement).closest<HTMLElement>('.omg-keybar__row');
     swipe.current = {
       id: e.pointerId,
@@ -117,19 +131,24 @@ export function KeyBar({
       const dy = ev.clientY - sw.y;
       const dxs = ev.clientX - sw.x;
       const dx = Math.abs(dxs);
-      if (onSwipeDown && dy > SWIPE_PX && dy > dx * 1.5) {
+      // A column: towards its screen edge (vertical moves scroll the keys and never dismiss).
+      const outward = column === 'left' ? -dxs : column === 'right' ? dxs : 0;
+      const dismiss = column
+        ? outward > SWIPE_PX && outward > Math.abs(dy) * 1.5
+        : dy > SWIPE_PX && dy > dx * 1.5;
+      if (onSwipeDown && dismiss) {
         sw.done = true;
         suppressClick.current = true;
         onSwipeDown();
         return;
       }
       // Sideways: only on release, and only if the row did not scroll (it was at its end).
-      if (atEnd && onSwipeSet && dx > SET_SWIPE_PX && dx > Math.abs(dy) * 1.5) {
+      if (atEnd && swipeSet && dx > SET_SWIPE_PX && dx > Math.abs(dy) * 1.5) {
         const scrolled = Math.abs((sw.row?.scrollLeft ?? 0) - sw.scroll) > 2;
         if (!scrolled) {
           sw.done = true;
           suppressClick.current = true;
-          onSwipeSet(dxs < 0 ? 1 : -1);
+          swipeSet(dxs < 0 ? 1 : -1);
         }
       }
     };
@@ -200,11 +219,95 @@ export function KeyBar({
       </ChromeButton>
     ) : null;
 
+  const renderKey = (token: string, ki: number) => {
+    const t = parseToken(token);
+    if (!t) return null;
+    const key = `${ki}:${token}`;
+    if (t.kind === 'modifier') {
+      const state = modifiers[t.mod];
+      return (
+        <ChromeButton
+          key={key}
+          className={`omg-key omg-key--mod omg-key--${state}`}
+          aria-label={s.modifier(tokenSpokenLabel(token), s.modifierStates[state])}
+          aria-pressed={state === 'off' ? false : state === 'locked' ? true : 'mixed'}
+          onClick={() => onModifier(t.mod)}
+        >
+          {tokenLabel(token)}
+          <span className="omg-key__lock" aria-hidden="true" />
+        </ChromeButton>
+      );
+    }
+    if (t.kind === 'fn') {
+      return (
+        <ChromeButton
+          key={key}
+          className={fnOn ? 'omg-key omg-key--toggle omg-key--locked' : 'omg-key omg-key--toggle'}
+          aria-label={tokenSpokenLabel(token)}
+          aria-pressed={fnOn}
+          onClick={() => setFnOn((v) => !v)}
+        >
+          Fn
+        </ChromeButton>
+      );
+    }
+    if (t.kind === 'combo') {
+      return (
+        <ChromeButton
+          key={key}
+          className="omg-key omg-key--combo"
+          aria-label={tokenSpokenLabel(token)}
+          onClick={() => onCombo(t.text)}
+        >
+          {tokenLabel(token)}
+        </ChromeButton>
+      );
+    }
+    if (t.kind === 'text') {
+      return (
+        <ChromeButton
+          key={key}
+          className="omg-key omg-key--text"
+          aria-label={tokenSpokenLabel(token)}
+          onClick={() => onText?.(t.text)}
+        >
+          {tokenLabel(token)}
+        </ChromeButton>
+      );
+    }
+    if (t.kind === 'saved') {
+      // A key whose saved combo was deleted is not shown.
+      if (!combos.some((c) => c.id === t.id)) return null;
+      return (
+        <ChromeButton
+          key={key}
+          className="omg-key omg-key--combo"
+          aria-label={tokenSpokenLabel(token, combos)}
+          onClick={() => onSaved?.(t.id)}
+        >
+          {tokenLabel(token, combos)}
+        </ChromeButton>
+      );
+    }
+    const arrow = ARROWS[t.name];
+    return (
+      <ChromeButton
+        key={key}
+        className={WIDE.has(t.name) ? 'omg-key omg-key--wide' : 'omg-key'}
+        aria-label={tokenSpokenLabel(token)}
+        onClick={() => onKey(t.name)}
+      >
+        {arrow ? <IconArrow dir={arrow} /> : tokenLabel(token)}
+      </ChromeButton>
+    );
+  };
+
   return (
     <div
-      className="omg-keybar"
+      className={column ? `omg-keybar omg-keybar--column omg-keybar--col-${column}` : 'omg-keybar'}
       role="toolbar"
       aria-label={s.label}
+      aria-orientation={column ? 'vertical' : 'horizontal'}
       data-swipe={onSwipeDown ? 'on' : 'off'}
       onPointerDown={onPointerDown}
       onClickCapture={(e) => {
@@ -215,102 +318,30 @@ export function KeyBar({
       }}
     >
       <div className="omg-keybar__rows">
-        {rows.map((row, ri) => (
-          <div
-            key={`${ri}:${row.join(',')}`}
-            ref={scrollHint}
-            className={
-              ri === lastIndex
-                ? 'omg-keybar__row omg-scrollhint'
-                : 'omg-keybar__row omg-keybar__row--f omg-scrollhint'
-            }
-          >
-            {row.map((token, ki) => {
-              const t = parseToken(token);
-              if (!t) return null;
-              const key = `${ki}:${token}`;
-              if (t.kind === 'modifier') {
-                const state = modifiers[t.mod];
-                return (
-                  <ChromeButton
-                    key={key}
-                    className={`omg-key omg-key--mod omg-key--${state}`}
-                    aria-label={s.modifier(tokenSpokenLabel(token), s.modifierStates[state])}
-                    aria-pressed={state === 'off' ? false : state === 'locked' ? true : 'mixed'}
-                    onClick={() => onModifier(t.mod)}
-                  >
-                    {tokenLabel(token)}
-                    <span className="omg-key__lock" aria-hidden="true" />
-                  </ChromeButton>
-                );
-              }
-              if (t.kind === 'fn') {
-                return (
-                  <ChromeButton
-                    key={key}
-                    className={
-                      fnOn ? 'omg-key omg-key--toggle omg-key--locked' : 'omg-key omg-key--toggle'
-                    }
-                    aria-label={tokenSpokenLabel(token)}
-                    aria-pressed={fnOn}
-                    onClick={() => setFnOn((v) => !v)}
-                  >
-                    Fn
-                  </ChromeButton>
-                );
-              }
-              if (t.kind === 'combo') {
-                return (
-                  <ChromeButton
-                    key={key}
-                    className="omg-key omg-key--combo"
-                    aria-label={tokenSpokenLabel(token)}
-                    onClick={() => onCombo(t.text)}
-                  >
-                    {tokenLabel(token)}
-                  </ChromeButton>
-                );
-              }
-              if (t.kind === 'text') {
-                return (
-                  <ChromeButton
-                    key={key}
-                    className="omg-key omg-key--text"
-                    aria-label={tokenSpokenLabel(token)}
-                    onClick={() => onText?.(t.text)}
-                  >
-                    {tokenLabel(token)}
-                  </ChromeButton>
-                );
-              }
-              if (t.kind === 'saved') {
-                // A key whose saved combo was deleted is not shown.
-                if (!combos.some((c) => c.id === t.id)) return null;
-                return (
-                  <ChromeButton
-                    key={key}
-                    className="omg-key omg-key--combo"
-                    aria-label={tokenSpokenLabel(token, combos)}
-                    onClick={() => onSaved?.(t.id)}
-                  >
-                    {tokenLabel(token, combos)}
-                  </ChromeButton>
-                );
-              }
-              const arrow = ARROWS[t.name];
-              return (
-                <ChromeButton
-                  key={key}
-                  className={WIDE.has(t.name) ? 'omg-key omg-key--wide' : 'omg-key'}
-                  aria-label={tokenSpokenLabel(token)}
-                  onClick={() => onKey(t.name)}
-                >
-                  {arrow ? <IconArrow dir={arrow} /> : tokenLabel(token)}
-                </ChromeButton>
-              );
-            })}
+        {column ? (
+          <div ref={scrollHint} className="omg-keybar__row omg-keybar__col omg-scrollhint">
+            {columnGroups(layout, fnOn).map((group, gi) => (
+              <Fragment key={`${gi}:${group.join(',')}`}>
+                {gi > 0 && <span className="omg-keybar__sep" aria-hidden="true" />}
+                {group.map(renderKey)}
+              </Fragment>
+            ))}
           </div>
-        ))}
+        ) : (
+          rows.map((row, ri) => (
+            <div
+              key={`${ri}:${row.join(',')}`}
+              ref={scrollHint}
+              className={
+                ri === lastIndex
+                  ? 'omg-keybar__row omg-scrollhint'
+                  : 'omg-keybar__row omg-keybar__row--f omg-scrollhint'
+              }
+            >
+              {row.map(renderKey)}
+            </div>
+          ))
+        )}
       </div>
       {(switcher || onCollapse || (keyboardActive && onHideKeyboard)) && (
         <div className="omg-keybar__pinned">

@@ -79,9 +79,12 @@ import { Toolbar } from './Toolbar.tsx';
 import { ToolbarEditor } from './ToolbarEditor.tsx';
 import {
   NO_EDGES,
+  addEdges,
+  columnReserve,
   cutoutSide,
   dockReserve,
   effectiveToolbarStyle,
+  keyBarPlacement,
   landscapeSide,
   type CutoutSide,
   type Edges,
@@ -306,6 +309,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   const chromeRef = useRef<HTMLDivElement>(null);
   const keyBarRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
+  const keyColRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
 
@@ -522,13 +526,44 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     report();
     return () => ro.disconnect();
   }, [docked, dockBottom, toolbarStyle, active, keyboardActive]);
+  // ---- Key column (landscape phones): the key bar at a side, in the spare width. Its space
+  // is reserved like a side toolbar's (added to it when both share a side), so the desktop is
+  // fitted beside it and nothing is pushed up; the column is not part of the keyboard inset.
+  const keyBarPlace = keyBarPlacement({
+    setting: settings.keyBarLandscape,
+    landscape,
+    phone: isPhoneSized(),
+    split,
+    toolbar: toolbarStyle,
+    cutout,
+  });
+  const keyColumn = keyBarPlace === 'bottom' ? undefined : keyBarPlace;
+  const keyColumnShown = keyColumn !== undefined && keyBarVisible && active;
+  const [colReserve, setColReserve] = useState<Edges>(NO_EDGES);
+  useEffect(() => {
+    const el = keyColRef.current;
+    if (!keyColumn || !keyColumnShown || !el) {
+      setColReserve((r) => (sameEdges(r, NO_EDGES) ? r : NO_EDGES));
+      return;
+    }
+    const report = () => {
+      const next = columnReserve(keyColumn, el.offsetWidth);
+      setColReserve((r) => (sameEdges(r, next) ? r : next));
+    };
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    report();
+    return () => ro.disconnect();
+  }, [keyColumn, keyColumnShown]);
+  const totalReserve = useMemo(() => addEdges(reserve, colReserve), [reserve, colReserve]);
   useEffect(() => {
     // Split layout: the stage ends above the trackpad, so a bottom dock covers only that.
-    controller.setReservedInsets(split ? { ...reserve, bottom: 0 } : reserve);
-  }, [controller, reserve, split]);
+    controller.setReservedInsets(split ? { ...totalReserve, bottom: 0 } : totalReserve);
+  }, [controller, totalReserve, split]);
 
   // ---- Key bar height: part of the keyboard inset (the view pans above it; no rescale).
-  // Docked at the bottom, the whole dock (key bar + toolbar) rides above the keyboard.
+  // Docked at the bottom, the whole dock (key bar + toolbar) rides above the keyboard. A key
+  // column is outside the slot, so only the text bar (if shown) counts here.
   useEffect(() => {
     const el = dockBottom ? dockRef.current : keyBarRef.current;
     if (!el) return;
@@ -537,7 +572,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     ro.observe(el);
     report();
     return () => ro.disconnect();
-  }, [controller, keyBarVisible, textBarVisible, split, active, dockBottom]);
+  }, [controller, keyBarVisible, textBarVisible, split, active, dockBottom, keyColumn]);
 
   // ---- Immersive (DSP-7)
   useEffect(() => {
@@ -754,8 +789,12 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     '--omg-split-top': splitTop,
     '--omg-dock-top': `${reserve.top}px`,
     '--omg-dock-bottom': `${reserve.bottom}px`,
-    '--omg-dock-left': `${reserve.left}px`,
-    '--omg-dock-right': `${reserve.right}px`,
+    // Side toolbar + key column: what the bottom dock, sheets and toasts keep clear of.
+    '--omg-dock-left': `${totalReserve.left}px`,
+    '--omg-dock-right': `${totalReserve.right}px`,
+    // The toolbar alone: a key column on its side sits next to it.
+    '--omg-toolbar-left': `${reserve.left}px`,
+    '--omg-toolbar-right': `${reserve.right}px`,
   } as CSSProperties;
   const effectiveMode: PointerMode =
     settings.pointerMode === 'touch' && !touchOffered ? 'direct' : settings.pointerMode;
@@ -856,6 +895,38 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       onActivity={bump}
     />
   );
+  const keyBar = keyBarVisible && (
+    <KeyBar
+      modifiers={snap.modifiers}
+      layout={activeSet.rows}
+      onKey={(name) => controller.pressKey(name)}
+      onModifier={(mod) => controller.tapModifier(mod)}
+      onCombo={runComboText}
+      onText={(text) => controller.typeText(text)}
+      onSaved={runSaved}
+      combos={library.combos}
+      setName={keySetName(activeSet)}
+      onNextSet={() => chooseSet(stepSet(sets, activeSet.id, 1).id, true)}
+      {...(settings.keySetLongPress ? { onPickSet: () => setMenu('keypicker') } : {})}
+      {...(settings.keySetSwipe
+        ? { onSwipeSet: (d: -1 | 1) => chooseSet(stepSet(sets, activeSet.id, d).id, true) }
+        : {})}
+      onCollapse={
+        split || !settings.keyBarCollapseButton ? undefined : () => setKeyBarMode('hidden')
+      }
+      keyboardActive={keyboardActive}
+      onHideKeyboard={toggleKeyboard}
+      {...(settings.keyBarSwipeDismiss
+        ? {
+            onSwipeDown: () => {
+              if (keyboardActive) toggleKeyboard();
+              else if (!split) setKeyBarMode('hidden');
+            },
+          }
+        : {})}
+      {...(keyColumn ? { column: keyColumn } : {})}
+    />
+  );
   const keyBarSlot = (
     <div ref={keyBarRef} className="omg-keybar-slot">
       {textBarVisible && (
@@ -870,37 +941,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
           }}
         />
       )}
-      {keyBarVisible && (
-        <KeyBar
-          modifiers={snap.modifiers}
-          layout={activeSet.rows}
-          onKey={(name) => controller.pressKey(name)}
-          onModifier={(mod) => controller.tapModifier(mod)}
-          onCombo={runComboText}
-          onText={(text) => controller.typeText(text)}
-          onSaved={runSaved}
-          combos={library.combos}
-          setName={keySetName(activeSet)}
-          onNextSet={() => chooseSet(stepSet(sets, activeSet.id, 1).id, true)}
-          {...(settings.keySetLongPress ? { onPickSet: () => setMenu('keypicker') } : {})}
-          {...(settings.keySetSwipe
-            ? { onSwipeSet: (d: -1 | 1) => chooseSet(stepSet(sets, activeSet.id, d).id, true) }
-            : {})}
-          onCollapse={
-            split || !settings.keyBarCollapseButton ? undefined : () => setKeyBarMode('hidden')
-          }
-          keyboardActive={keyboardActive}
-          onHideKeyboard={toggleKeyboard}
-          {...(settings.keyBarSwipeDismiss
-            ? {
-                onSwipeDown: () => {
-                  if (keyboardActive) toggleKeyboard();
-                  else if (!split) setKeyBarMode('hidden');
-                },
-              }
-            : {})}
-        />
-      )}
+      {!keyColumn && keyBar}
     </div>
   );
 
@@ -915,6 +956,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
         data-split={split ? 'on' : 'off'}
         data-immersive={settings.immersive ? 'on' : 'off'}
         data-toolbar={toolbarStyle}
+        data-keybar={keyColumn ?? 'bottom'}
         data-cutout={landscape ? cutout : 'unknown'}
         data-active={active ? 'true' : 'false'}
         aria-hidden={active ? undefined : true}
@@ -971,6 +1013,16 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
             <>
               {isDemo && <div className="omg-badge">{t.common.demo}</div>}
               {docked && !dockBottom && toolbar}
+              {keyColumn && keyBarVisible && (
+                <div
+                  ref={keyColRef}
+                  className={`omg-keycol omg-keycol--${keyColumn}`}
+                  // Next to a toolbar docked on the same side, or at the screen edge.
+                  data-edge={toolbarStyle === `dock-${keyColumn}` ? 'inner' : 'outer'}
+                >
+                  {keyBar}
+                </div>
+              )}
               <div ref={dockRef} className="omg-dock">
                 {dockBottom ? (
                   <>

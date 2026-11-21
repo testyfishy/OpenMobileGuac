@@ -27,6 +27,17 @@ export interface ConnectionSecretsOptions {
    * gate as saved server passwords (SRV-6(b)).
    */
   readonly mayUseStored: () => Promise<boolean>;
+  /**
+   * Resolves once stored secrets may be looked at (the start-up "sign out after …" check
+   * has run), without any prompt. The app passes `AuthService.storedSecretsReady`.
+   */
+  readonly storedReady?: () => Promise<void>;
+  /**
+   * The device check before a remembered value is released, when the session asks for one
+   * ("Ask for Face ID / fingerprint …"). `label` names the connection in the prompt. The
+   * app passes `LockService.confirmPresence`. Without it, no check is made.
+   */
+  readonly confirm?: (label: string) => Promise<boolean>;
   readonly now?: () => number;
 }
 
@@ -41,6 +52,8 @@ export interface ConnectionSecretsOptions {
 export class ConnectionSecrets {
   private readonly secure: SecureStore;
   private readonly mayUseStored: () => Promise<boolean>;
+  private readonly storedReady: () => Promise<void>;
+  private readonly confirm: (label: string) => Promise<boolean>;
   private readonly now: () => number;
   /** profile id → entry key → entry (memory policies). */
   private readonly memory = new Map<string, Map<string, RememberedEntry>>();
@@ -50,36 +63,58 @@ export class ConnectionSecrets {
   constructor(opts: ConnectionSecretsOptions) {
     this.secure = opts.secure;
     this.mayUseStored = opts.mayUseStored;
+    this.storedReady = opts.storedReady ?? (() => Promise.resolve());
+    const confirm = opts.confirm;
+    this.confirm = confirm ? (label) => confirm(label).catch(() => false) : async () => true;
     this.now = opts.now ?? (() => Date.now());
   }
 
-  /** Remembered values for every requested name, or null (then the user is asked). */
+  /**
+   * Remembered values for every requested name, or null (then the user is asked).
+   *
+   * `confirmAs` (the connection's name): release the values only after the device check
+   * ("Ask for Face ID / fingerprint …"). The check is made only when there is something to
+   * fill, before anything is returned; for a value saved on the device it comes before the
+   * app-lock gate, which a successful check satisfies (one prompt, naming the connection).
+   * A cancelled or failed check returns null and keeps the value (the user types it this
+   * time). The entry is looked up again after the check: it may have expired or been
+   * forgotten while the prompt was showing.
+   */
   async recall(
     policy: RememberPolicy,
     profileId: string,
     target: RememberTarget,
     names: readonly string[],
+    confirmAs?: string,
   ): Promise<Record<string, string> | null> {
     this.prune(policy);
     if (policy === 'never') return null;
     const key = entryKey(target, names);
-    const now = this.now();
-    const mem = this.memory.get(profileId)?.get(key);
-    if (mem) {
-      const answer = answerFor(mem, names);
-      if (answer) {
+    const inMemory = (): Record<string, string> | null => {
+      const mem = this.memory.get(profileId)?.get(key);
+      return mem ? answerFor(mem, names) : null;
+    };
+    if (inMemory()) {
+      if (confirmAs !== undefined && !(await this.confirm(confirmAs))) return null;
+      this.prune(policy);
+      const mem = this.memory.get(profileId)?.get(key);
+      const answer = mem ? answerFor(mem, names) : null;
+      if (mem && answer) {
         // Time limits count from the last use.
-        this.memory.get(profileId)?.set(key, { ...mem, at: now });
+        this.memory.get(profileId)?.set(key, { ...mem, at: this.now() });
         return answer;
       }
     }
     if (policy !== 'device') return null;
-    const record = await this.read(profileId);
-    const saved = record.get(key);
-    if (!saved) return null;
+    await this.storedReady();
+    const saved = (await this.read(profileId)).get(key);
+    if (!saved || !answerFor(saved, names)) return null;
+    if (confirmAs !== undefined && !(await this.confirm(confirmAs))) return null;
     // Only after the lock / biometric gate, as for a saved server password.
     if (!(await this.mayUseStored())) return null;
-    return answerFor(saved, names);
+    if (confirmAs === undefined) return answerFor(saved, names);
+    const again = (await this.read(profileId)).get(key);
+    return again ? answerFor(again, names) : null;
   }
 
   /** Keeps values the user typed (after the connection succeeded). */
@@ -162,6 +197,8 @@ export class ConnectionSecrets {
     readonly policy: RememberPolicy;
     readonly server: () => string | undefined;
     readonly connection: Omit<RememberTarget, 'server'>;
+    /** Set (the connection's name) when values are released only after the device check. */
+    readonly confirmAs?: string;
   }): BoundConnectionSecrets {
     let known: RememberTarget | null = null;
     const where = (): RememberTarget | null => {
@@ -170,12 +207,12 @@ export class ConnectionSecrets {
       known = { ...opts.connection, server };
       return known;
     };
-    const { profileId, policy } = opts;
+    const { profileId, policy, confirmAs } = opts;
     return {
       policy,
       recall: async (names) => {
         const at = where();
-        return at ? this.recall(policy, profileId, at, names) : null;
+        return at ? this.recall(policy, profileId, at, names, confirmAs) : null;
       },
       remember: (names, values) => {
         const at = where();

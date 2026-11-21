@@ -309,6 +309,14 @@ export const sessionEs: SessionStrings = {
     toolbarLandscape: 'Barra fija en horizontal',
     toolbarLandscapeHint:
       'Con el teléfono en horizontal, una barra fijada arriba o abajo pasa a este lado y deja toda la altura para el escritorio. El lado opuesto a la cámara da la columna más estrecha.',
+    displayAlign: 'Posición del escritorio',
+    displayAlignHint:
+      'Dónde queda el escritorio cuando es más estrecho que la pantalla, por ejemplo con píxeles 1:1 en horizontal. Centro es el medio del espacio junto a una barra lateral.',
+    displayAlignOptions: {
+      left: 'Izquierda',
+      center: 'Centro',
+      right: 'Derecha',
+    },
     toolbarLandscapeOptions: {
       same: 'No mover',
       away: 'Lado opuesto a la cámara',
@@ -340,7 +348,7 @@ export const sessionEs: SessionStrings = {
       'Las teclas que se muestran sobre el teclado. Crea y edita conjuntos en Ajustes › Teclas y combinaciones o desde la barra de teclas.',
     keySetSwipe: 'Deslizar de lado en la barra de teclas para cambiar de conjunto',
     keySetSwipeHint:
-      'Funciona cuando la fila está desplazada hasta el final. Desactivado: usa el botón de cambio al final de la barra.',
+      'Funciona cuando la fila está desplazada hasta el final (no en una columna lateral). Desactivado: usa el botón de cambio al final de la barra.',
     remoteFiles: 'Archivos del remoto',
     remoteFilesHint:
       'Archivos y trabajos de impresión RDP que el equipo remoto envía a este dispositivo.',
@@ -363,7 +371,17 @@ export const sessionEs: SessionStrings = {
     keyBarCollapseButtonHint:
       'Un botón al final de las teclas extra que las oculta. Desactivado deja más sitio para teclas; el botón de la barra de herramientas sigue mostrando y ocultando las teclas.',
     keyBarSwipeDismiss: 'Deslizar hacia abajo en las teclas extra para ocultar el teclado',
-    keyBarSwipeDismissHint: 'Con el teclado oculto, el gesto oculta la barra de teclas.',
+    keyBarSwipeDismissHint:
+      'Con el teclado oculto, el gesto oculta la barra de teclas. En una columna lateral (en horizontal), desliza hacia el borde de la pantalla.',
+    keyBarLandscape: 'Teclas extra en horizontal',
+    keyBarLandscapeHint:
+      'Con el teléfono en horizontal, una columna a un lado usa el ancho que sobra en vez de subir el escritorio. Lado libre: el lado que deja libre una barra lateral, o el opuesto a la cámara.',
+    keyBarLandscapeOptions: {
+      side: 'Lado libre',
+      bottom: 'Fila inferior',
+      left: 'Lado izquierdo',
+      right: 'Lado derecho',
+    },
     haptics: 'Respuesta háptica',
     hapticsHint: 'Una vibración ligera al hacer clic, clic derecho y arrastrar',
     keepAwake: 'Mantener la pantalla encendida',

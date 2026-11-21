@@ -1,7 +1,14 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { describeRequiredParams } from '../../session/credentials/requiredParams.ts';
-import type { RememberPolicy } from '../../session/credentials/rememberedParams.ts';
+import { BiometryType } from '@aparajita/capacitor-biometric-auth';
+import {
+  rememberUnlockOn,
+  type RememberPolicy,
+} from '../../session/credentials/rememberedParams.ts';
+import { en } from '../i18n/en.ts';
+import { es } from '../i18n/es.ts';
+import { biometryMethodFor } from '../services/native.ts';
 import {
   DEFAULT_APP_SETTINGS,
   parseAppSettings,
@@ -73,5 +80,61 @@ describe('"Remember connection passwords" setting', () => {
     const current = { ...DEFAULT_APP_SETTINGS, rememberConnectionPasswords: 'never' as const };
     const restored = settingsFromBackup(current, { rememberConnectionPasswords: 'device' });
     expect(restored.rememberConnectionPasswords).toBe('never');
+  });
+});
+
+describe('"Ask for Face ID / fingerprint before filling" setting', () => {
+  it('defaults to auto and parses stored values', () => {
+    expect(DEFAULT_APP_SETTINGS.rememberConnectionUnlock).toBe('auto');
+    expect(parseAppSettings({}).rememberConnectionUnlock).toBe('auto');
+    expect(parseAppSettings({ rememberConnectionUnlock: 'on' }).rememberConnectionUnlock).toBe(
+      'on',
+    );
+    expect(parseAppSettings({ rememberConnectionUnlock: 'off' }).rememberConnectionUnlock).toBe(
+      'off',
+    );
+    expect(parseAppSettings({ rememberConnectionUnlock: true }).rememberConnectionUnlock).toBe(
+      'auto',
+    );
+  });
+
+  it('auto = on for "On this device" only; on/off apply to every remembered value', () => {
+    expect(rememberUnlockOn('auto', 'device')).toBe(true);
+    for (const p of ['5m', '15m', '1h', 'app'] as const) {
+      expect(rememberUnlockOn('auto', p)).toBe(false);
+      expect(rememberUnlockOn('on', p)).toBe(true);
+    }
+    expect(rememberUnlockOn('off', 'device')).toBe(false);
+    expect(rememberUnlockOn('on', 'never')).toBe(false);
+  });
+
+  it('is off where the device has no biometrics or passcode (no check, no lock-out)', () => {
+    expect(rememberUnlockOn('on', 'device', false)).toBe(false);
+    expect(rememberUnlockOn('auto', 'device', false)).toBe(false);
+  });
+
+  it('is kept from this device when settings are restored from a backup', () => {
+    const current = { ...DEFAULT_APP_SETTINGS, rememberConnectionUnlock: 'off' as const };
+    expect(
+      settingsFromBackup(current, { rememberConnectionUnlock: 'on' }).rememberConnectionUnlock,
+    ).toBe('off');
+  });
+
+  it('names the device method in the label and the connection in the prompt', () => {
+    expect(biometryMethodFor([BiometryType.faceId])).toBe('face-id');
+    expect(biometryMethodFor([BiometryType.fingerprintAuthentication])).toBe('fingerprint');
+    expect(biometryMethodFor([BiometryType.none])).toBe('generic');
+    expect(
+      biometryMethodFor([BiometryType.fingerprintAuthentication, BiometryType.faceAuthentication]),
+    ).toBe('generic');
+    expect(en.settings.rememberConnectionUnlock(en.settings.biometryMethods['face-id'])).toBe(
+      'Ask for Face ID before filling a remembered password',
+    );
+    expect(en.lock.connectionReason('Lab desktop')).toBe(
+      'Unlock the saved password for Lab desktop',
+    );
+    expect(es.lock.connectionReason('Lab desktop')).toBe(
+      'Desbloquear la contraseña guardada de Lab desktop',
+    );
   });
 });

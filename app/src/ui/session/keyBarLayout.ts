@@ -105,6 +105,24 @@ export function tokenSpokenLabel(token: string, combos: readonly SavedCombo[] = 
   return s.spoken[name] ?? name;
 }
 
+/**
+ * The keys of a side column (landscape phones), as groups shown top to bottom with a divider
+ * between them. One column of fixed width, so showing the F keys never widens it (which would
+ * refit the desktop): a set whose first row has Fn shows that row, and with Fn on the other
+ * rows are inserted right after the Fn key, under the finger. Other sets list their rows in
+ * order.
+ */
+export function columnGroups(layout: KeyBarLayout, fnOn: boolean): string[][] {
+  const [first, ...rest] = layout;
+  if (!first) return [];
+  const fn = first.indexOf('Fn');
+  if (fn < 0) return layout.map((r) => [...r]).filter((r) => r.length > 0);
+  if (!fnOn) return [[...first]];
+  return [first.slice(0, fn + 1), ...rest.map((r) => [...r]), first.slice(fn + 1)].filter(
+    (r) => r.length > 0,
+  );
+}
+
 /** Normalise a stored legacy layout. Returns null for "none". */
 export function normalizeKeyBarLayout(raw: unknown): string[][] | null {
   return normalizeRows(raw);

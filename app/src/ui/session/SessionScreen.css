@@ -2129,3 +2129,156 @@
 .omg-pill--viewers {
   border-color: color-mix(in srgb, var(--_accent, #4a90e2) 80%, transparent);
 }
+
+/* ---- Key column (landscape phones, `keyBarLandscape`): the extra keys at a side, in the width
+   a wide screen has spare, from below a top dock down to the keyboard. The space is reserved
+   like a side toolbar's (`--omg-dock-left/right` hold both), so nothing is pushed up. */
+.omg-keycol {
+  position: absolute;
+  top: var(--omg-dock-top, 0px);
+  bottom: var(--_kb);
+  z-index: 1;
+  display: flex;
+}
+
+/* Next to a toolbar docked on the same side (`--omg-toolbar-*` is 0 without one). */
+.omg-keycol--left {
+  left: var(--omg-toolbar-left, 0px);
+}
+
+.omg-keycol--right {
+  right: var(--omg-toolbar-right, 0px);
+}
+
+.omg-keybar--column {
+  flex-direction: column;
+  align-items: stretch;
+  height: 100%;
+  padding: calc(env(safe-area-inset-top, 0px) + 4px) 4px 4px;
+  border-top: 0;
+  touch-action: pan-y;
+}
+
+.omg-keycol--left .omg-keybar--column {
+  border-right: 1px solid var(--_border);
+}
+
+.omg-keycol--right .omg-keybar--column {
+  border-left: 1px solid var(--_border);
+}
+
+/* At the screen edge the column keeps that side's whole safe area: the camera cutout may be
+   there, and that strip is dead space anyway. */
+.omg-keycol--left[data-edge='outer'] .omg-keybar--column {
+  padding-left: calc(env(safe-area-inset-left, 0px) + 4px);
+}
+
+.omg-keycol--right[data-edge='outer'] .omg-keybar--column {
+  padding-right: calc(env(safe-area-inset-right, 0px) + 4px);
+}
+
+/* The cutout is on the other side: this side's safe area only clears the rounded corners,
+   which a narrow margin (and a little room at the top) does as well (as the side toolbar). */
+.omg-session[data-cutout='left'] .omg-keycol--right[data-edge='outer'] .omg-keybar--column {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+  padding-right: calc(min(env(safe-area-inset-right, 0px), 12px) + 4px);
+}
+
+.omg-session[data-cutout='right'] .omg-keycol--left[data-edge='outer'] .omg-keybar--column {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+  padding-left: calc(min(env(safe-area-inset-left, 0px), 12px) + 4px);
+}
+
+/* Keyboard hidden: the column reaches the bottom edge (home indicator). */
+.omg-session[data-keyboard='closed'] .omg-keycol .omg-keybar--column {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 4px);
+}
+
+.omg-keybar--column[data-swipe='on'] {
+  touch-action: pan-y;
+}
+
+.omg-keybar--column .omg-keybar__rows {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.omg-keybar__col {
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Vertical moves scroll the keys; a sideways one towards the edge is the dismiss swipe. */
+  touch-action: pan-y;
+  scroll-snap-type: y proximity;
+}
+
+/* One fixed width (Fn and set changes never refit the desktop); long labels wrap. */
+.omg-keybar--column .omg-key {
+  width: 52px;
+  min-width: 0;
+  padding: 2px;
+  font-size: 12px;
+  line-height: 1.15;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+
+.omg-keybar--column .omg-key--text {
+  font-size: 11px;
+  white-space: normal;
+}
+
+.omg-keybar__sep {
+  flex: none;
+  height: 1px;
+  margin: 2px 6px;
+  background: var(--_border);
+}
+
+.omg-keybar--column .omg-keybar__pinned {
+  flex-direction: column;
+  padding: 4px 0 0;
+  border-left: 0;
+  border-top: 1px solid var(--_border);
+}
+
+.omg-keybar--column .omg-key--set {
+  max-width: none;
+  justify-content: center;
+}
+
+.omg-keybar--column .omg-key__set-name {
+  display: none;
+}
+
+/* "Hide extra keys" points towards the edge the column goes to. */
+.omg-keycol--left .omg-key--collapse svg {
+  transform: rotate(90deg);
+}
+
+.omg-keycol--right .omg-key--collapse svg {
+  transform: rotate(-90deg);
+}
+
+/* The bottom dock (text bar, a floating or bottom toolbar), sheets and toasts leave it free. */
+.omg-session[data-keybar='left'] .omg-dock,
+.omg-session[data-keybar='left'] .omg-sheet-layer {
+  left: var(--omg-dock-left, 0px);
+}
+
+.omg-session[data-keybar='right'] .omg-dock,
+.omg-session[data-keybar='right'] .omg-sheet-layer {
+  right: var(--omg-dock-right, 0px);
+}
+
+.omg-session[data-keybar='left'] .omg-badge,
+.omg-session[data-keybar='left'] .omg-toast-region {
+  left: calc(var(--omg-dock-left, 0px) + 8px);
+}
+
+.omg-session[data-keybar='right'] .omg-toast-region {
+  right: var(--omg-dock-right, 0px);
+}

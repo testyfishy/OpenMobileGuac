@@ -479,6 +479,9 @@ export const es: Strings = {
     resetConfirm: 'Borrar y desactivar',
     offReason: 'Desactivar el bloqueo de la app',
     credentialReason: 'Usar las credenciales guardadas',
+    connectionReason: (name: string) => `Desbloquear la contraseña guardada de ${name}`,
+    connectionUnlockOffReason:
+      'Dejar de pedirlo antes de rellenar las contraseñas de conexión guardadas',
     cancel: 'Cancelar',
   },
 
@@ -590,9 +593,23 @@ export const es: Strings = {
       device: 'En este dispositivo',
     },
     rememberConnectionHint:
-      'Cuando un equipo remoto pide su propio usuario y contraseña después de elegir una conexión, la app puede responder sola la próxima vez, también al reconectar después de estar en segundo plano. Los límites de tiempo cuentan desde el último uso. Todas las opciones salvo «En este dispositivo» los guardan solo en memoria, como mucho hasta que se cierra la app; «En este dispositivo» los guarda en el llavero / almacén de claves, detrás del bloqueo de la app si está activado. El aviso tiene una casilla «Recordar» para decir que no en una conexión.',
+      'Cuando un equipo remoto pide su propio usuario y contraseña después de elegir una conexión, la app puede responder sola la próxima vez, también al reconectar después de estar en segundo plano. Los límites de tiempo cuentan desde el último uso. Todas las opciones salvo «En este dispositivo» los guardan solo en memoria, como mucho hasta que se cierra la app; «En este dispositivo» los guarda en el llavero / almacén de claves, detrás del bloqueo de la app si está activado. La opción de abajo también puede pedir una comprobación del dispositivo cada vez que se rellena una. El aviso tiene una casilla «Recordar» para decir que no en una conexión.',
     rememberConnectionMemoryOnly:
       'Esta versión no puede guardar secretos en el dispositivo: «En este dispositivo» los guarda en memoria hasta que se cierra la app.',
+    rememberConnectionUnlock: (method: string) =>
+      `Pedir ${method} antes de rellenar una contraseña recordada`,
+    biometryMethods: {
+      'face-id': 'Face ID',
+      'touch-id': 'Touch ID',
+      fingerprint: 'la huella',
+      face: 'el desbloqueo facial',
+      iris: 'el escaneo del iris',
+      generic: 'la biometría o el código del dispositivo',
+    },
+    rememberConnectionUnlockHint:
+      'Cada vez que se va a rellenar una contraseña de conexión recordada, el dispositivo lo pide antes (también vale el código del dispositivo). Cancélalo para escribir la contraseña; no se olvida nada. Una comprobación vale para lo que se rellene en los 30 segundos siguientes mientras la app siga en primer plano, y desbloquear el bloqueo de la app cuenta como comprobación. Activado por defecto con «En este dispositivo».',
+    rememberConnectionUnlockUnavailable:
+      'Necesita Face ID, una huella o un código del dispositivo (solo en la app móvil). Mientras tanto, las contraseñas recordadas se rellenan sin preguntar.',
     forgetConnectionPasswords: 'Olvidar las contraseñas de conexión recordadas',
     connectionPasswordsForgotten: 'Contraseñas de conexión recordadas olvidadas.',
     lockOffWithSeeds:

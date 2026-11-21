@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TunnelTargetTypes } from '../../core/api/tunnel.ts';
 import { TOKEN_HEADER } from '../../core/api/GuacApi.ts';
 import { streamDownloadUrl } from '../../session/transfer/savedFiles.ts';
+import { rememberUnlockOn } from '../../session/credentials/rememberedParams.ts';
 import type { ConnectionRef } from '../../core/storage/ProfileStore.ts';
 import type { TunnelLike } from '../../core/transport/TunnelLike.ts';
 import { Dialog } from '../components/Dialog.tsx';
@@ -245,8 +246,13 @@ export default function SessionHost({
   // SRV-11: remembered answers to the remote computer's own sign-in prompt, bound to this
   // server (profile id and signed-in address) and this connection. Not for the Demo, a
   // joined session or a share link (someone else's connection). The policy is read at each
-  // use, so a change in Settings applies to sessions already open.
+  // use, so a change in Settings applies to sessions already open. With "Ask for Face ID /
+  // fingerprint …" on, a remembered value is released only after the device check, whose
+  // prompt names this connection (no check where the device has none: confirmPresence).
   const rememberPolicy = app.rememberConnectionPasswords;
+  const confirmAs = rememberUnlockOn(app.rememberConnectionUnlock, rememberPolicy)
+    ? target.name
+    : undefined;
   const credentialMemory = useMemo(
     () =>
       isDemo || joined || isShareServerId(serverId)
@@ -260,8 +266,10 @@ export default function SessionHost({
               type: target.type,
               identifier: target.identifier,
             },
+            ...(confirmAs !== undefined ? { confirmAs } : {}),
           }),
     [
+      confirmAs,
       isDemo,
       joined,
       serverId,

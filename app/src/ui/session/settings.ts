@@ -8,7 +8,7 @@
  */
 
 import type { GestureConfig } from '../../session/gesture/GestureRecognizer.ts';
-import type { FitMode } from '../../session/viewport/Viewport.ts';
+import { ALIGN_X, type AlignX, type FitMode } from '../../session/viewport/Viewport.ts';
 import {
   AUDIO_MODES,
   QUALITIES,
@@ -22,15 +22,19 @@ import { GENERAL_SET_ID, isKeySetId } from '../../session/keys/KeySets.ts';
 import type { CommandKeyMode } from '../../session/keys/HardwareKeyboard.ts';
 import { normalizeKeyBarLayout } from './keyBarLayout.ts';
 import {
+  KEY_BAR_LANDSCAPE,
   TOOLBAR_LANDSCAPE,
   TOOLBAR_STYLES,
   normalizeToolbarItems,
+  type KeyBarLandscape,
   type ToolbarLandscape,
   type ToolbarStyle,
 } from './toolbarItems.ts';
 
 export interface SessionSettings {
   fitMode: FitMode;
+  /** Where a desktop narrower than the free width sits (1:1 pixels, a tall remote). */
+  displayAlign: AlignX;
   pointerMode: PointerMode;
   /**
    * DSP-4: follow the view: send the new size when the area the desktop is drawn in changes
@@ -152,6 +156,12 @@ export interface SessionSettings {
   keyBarSwipeDismiss?: boolean;
   /** A "hide extra keys" button at the right end of the key bar (the toolbar hides it too). */
   keyBarCollapseButton?: boolean;
+  /**
+   * Phones in landscape: the extra key bar as a row at the bottom (pushing the view up) or a
+   * column at a side, in the width a wide screen has spare (`side`: the side the toolbar does
+   * not use). Portrait, tablets and the split layout always use the row.
+   */
+  keyBarLandscape?: KeyBarLandscape;
 
   // ---- Gesture switches (Settings › Gestures; optional for compatibility, all on by default)
   /** Touch and hold: right click (direct) or drag (trackpad). Off: a hold is a tap. */
@@ -190,6 +200,7 @@ export type ResolvedSessionSettings = Required<SessionSettings>;
 
 export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   fitMode: 'fit-screen',
+  displayAlign: 'center',
   pointerMode: 'direct',
   matchDeviceSize: true,
   pointerSpeed: 1,
@@ -233,6 +244,7 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   tapDismissKeyboard: 'off',
   keyBarSwipeDismiss: true,
   keyBarCollapseButton: false,
+  keyBarLandscape: 'side',
   gestureLongPress: true,
   gestureTwoFingerTap: true,
   gestureThreeFingerTap: true,
@@ -320,6 +332,7 @@ export function normalizeSessionSettings(
   const d = DEFAULT_SESSION_SETTINGS;
   return {
     fitMode: oneOf(raw['fitMode'], FIT_MODES_LIST, d.fitMode),
+    displayAlign: oneOf(raw['displayAlign'], ALIGN_X, d.displayAlign),
     pointerMode: oneOf(raw['pointerMode'], POINTER_MODES_LIST, d.pointerMode),
     matchDeviceSize: bool(raw['matchDeviceSize'], d.matchDeviceSize),
     pointerSpeed: clampTo(raw['pointerSpeed'], 'pointerSpeed'),
@@ -368,6 +381,7 @@ export function normalizeSessionSettings(
     tapDismissKeyboard: tapDismiss(raw['tapDismissKeyboard']),
     keyBarSwipeDismiss: bool(raw['keyBarSwipeDismiss'], d.keyBarSwipeDismiss),
     keyBarCollapseButton: bool(raw['keyBarCollapseButton'], d.keyBarCollapseButton),
+    keyBarLandscape: oneOf(raw['keyBarLandscape'], KEY_BAR_LANDSCAPE, d.keyBarLandscape),
     gestureLongPress: bool(raw['gestureLongPress'], d.gestureLongPress),
     gestureTwoFingerTap: bool(raw['gestureTwoFingerTap'], d.gestureTwoFingerTap),
     gestureThreeFingerTap: bool(raw['gestureThreeFingerTap'], d.gestureThreeFingerTap),
@@ -418,12 +432,14 @@ export const INPUT_SETTING_KEYS = [
   'commandKey',
   'toolbarStyle',
   'toolbarLandscape',
+  'displayAlign',
   'toolbarItems',
   'toolbarLabels',
   'toolbarAutoHide',
   'tapDismissKeyboard',
   'keyBarSwipeDismiss',
   'keyBarCollapseButton',
+  'keyBarLandscape',
   'gestureLongPress',
   'gestureTwoFingerTap',
   'gestureThreeFingerTap',

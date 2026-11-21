@@ -1,6 +1,7 @@
 import {
   BiometricAuth,
   BiometryErrorType,
+  BiometryType,
   type BiometryError,
 } from '@aparajita/capacitor-biometric-auth';
 import { App as CapApp } from '@capacitor/app';
@@ -179,6 +180,43 @@ export async function biometryAvailability(): Promise<BiometryAvailability> {
     return r.isAvailable || r.deviceIsSecure ? 'available' : 'no-device-security';
   } catch {
     return 'no-device-security';
+  }
+}
+
+/**
+ * The device's biometric method, for wording only ("Ask for Face ID …"). `generic`: no
+ * biometrics enrolled (passcode only), several kinds, an unknown kind, or the web build.
+ */
+export type BiometryMethod = 'face-id' | 'touch-id' | 'fingerprint' | 'face' | 'iris' | 'generic';
+
+export function biometryMethodFor(types: readonly number[]): BiometryMethod {
+  const kinds = [...new Set(types.filter((t) => t !== BiometryType.none))];
+  if (kinds.length !== 1) return 'generic';
+  switch (kinds[0]) {
+    case BiometryType.faceId:
+      return 'face-id';
+    case BiometryType.touchId:
+      return 'touch-id';
+    case BiometryType.fingerprintAuthentication:
+      return 'fingerprint';
+    case BiometryType.faceAuthentication:
+      return 'face';
+    case BiometryType.irisAuthentication:
+      return 'iris';
+    default:
+      return 'generic';
+  }
+}
+
+export async function biometryMethod(): Promise<BiometryMethod> {
+  if (!native()) return 'generic';
+  try {
+    const r = await BiometricAuth.checkBiometry();
+    if (!r.isAvailable) return 'generic';
+    const types = Array.isArray(r.biometryTypes) ? r.biometryTypes : [r.biometryType];
+    return biometryMethodFor(types);
+  } catch {
+    return 'generic';
   }
 }
 

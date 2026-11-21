@@ -35,6 +35,34 @@ export function parseRememberPolicy(raw: unknown): RememberPolicy {
     : DEFAULT_REMEMBER_POLICY;
 }
 
+/**
+ * "Ask for Face ID / fingerprint before filling a remembered connection password": a
+ * device check (biometrics or the device passcode) each time a remembered value is about
+ * to be sent. `auto` (the default) = on for "On this device", off for the memory-only
+ * choices; `on` / `off` = the user's own choice, for every policy.
+ */
+export type RememberUnlock = 'auto' | 'on' | 'off';
+
+export const DEFAULT_REMEMBER_UNLOCK: RememberUnlock = 'auto';
+
+export function parseRememberUnlock(raw: unknown): RememberUnlock {
+  return raw === 'auto' || raw === 'on' || raw === 'off' ? raw : DEFAULT_REMEMBER_UNLOCK;
+}
+
+/**
+ * Whether remembered values are released only after a device check. `deviceCheck`: the
+ * device has biometrics or a passcode (false on the web build or with nothing set up:
+ * then there is no check, and Settings shows the toggle disabled with a hint).
+ */
+export function rememberUnlockOn(
+  setting: RememberUnlock,
+  policy: RememberPolicy,
+  deviceCheck = true,
+): boolean {
+  if (!deviceCheck || policy === 'never') return false;
+  return setting === 'on' || (setting === 'auto' && policy === 'device');
+}
+
 /** Whether the prompt offers "Remember for this connection" (null: nothing can be kept). */
 export function offersRemember(
   policy: RememberPolicy | null | undefined,

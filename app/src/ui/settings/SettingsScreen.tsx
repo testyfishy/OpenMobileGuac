@@ -20,12 +20,19 @@ import {
   notificationPermission,
   requestNotificationPermission,
 } from '../services/keepAlive.ts';
-import { platformName, saveTextFile, type BiometryAvailability } from '../services/native.ts';
+import {
+  biometryMethod,
+  platformName,
+  saveTextFile,
+  type BiometryAvailability,
+  type BiometryMethod,
+} from '../services/native.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { SOURCE_URL, strings } from '../strings.ts';
 import type { ThemePreference } from '../theme/theme.ts';
 import {
   REMEMBER_POLICIES,
+  rememberUnlockOn,
   type RememberPolicy,
 } from '../../session/credentials/rememberedParams.ts';
 import {
@@ -71,6 +78,7 @@ export function SettingsScreen() {
   const [query, setQuery] = useState('');
   const [listEditor, setListEditor] = useState<ListEditor | null>(null);
   const [biometry, setBiometry] = useState<BiometryAvailability | undefined>(undefined);
+  const [method, setMethod] = useState<BiometryMethod>('generic');
   const [confirmLockOff, setConfirmLockOff] = useState<string[] | null>(null);
   const sessions = useSessions();
   const { bump } = useProfilesVersion();
@@ -146,6 +154,9 @@ export function SettingsScreen() {
     void services.lock.availability().then((a) => {
       if (live) setBiometry(a);
     });
+    void biometryMethod().then((m) => {
+      if (live) setMethod(m);
+    });
     return () => {
       live = false;
     };
@@ -217,6 +228,20 @@ export function SettingsScreen() {
     void secretProfileIds()
       .then((ids) => services.connectionSecrets.applyPolicy(policy, ids))
       .catch(() => undefined);
+  };
+  // "Ask for Face ID / fingerprint …": turning it off is itself protected, like turning the
+  // app lock off, so whoever holds the unlocked phone cannot simply switch the check off.
+  const setRememberUnlock = async (on: boolean) => {
+    if (!on) {
+      const ok =
+        (await services.lock.prompt(
+          strings.lock.connectionUnlockOffReason,
+          strings.lock.cancel,
+        )) === 'ok';
+      if (!ok) return;
+    }
+    const cur = settingsRef.current;
+    write({ ...cur, rememberConnectionUnlock: on ? 'on' : 'off' });
   };
   const forgetConnectionPasswords = async () => {
     await services.connectionSecrets.forgetAll(await secretProfileIds());
@@ -295,6 +320,23 @@ export function SettingsScreen() {
           {settings.rememberConnectionPasswords === 'device' &&
           services.secretStorage === 'memory' ? (
             <p className="field-hint">{t.rememberConnectionMemoryOnly}</p>
+          ) : null}
+          {settings.rememberConnectionPasswords !== 'never' ? (
+            <Toggle
+              label={t.rememberConnectionUnlock(t.biometryMethods[method])}
+              hint={
+                lockAvailable || biometry === undefined
+                  ? t.rememberConnectionUnlockHint
+                  : t.rememberConnectionUnlockUnavailable
+              }
+              checked={rememberUnlockOn(
+                settings.rememberConnectionUnlock,
+                settings.rememberConnectionPasswords,
+                lockAvailable,
+              )}
+              disabled={!lockAvailable}
+              onChange={(v) => void setRememberUnlock(v)}
+            />
           ) : null}
           <button
             type="button"

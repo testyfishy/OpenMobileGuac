@@ -23,6 +23,7 @@ import {
 
 const BASE: SessionSettings = {
   fitMode: 'fit-screen',
+  displayAlign: 'center',
   pointerMode: 'direct',
   matchDeviceSize: true,
   pointerSpeed: 1,

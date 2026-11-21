@@ -160,6 +160,55 @@ export interface Edges {
 
 export const NO_EDGES: Edges = { top: 0, right: 0, bottom: 0, left: 0 };
 
+/** Edge by edge sum (a side toolbar and the key column next to it). */
+export function addEdges(a: Edges, b: Edges): Edges {
+  return {
+    top: a.top + b.top,
+    right: a.right + b.right,
+    bottom: a.bottom + b.bottom,
+    left: a.left + b.left,
+  };
+}
+
+/**
+ * Landscape phones: where the extra key bar goes. `bottom`: the row above the keyboard (as
+ * in portrait); `side`: a column on the side the toolbar does not use; `left` / `right`: a
+ * column on that side (next to a toolbar docked there).
+ */
+export const KEY_BAR_LANDSCAPE = ['side', 'bottom', 'left', 'right'] as const;
+export type KeyBarLandscape = (typeof KEY_BAR_LANDSCAPE)[number];
+export type KeyBarPlacement = 'bottom' | 'left' | 'right';
+
+/**
+ * Where the key bar is laid out. A column only on a phone-sized device in landscape, and not
+ * in the split layout (its key bar sits under the trackpad). `side` takes the side opposite a
+ * side-docked toolbar; otherwise the side away from the camera cutout, where the column fits
+ * mostly inside the safe-area strip that is dead anyway (right when the cutout is unknown).
+ */
+export function keyBarPlacement(opts: {
+  readonly setting: KeyBarLandscape;
+  readonly landscape: boolean;
+  readonly phone: boolean;
+  readonly split: boolean;
+  readonly toolbar: ToolbarStyle;
+  readonly cutout: CutoutSide;
+}): KeyBarPlacement {
+  const { setting, toolbar } = opts;
+  if (!opts.landscape || !opts.phone || opts.split || setting === 'bottom') return 'bottom';
+  if (setting === 'left' || setting === 'right') return setting;
+  if (toolbar === 'dock-left') return 'right';
+  if (toolbar === 'dock-right') return 'left';
+  return landscapeSide('away', opts.cutout) === 'left' ? 'left' : 'right';
+}
+
+/** Space the key column reserves at its side, from its measured width (0 = not shown). */
+export function columnReserve(placement: KeyBarPlacement, width: number): Edges {
+  const w = Number.isFinite(width) && width > 0 ? Math.round(width) : 0;
+  if (placement === 'left') return { ...NO_EDGES, left: w };
+  if (placement === 'right') return { ...NO_EDGES, right: w };
+  return NO_EDGES;
+}
+
 /**
  * Space a docked toolbar reserves at its edge of the session (CSS px, safe-area padding
  * included), from the toolbar's measured size. Floating reserves nothing.

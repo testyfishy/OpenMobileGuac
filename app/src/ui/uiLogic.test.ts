@@ -169,6 +169,7 @@ describe('connection tree view', () => {
 describe('settings model', () => {
   const defaults: SessionSettings = {
     fitMode: 'fit-screen',
+    displayAlign: 'center',
     pointerMode: 'direct',
     matchDeviceSize: false,
     pointerSpeed: 1,

@@ -30,9 +30,11 @@ import {
   type RemoteResolution,
 } from '../../session/viewport/remoteSize.ts';
 import {
+  KEY_BAR_LANDSCAPE,
   TOOLBAR_LANDSCAPE,
   TOOLBAR_STYLES,
   resolveToolbarItems,
+  type KeyBarLandscape,
   type ToolbarLandscape,
   type ToolbarStyle,
 } from './toolbarItems.ts';
@@ -356,6 +358,15 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     hint: () => S().input.keyboardTip,
     optionLabel: (v) => (v === 'word' ? S().input.commitOnWord : S().input.live),
   },
+  {
+    key: 'keyBarLandscape',
+    section: 'keyboard',
+    control: 'choice',
+    options: KEY_BAR_LANDSCAPE,
+    label: () => S().options.keyBarLandscape,
+    hint: () => S().options.keyBarLandscapeHint,
+    optionLabel: (v) => S().options.keyBarLandscapeOptions[v as KeyBarLandscape] ?? v,
+  },
   sw(
     'keyBarCollapseButton',
     'keyboard',
@@ -426,6 +437,15 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     label: () => S().options.fitMode,
     optionLabel: (v) =>
       S().fitModes.labels[v as keyof ReturnType<typeof S>['fitModes']['labels']] ?? v,
+  },
+  {
+    key: 'displayAlign',
+    section: 'display',
+    control: 'choice',
+    options: ['left', 'center', 'right'],
+    label: () => S().options.displayAlign,
+    hint: () => S().options.displayAlignHint,
+    optionLabel: (v) => S().options.displayAlignOptions[v as 'left' | 'center' | 'right'] ?? v,
   },
   sw(
     'matchDeviceSize',

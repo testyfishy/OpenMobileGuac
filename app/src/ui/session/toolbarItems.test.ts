@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeSessionSettings } from './settings.ts';
+import { DEFAULT_SESSION_SETTINGS, normalizeSessionSettings } from './settings.ts';
 import {
   DEFAULT_TOOLBAR_ITEMS,
+  KEY_BAR_LANDSCAPE,
   MAX_TOOLBAR_ITEMS,
   NO_EDGES,
   TOOLBAR_ACTIONS,
+  addEdges,
   availableToolbarActions,
+  columnReserve,
+  keyBarPlacement,
   dockReserve,
   editToolbarItems,
   cutoutSide,
@@ -99,5 +103,60 @@ describe('toolbar placement', () => {
     expect(dockReserve('dock-top', size)).toEqual({ ...NO_EDGES, top: 58 });
     expect(dockReserve('dock-left', size)).toEqual({ ...NO_EDGES, left: 64 });
     expect(dockReserve('dock-right', size)).toEqual({ ...NO_EDGES, right: 64 });
+  });
+});
+
+describe('key bar placement (landscape phones)', () => {
+  const base = {
+    setting: 'side',
+    landscape: true,
+    phone: true,
+    split: false,
+    toolbar: 'dock-bottom',
+    cutout: 'left',
+  } as const;
+
+  it('stays a bottom row in portrait, on tablets, in the split layout and when asked', () => {
+    expect(keyBarPlacement({ ...base, landscape: false })).toBe('bottom');
+    expect(keyBarPlacement({ ...base, phone: false })).toBe('bottom');
+    expect(keyBarPlacement({ ...base, split: true })).toBe('bottom');
+    expect(keyBarPlacement({ ...base, setting: 'bottom' })).toBe('bottom');
+  });
+
+  it('`side` takes the side a side toolbar leaves free, else the side away from the camera', () => {
+    expect(keyBarPlacement({ ...base, toolbar: 'dock-right' })).toBe('left');
+    expect(keyBarPlacement({ ...base, toolbar: 'dock-left', cutout: 'right' })).toBe('right');
+    // Toolbar not at a side: the non-cutout side (its safe-area strip is nearly free).
+    expect(keyBarPlacement({ ...base, toolbar: 'dock-bottom', cutout: 'left' })).toBe('right');
+    expect(keyBarPlacement({ ...base, toolbar: 'floating', cutout: 'right' })).toBe('left');
+    expect(keyBarPlacement({ ...base, toolbar: 'dock-top', cutout: 'unknown' })).toBe('right');
+  });
+
+  it('`left` / `right` are fixed, even beside a toolbar docked there', () => {
+    expect(keyBarPlacement({ ...base, setting: 'left', toolbar: 'dock-left' })).toBe('left');
+    expect(keyBarPlacement({ ...base, setting: 'right', toolbar: 'dock-left' })).toBe('right');
+  });
+
+  it('defaults to a side column and repairs stored values', () => {
+    expect(normalizeSessionSettings(null).keyBarLandscape).toBe('side');
+    expect(normalizeSessionSettings({ keyBarLandscape: 'bottom' }).keyBarLandscape).toBe('bottom');
+    expect(normalizeSessionSettings({ keyBarLandscape: 'top' as never }).keyBarLandscape).toBe(
+      'side',
+    );
+    expect(KEY_BAR_LANDSCAPE).toContain(DEFAULT_SESSION_SETTINGS.keyBarLandscape);
+  });
+
+  it('the column reserves its width at its side, added to a toolbar docked there', () => {
+    expect(columnReserve('bottom', 80)).toEqual(NO_EDGES);
+    expect(columnReserve('left', 0)).toEqual(NO_EDGES);
+    expect(columnReserve('left', 71.6)).toEqual({ ...NO_EDGES, left: 72 });
+    expect(columnReserve('right', Number.NaN)).toEqual(NO_EDGES);
+    const toolbar = dockReserve('dock-left', { width: 64, height: 393 });
+    expect(addEdges(toolbar, columnReserve('left', 70))).toEqual({ ...NO_EDGES, left: 134 });
+    expect(addEdges(toolbar, columnReserve('right', 70))).toEqual({
+      ...NO_EDGES,
+      left: 64,
+      right: 70,
+    });
   });
 });

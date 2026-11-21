@@ -63,6 +63,7 @@ import { TouchPassthrough, type TouchContact } from '../../session/pointer/Touch
 import {
   applyViewportCommands,
   createViewport,
+  setAlignX,
   ensureVisible,
   isFlinging,
   isZoomedIn,
@@ -449,6 +450,7 @@ export class SessionController {
     this.viewport = createViewport({
       remote: { width: 0, height: 0 },
       screen: { width: 0, height: 0 },
+      alignX: this.settings.displayAlign,
       mode: this.settings.fitMode,
       pixelRatio: devicePixelRatio(),
     });
@@ -1280,6 +1282,9 @@ export class SessionController {
     const prev = this.settings;
     const next = normalizeSessionSettings(input);
     this.settings = next;
+    if (prev.displayAlign !== next.displayAlign) {
+      this.setViewport(setAlignX(this.viewport, next.displayAlign));
+    }
     if (prev.fitMode !== next.fitMode) {
       this.setViewport(setMode(this.viewport, next.fitMode));
     }
@@ -1479,7 +1484,14 @@ export class SessionController {
     const screenChanged =
       Math.abs(prev.screen.width - out.screen.width) >= 0.5 ||
       Math.abs(prev.screen.height - out.screen.height) >= 0.5;
+    const frame = this.reserved;
+    const pf = prev.frame;
     const insetsChanged =
+      !pf ||
+      pf.top !== frame.top ||
+      pf.bottom !== frame.bottom ||
+      pf.left !== frame.left ||
+      pf.right !== frame.right ||
       prev.insets.top !== insets.top ||
       prev.insets.bottom !== insets.bottom ||
       prev.insets.left !== insets.left ||
@@ -1499,6 +1511,8 @@ export class SessionController {
         remote: prev.remote,
         screen: out.screen,
         insets,
+        frame,
+        alignX: this.settings.displayAlign,
         keyboardInset,
         mode: this.settings.fitMode,
         pixelRatio: devicePixelRatio(),
@@ -1506,7 +1520,7 @@ export class SessionController {
     } else if (!screenChanged && !insetsChanged) {
       next = relayout(prev, { keyboardInset });
     } else {
-      next = relayout(prev, { screen: out.screen, insets, keyboardInset });
+      next = relayout(prev, { screen: out.screen, insets, frame, keyboardInset });
     }
     if (kbChanged && keyboardInset > prev.keyboardInset && this.lastMouse) {
       // Keyboard (or key bar) came up: keep the pointer / focus point above it (DSP-5).
@@ -1524,6 +1538,8 @@ export class SessionController {
             remote,
             screen: prev.screen,
             insets: prev.insets,
+            ...(prev.frame ? { frame: prev.frame } : {}),
+            alignX: this.settings.displayAlign,
             keyboardInset: prev.keyboardInset,
             mode: this.settings.fitMode,
             pixelRatio: devicePixelRatio(),

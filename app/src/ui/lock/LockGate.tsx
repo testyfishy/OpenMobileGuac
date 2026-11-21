@@ -52,6 +52,9 @@ export function LockGate() {
     let backgroundedAt: number | null = null;
     const sub = onAppActiveChange((active) => {
       if (lock.promptActive()) return;
+      // SRV-11: the connection-password check waits for the foreground and its grace ends
+      // in the background, also while the app lock is off.
+      lock.setActive(active);
       if (!active) {
         backgroundedAt = Date.now();
         // Hide the UI now, so the first frame after returning is the lock screen, not the

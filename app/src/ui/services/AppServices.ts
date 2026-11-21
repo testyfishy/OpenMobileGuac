@@ -130,10 +130,15 @@ export function createAppServices(overrides: AppServiceOverrides = {}): AppServi
   );
   auth.setUnlockWaiter(() => lock.whenUnlocked());
   // SRV-11: device-saved connection passwords pass the same gate as saved passwords; what is
-  // kept in memory for a server is dropped when the app signs out of it.
+  // kept in memory for a server is dropped when the app signs out of it. With "Ask for Face
+  // ID / fingerprint …" on, every remembered value first passes the lock's presence check
+  // (prompt text read at call time, naming the connection).
   const connectionSecrets = new ConnectionSecrets({
     secure,
     mayUseStored: () => auth.mayUseStoredSecret(),
+    storedReady: () => auth.storedSecretsReady(),
+    confirm: (label) =>
+      lock.confirmPresence(strings.lock.connectionReason(label), strings.lock.cancel),
   });
   auth.onSignedOut((id) => connectionSecrets.forgetMemory(id));
   log.info('app', `started (${native ? 'native' : 'web'}, secrets: ${secretStorage})`);

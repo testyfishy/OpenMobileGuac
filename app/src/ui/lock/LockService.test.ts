@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AuthOutcome } from '../services/native.ts';
-import { lockEnforced, LockService } from './LockService.ts';
+import type { AuthOutcome, BiometryAvailability } from '../services/native.ts';
+import { DECLINE_MS, lockEnforced, LockService } from './LockService.ts';
 
 function make(outcomes: AuthOutcome[]) {
   let t = 0;
@@ -67,6 +67,127 @@ describe('LockService', () => {
     lock.setEnabled(false);
     expect(lock.isLocked()).toBe(false);
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('LockService.confirmPresence (SRV-11 connection passwords)', () => {
+  function presence(outcomes: AuthOutcome[], availability: BiometryAvailability = 'available') {
+    let t = 1_000_000;
+    const authenticate = vi.fn<(reason: string) => Promise<AuthOutcome>>(
+      async () => outcomes.shift() ?? 'failed',
+    );
+    const lock = new LockService({
+      authenticate,
+      availability: async () => availability,
+      now: () => t,
+    });
+    return { lock, authenticate, advance: (ms: number) => (t += ms) };
+  }
+
+  it('prompts with the lock off (an off lock is not a check), naming the reason given', async () => {
+    const { lock, authenticate } = presence(['ok']);
+    expect(lock.recentlyUnlocked()).toBe(true); // the trap: true whenever the lock is off
+    expect(await lock.confirmPresence('Unlock the saved password for Lab', 'Cancel')).toBe(true);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    expect(authenticate.mock.calls[0]?.[0]).toBe('Unlock the saved password for Lab');
+  });
+
+  it('grace: a check within 30 s covers the next fill, until the app goes to the background', async () => {
+    const { lock, authenticate, advance } = presence(['ok', 'ok', 'ok']);
+    expect(await lock.confirmPresence('r', 'c')).toBe(true);
+    advance(5_000);
+    expect(await lock.confirmPresence('r', 'c')).toBe(true);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    advance(30_000);
+    expect(await lock.confirmPresence('r', 'c')).toBe(true);
+    expect(authenticate).toHaveBeenCalledTimes(2);
+    // Background ends the grace, however short.
+    advance(1_000);
+    lock.setActive(false);
+    advance(1_000);
+    lock.setActive(true);
+    expect(await lock.confirmPresence('r', 'c')).toBe(true);
+    expect(authenticate).toHaveBeenCalledTimes(3);
+  });
+
+  it('an app-lock unlock counts as the check (no double prompt)', async () => {
+    const { lock, authenticate, advance } = presence(['ok']);
+    lock.setEnabled(true);
+    lock.lock();
+    const pending = lock.confirmPresence('r', 'c');
+    await Promise.resolve();
+    expect(authenticate).not.toHaveBeenCalled(); // not behind the lock screen
+    await lock.unlock('unlock app', 'c');
+    advance(2_000);
+    expect(await pending).toBe(true);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+  });
+
+  it('lock on, back from the background before the lock is due: one prompt', async () => {
+    const { lock, authenticate, advance } = presence(['ok', 'ok']);
+    lock.setEnabled(true);
+    await lock.unlock('unlock app', 'c');
+    advance(2_000);
+    lock.setActive(false);
+    lock.cover();
+    advance(2_000);
+    lock.setActive(true);
+    lock.uncover();
+    expect(await lock.confirmPresence('r', 'c')).toBe(true);
+    expect(authenticate).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for the foreground before prompting', async () => {
+    const { lock, authenticate } = presence(['ok']);
+    lock.setActive(false);
+    const pending = lock.confirmPresence('r', 'c');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(authenticate).not.toHaveBeenCalled();
+    lock.setActive(true);
+    expect(await pending).toBe(true);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+  });
+
+  it('one prompt covers a batch of concurrent checks', async () => {
+    let resolve: (o: AuthOutcome) => void = () => undefined;
+    const authenticate = vi.fn(() => new Promise<AuthOutcome>((r) => (resolve = r)));
+    const lock = new LockService({
+      authenticate,
+      availability: async () => 'available',
+      now: () => 0,
+    });
+    const all = Promise.all([1, 2, 3].map(() => lock.confirmPresence('r', 'c')));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    resolve('ok');
+    expect(await all).toEqual([true, true, true]);
+  });
+
+  it('after a cancel, checks within 10 s return false without another prompt', async () => {
+    const { lock, authenticate, advance } = presence(['cancelled', 'ok']);
+    expect(await lock.confirmPresence('r', 'c')).toBe(false);
+    advance(3_000);
+    expect(await lock.confirmPresence('r', 'c')).toBe(false);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    advance(DECLINE_MS);
+    expect(await lock.confirmPresence('r', 'c')).toBe(true);
+    expect(authenticate).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failed or unavailable prompt is a refusal, not an error', async () => {
+    const { lock } = presence(['failed']);
+    expect(await lock.confirmPresence('r', 'c')).toBe(false);
+    const other = presence(['unavailable']);
+    expect(await other.lock.confirmPresence('r', 'c')).toBe(false);
+  });
+
+  it('no biometrics or passcode on the device (or the web build): no check', async () => {
+    for (const a of ['web', 'no-device-security'] as const) {
+      const { lock, authenticate } = presence([], a);
+      expect(await lock.confirmPresence('r', 'c')).toBe(true);
+      expect(authenticate).not.toHaveBeenCalled();
+    }
   });
 });
 
