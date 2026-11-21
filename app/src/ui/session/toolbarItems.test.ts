@@ -68,6 +68,13 @@ describe('toolbar placement', () => {
     expect(effectiveToolbarStyle('dock-right', false)).toBe('dock-bottom');
     expect(effectiveToolbarStyle('dock-top', false)).toBe('dock-top');
     expect(effectiveToolbarStyle('floating', true)).toBe('floating');
+    // Landscape side: moves a top/bottom dock, only in landscape, never a floating one.
+    expect(effectiveToolbarStyle('dock-bottom', true, 'right')).toBe('dock-right');
+    expect(effectiveToolbarStyle('dock-top', true, 'left')).toBe('dock-left');
+    expect(effectiveToolbarStyle('dock-bottom', false, 'right')).toBe('dock-bottom');
+    expect(effectiveToolbarStyle('dock-bottom', true, 'same')).toBe('dock-bottom');
+    expect(effectiveToolbarStyle('dock-left', true, 'right')).toBe('dock-left');
+    expect(effectiveToolbarStyle('floating', true, 'right')).toBe('floating');
   });
 
   it('a docked toolbar reserves its own edge; floating reserves nothing', () => {

@@ -6,6 +6,7 @@ import {
   type SessionAction,
   type SessionActionContext,
 } from './sessionActions.tsx';
+import { scrollHint } from './scrollHint.ts';
 import { sessionStrings } from './sessionStrings.ts';
 import { resolveToolbarItems, type ToolbarStyle } from './toolbarItems.ts';
 
@@ -86,7 +87,7 @@ export const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(function Toolbar
       onPointerDownCapture={onActivity}
       onKeyDownCapture={onActivity}
     >
-      <div className="omg-toolbar__scroll">
+      <div ref={scrollHint} className="omg-toolbar__scroll omg-scrollhint">
         {row.map((a) => (
           <ToolButton key={a.id} action={a} />
         ))}

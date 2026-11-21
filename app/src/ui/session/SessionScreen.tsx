@@ -166,6 +166,12 @@ type Menu =
  * `fromScreen`: use the device orientation instead, for a rotation while a keyboard that
  * shrinks the WebView is open (the viewport would look landscape on a portrait phone).
  */
+/** True when the device's short side is phone-sized (stable across rotation and keyboards). */
+function isPhoneSized(): boolean {
+  if (typeof window === 'undefined' || !window.screen) return true;
+  return Math.min(window.screen.width, window.screen.height) <= 540;
+}
+
 function readLandscape(fromScreen = false): boolean {
   if (typeof window === 'undefined') return false;
   const type = typeof screen !== 'undefined' ? screen.orientation?.type : undefined;
@@ -423,7 +429,12 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
       so?.removeEventListener?.('change', rotated);
     };
   }, [keyboardActive]);
-  const toolbarStyle = effectiveToolbarStyle(settings.toolbarStyle, landscape);
+  const toolbarStyle = effectiveToolbarStyle(
+    settings.toolbarStyle,
+    landscape,
+    // Phones only: a tablet in landscape has height to spare, so its dock stays put.
+    isPhoneSized() ? settings.toolbarLandscape : 'same',
+  );
   const docked = toolbarStyle !== 'floating';
   const dockBottom = toolbarStyle === 'dock-bottom';
   const [reserve, setReserve] = useState<Edges>(NO_EDGES);

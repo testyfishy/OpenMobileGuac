@@ -21,7 +21,13 @@ import type { PointerConfig, PointerMode } from '../../session/pointer/PointerMo
 import { GENERAL_SET_ID, isKeySetId } from '../../session/keys/KeySets.ts';
 import type { CommandKeyMode } from '../../session/keys/HardwareKeyboard.ts';
 import { normalizeKeyBarLayout } from './keyBarLayout.ts';
-import { TOOLBAR_STYLES, normalizeToolbarItems, type ToolbarStyle } from './toolbarItems.ts';
+import {
+  TOOLBAR_LANDSCAPE,
+  TOOLBAR_STYLES,
+  normalizeToolbarItems,
+  type ToolbarLandscape,
+  type ToolbarStyle,
+} from './toolbarItems.ts';
 
 export interface SessionSettings {
   fitMode: FitMode;
@@ -112,6 +118,11 @@ export interface SessionSettings {
    * desktop is laid out around. Side docks apply in landscape; portrait uses the bottom.
    */
   toolbarStyle?: ToolbarStyle;
+  /**
+   * Landscape: move a toolbar docked at the top or bottom to a side, where a wide and
+   * short screen has room to spare. `same` keeps it where `toolbarStyle` puts it.
+   */
+  toolbarLandscape?: ToolbarLandscape;
   /** Actions in the toolbar row, in order (ids from toolbarItems.ts); null = built-in row. */
   toolbarItems?: string[] | null;
   /** Labels under the icons: `auto` hides them on short (landscape) screens. */
@@ -180,6 +191,7 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   terminalPinchFont: false,
   commandKey: 'super',
   toolbarStyle: 'dock-bottom',
+  toolbarLandscape: 'right',
   toolbarItems: null,
   toolbarLabels: 'auto',
   toolbarAutoHide: true,
@@ -299,6 +311,7 @@ export function normalizeSessionSettings(
     terminalPinchFont: bool(raw['terminalPinchFont'], d.terminalPinchFont),
     commandKey: oneOf(raw['commandKey'], ['super', 'ctrl'] as const, d.commandKey),
     toolbarStyle: oneOf(raw['toolbarStyle'], TOOLBAR_STYLES, d.toolbarStyle),
+    toolbarLandscape: oneOf(raw['toolbarLandscape'], TOOLBAR_LANDSCAPE, d.toolbarLandscape),
     toolbarItems: normalizeToolbarItems(raw['toolbarItems']),
     toolbarLabels: oneOf(
       raw['toolbarLabels'],
@@ -347,6 +360,7 @@ export const INPUT_SETTING_KEYS = [
   'terminalPinchFont',
   'commandKey',
   'toolbarStyle',
+  'toolbarLandscape',
   'toolbarItems',
   'toolbarLabels',
   'toolbarAutoHide',

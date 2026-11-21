@@ -10,6 +10,7 @@ import {
   visibleRows,
   type KeyBarLayout,
 } from './keyBarLayout.ts';
+import { scrollHint } from './scrollHint.ts';
 import { sessionStrings } from './sessionStrings.ts';
 
 export interface KeyBarProps {
@@ -217,7 +218,12 @@ export function KeyBar({
         {rows.map((row, ri) => (
           <div
             key={`${ri}:${row.join(',')}`}
-            className={ri === lastIndex ? 'omg-keybar__row' : 'omg-keybar__row omg-keybar__row--f'}
+            ref={scrollHint}
+            className={
+              ri === lastIndex
+                ? 'omg-keybar__row omg-scrollhint'
+                : 'omg-keybar__row omg-keybar__row--f omg-scrollhint'
+            }
           >
             {row.map((token, ki) => {
               const t = parseToken(token);

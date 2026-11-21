@@ -26,7 +26,13 @@ import {
   type Quality,
   type RemoteResolution,
 } from '../../session/viewport/remoteSize.ts';
-import { TOOLBAR_STYLES, resolveToolbarItems, type ToolbarStyle } from './toolbarItems.ts';
+import {
+  TOOLBAR_LANDSCAPE,
+  TOOLBAR_STYLES,
+  resolveToolbarItems,
+  type ToolbarLandscape,
+  type ToolbarStyle,
+} from './toolbarItems.ts';
 
 /** Fields with a control: every field except the legacy ones (`LEGACY_SESSION_KEYS`). */
 export type SettingKey = Exclude<
@@ -129,6 +135,15 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     label: () => S().options.toolbarStyle,
     hint: () => S().options.toolbarStyleHint,
     optionLabel: (v) => S().options.toolbarStyles[v as ToolbarStyle] ?? v,
+  },
+  {
+    key: 'toolbarLandscape',
+    section: 'toolbar',
+    control: 'choice',
+    options: TOOLBAR_LANDSCAPE,
+    label: () => S().options.toolbarLandscape,
+    hint: () => S().options.toolbarLandscapeHint,
+    optionLabel: (v) => S().options.toolbarLandscapeOptions[v as ToolbarLandscape] ?? v,
   },
   {
     key: 'toolbarItems',

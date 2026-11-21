@@ -1916,3 +1916,53 @@
   border-radius: var(--_radius);
   overflow: hidden;
 }
+
+/* ---- Scroll hint: fade the edge of a row or column that has more to scroll to. */
+.omg-scrollhint {
+  --_fade-start: 0px;
+  --_fade-end: 0px;
+}
+
+.omg-scrollhint[data-more='start'],
+.omg-scrollhint[data-more='both'] {
+  --_fade-start: 28px;
+}
+
+.omg-scrollhint[data-more='end'],
+.omg-scrollhint[data-more='both'] {
+  --_fade-end: 28px;
+}
+
+.omg-scrollhint[data-more]:not([data-more='none']) {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--_fade-start),
+    #000 calc(100% - var(--_fade-end)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--_fade-start),
+    #000 calc(100% - var(--_fade-end)),
+    transparent
+  );
+}
+
+.omg-scrollhint[data-axis='y'][data-more]:not([data-more='none']) {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--_fade-start),
+    #000 calc(100% - var(--_fade-end)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--_fade-start),
+    #000 calc(100% - var(--_fade-end)),
+    transparent
+  );
+}

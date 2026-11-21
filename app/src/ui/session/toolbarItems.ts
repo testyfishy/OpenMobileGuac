@@ -111,7 +111,17 @@ export const TOOLBAR_STYLES: readonly ToolbarStyle[] = [
 ];
 
 /** Where the toolbar actually goes: side docks only in landscape (portrait: bottom). */
-export function effectiveToolbarStyle(style: ToolbarStyle, landscape: boolean): ToolbarStyle {
+export const TOOLBAR_LANDSCAPE = ['same', 'left', 'right'] as const;
+export type ToolbarLandscape = (typeof TOOLBAR_LANDSCAPE)[number];
+
+export function effectiveToolbarStyle(
+  style: ToolbarStyle,
+  landscape: boolean,
+  landscapeSide: ToolbarLandscape = 'same',
+): ToolbarStyle {
+  if (landscape && landscapeSide !== 'same' && (style === 'dock-bottom' || style === 'dock-top')) {
+    return landscapeSide === 'left' ? 'dock-left' : 'dock-right';
+  }
   if ((style === 'dock-left' || style === 'dock-right') && !landscape) return 'dock-bottom';
   return style;
 }

@@ -309,6 +309,14 @@ export const sessionStringsEn = {
       'dock-right': 'Right',
       floating: 'Floating',
     },
+    toolbarLandscape: 'Docked toolbar in landscape',
+    toolbarLandscapeHint:
+      'With the phone on its side, a toolbar docked at the top or bottom moves to this side, leaving the full height for the desktop.',
+    toolbarLandscapeOptions: {
+      same: 'Keep in place',
+      left: 'Left side',
+      right: 'Right side',
+    },
     toolbarLabels: 'Button labels',
     toolbarLabelsHint: 'Auto hides the labels on short landscape screens.',
     toolbarLabelOptions: {

@@ -304,6 +304,14 @@ export const sessionEs: SessionStrings = {
       'dock-right': 'Derecha',
       floating: 'Flotante',
     },
+    toolbarLandscape: 'Barra fija en horizontal',
+    toolbarLandscapeHint:
+      'Con el teléfono en horizontal, una barra fijada arriba o abajo pasa a este lado y deja toda la altura para el escritorio.',
+    toolbarLandscapeOptions: {
+      same: 'No mover',
+      left: 'Lado izquierdo',
+      right: 'Lado derecho',
+    },
     toolbarLabels: 'Etiquetas de los botones',
     toolbarLabelsHint: 'Automático oculta las etiquetas en pantallas bajas en horizontal.',
     toolbarLabelOptions: {
