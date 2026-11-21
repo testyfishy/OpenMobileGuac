@@ -1004,6 +1004,7 @@ export class SessionController {
         });
     };
     client.onsync = () => {
+      this.pip?.displayChanged();
       if (!live()) return;
       this.stats.frames++;
       if (

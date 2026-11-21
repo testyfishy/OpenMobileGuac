@@ -33,8 +33,26 @@ export interface OmgPipPlugin {
   addListener(event: 'state', fn: (status: PipStatus) => void): Promise<PluginListenerHandle>;
 }
 
-/** Frames per second sent to the window. */
-export const PIP_FPS = 4;
+/**
+ * Most frames per second sent while the window is up (the app is in the background). Frames
+ * follow the remote display's own updates, because a hidden page's timers run once a second.
+ */
+export const PIP_FPS = 12;
+/** In the foreground nobody sees the frames: just keep the picture current for the start. */
+export const PIP_FOREGROUND_FPS = 2;
+
+/** Whether a frame may be sent now. Pure. */
+export function pipFrameDue(input: {
+  readonly now: number;
+  readonly lastSentAt: number;
+  readonly hidden: boolean;
+  readonly dirty: boolean;
+}): boolean {
+  const since = input.now - input.lastSentAt;
+  // Nothing changed: still refresh once a second, so a lost frame cannot stick.
+  if (!input.dirty) return since >= 1000;
+  return since >= 1000 / (input.hidden ? PIP_FPS : PIP_FOREGROUND_FPS);
+}
 /** Frames are scaled down to at most this width: the window is small. */
 export const PIP_MAX_WIDTH = 960;
 const JPEG_PREFIX = 'data:image/jpeg;base64,';
@@ -71,6 +89,8 @@ export class PipFeed {
   private hiddenAt = 0;
   private ticksHidden = 0;
   private sentHidden = 0;
+  private dirty = true;
+  private lastSentAt = 0;
 
   /** The current picture of the remote display, or null when there is none. */
   private readonly source: () => HTMLCanvasElement | null;
@@ -97,7 +117,10 @@ export class PipFeed {
         return;
       }
       document.addEventListener('visibilitychange', this.onVisibility);
-      this.timer = setInterval(() => void this.tick(), 1000 / PIP_FPS);
+      this.timer = setInterval(() => {
+        if (document.visibilityState === 'hidden') this.ticksHidden++;
+        void this.pump();
+      }, 1000 / PIP_FOREGROUND_FPS);
     } catch (e) {
       this.log(`PiP could not start: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -148,12 +171,21 @@ export class PipFeed {
       .catch(() => undefined);
   };
 
-  private async tick(): Promise<void> {
+  /** The remote display changed (called for every update the session receives). */
+  displayChanged(): void {
+    this.dirty = true;
+    void this.pump();
+  }
+
+  private async pump(): Promise<void> {
+    if (this.busy || this.stopped || this.timer === null) return;
     const hidden = document.visibilityState === 'hidden';
-    if (hidden) this.ticksHidden++;
-    if (this.busy || this.stopped) return;
+    const now = Date.now();
+    if (!pipFrameDue({ now, lastSentAt: this.lastSentAt, hidden, dirty: this.dirty })) return;
     const jpeg = this.capture();
     if (jpeg === null) return;
+    this.dirty = false;
+    this.lastSentAt = now;
     this.busy = true;
     try {
       await pip().frame({ jpeg });
