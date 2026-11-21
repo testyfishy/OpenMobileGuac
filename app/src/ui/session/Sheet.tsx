@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { ChromeButton } from './ChromeButton.tsx';
-import { IconClose } from './icons.tsx';
+import { IconBack, IconClose } from './icons.tsx';
+import { SheetBackContext } from './sheetBack.ts';
 import { sessionStrings } from './sessionStrings.ts';
 
 /** Downward drag (px) on the header that closes the sheet. */
@@ -26,6 +27,7 @@ export function Sheet({
   closeLabel?: string;
   className?: string;
 }) {
+  const onBack = useContext(SheetBackContext);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -79,7 +81,8 @@ export function Sheet({
       >
         <header
           className={
-            dismissible ? 'omg-sheet__header omg-sheet__header--drag' : 'omg-sheet__header'
+            (dismissible ? 'omg-sheet__header omg-sheet__header--drag' : 'omg-sheet__header') +
+            (onBack ? ' omg-sheet__header--back' : '')
           }
           onPointerDown={onDown}
           onPointerMove={onMove}
@@ -87,6 +90,16 @@ export function Sheet({
           onPointerCancel={onCancel}
         >
           {dismissible && <span className="omg-sheet__grip" aria-hidden="true" />}
+          {onBack && (
+            <ChromeButton
+              className="omg-btn--icon omg-sheet__back"
+              aria-label={sessionStrings.common.back}
+              title={sessionStrings.common.back}
+              onClick={onBack}
+            >
+              <IconBack />
+            </ChromeButton>
+          )}
           <h2 className="omg-sheet__title">{title}</h2>
           <ChromeButton
             className="omg-btn--icon omg-sheet__close"

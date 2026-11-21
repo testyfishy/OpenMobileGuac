@@ -15,6 +15,7 @@ const plural = (n: number, one: string, other: string) => (n === 1 ? one : other
 export const sessionStringsEn = {
   common: {
     close: 'Close',
+    back: 'Back',
     cancel: 'Cancel',
     done: 'Done',
     add: 'Add',

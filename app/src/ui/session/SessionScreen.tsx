@@ -44,6 +44,7 @@ import { KeySetManager, KeySetPicker, type SaveTextFile } from './KeySetManager.
 import { keySetName, keySetNameIn } from './keySetNames.ts';
 import { MoreSheet, type TerminalControls } from './MoreSheet.tsx';
 import { ShareSheet, type SessionSharing } from './ShareSheet.tsx';
+import { SheetBackContext } from './sheetBack.ts';
 import { nextColorScheme, parseFontSize, stepFontSize } from '../../session/terminalFont.ts';
 import {
   enterImmersive,
@@ -485,7 +486,33 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
 
   // ---- Toolbar auto-hide
   const [toolbarExpanded, setToolbarExpanded] = useState(true);
-  const [menu, setMenu] = useState<Menu>(null);
+  // The open sheet plus the sheets it was reached from, so a sub-sheet can go Back.
+  const [menuNav, setMenuNav] = useState<{ menu: Menu; trail: Menu[] }>({
+    menu: null,
+    trail: [],
+  });
+  const menu = menuNav.menu;
+  const setMenu = useCallback((next: Menu) => {
+    setMenuNav((nav) => {
+      if (next === null) return { menu: null, trail: [] };
+      if (next === nav.menu) return nav;
+      // Reopening a sheet already on the trail returns to it instead of growing a loop.
+      const at = nav.trail.indexOf(next);
+      if (at >= 0) return { menu: next, trail: nav.trail.slice(0, at) };
+      return { menu: next, trail: nav.menu === null ? [] : [...nav.trail, nav.menu] };
+    });
+  }, []);
+  const menuBack = useMemo(
+    () =>
+      menuNav.trail.length === 0
+        ? null
+        : () =>
+            setMenuNav((nav) => ({
+              menu: nav.trail[nav.trail.length - 1] ?? null,
+              trail: nav.trail.slice(0, -1),
+            })),
+    [menuNav.trail.length],
+  );
   const [activity, setActivity] = useState(0);
   const connected = snap.phase.kind === 'connected';
   const autoHide = !docked && settings.toolbarAutoHide && !keyboardActive;
@@ -878,195 +905,205 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
               )}
             </div>
 
-            {menu === 'more' && (
-              <MoreSheet
-                context={actionContext}
-                pointerMode={effectiveMode}
-                audioActive={snap.audioStreams > 0}
-                hasFilesystem={transferSnap.filesystems.length > 0}
-                toggles={{
-                  naturalScroll: settings.naturalScroll,
-                  tapDrag: settings.tapDrag,
-                  largeCursor: settings.largeCursor,
-                  textInputBar: settings.textInputBar,
-                  split,
-                  immersive: settings.immersive,
-                }}
-                onToggle={(key, on) => {
-                  if (key === 'split') onSettingsChange({ splitLayout: on ? 'on' : 'off' });
-                  else onSettingsChange({ [key]: on });
-                }}
-                onEditToolbar={() => setMenu('toolbar')}
-                quality={settings.quality}
-                audio={settings.audio}
-                viewOnly={settings.viewOnly}
-                reconnectToApply={snap.reconnectToApply}
-                onQuality={(q) => onSettingsChange({ quality: q })}
-                onAudio={(a) => onSettingsChange({ audio: a })}
-                onReconnect={() => {
-                  setMenu(null);
-                  controller.reconnect();
-                }}
-                terminal={
-                  terminal
-                    ? terminalControls(snap.mutableArguments, (n, v) =>
-                        controller.setArgument(n, v),
-                      )
-                    : null
-                }
-                {...(props.sharing ? { onShare: () => setMenu('share') } : {})}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'toolbar' && (
-              <ToolbarEditor
-                items={settings.toolbarItems}
-                style={settings.toolbarStyle}
-                labels={settings.toolbarLabels}
-                context={actionContext}
-                onItems={(items) => onSettingsChange({ toolbarItems: items })}
-                onStyle={(s) => onSettingsChange({ toolbarStyle: s })}
-                onLabels={(l) => onSettingsChange({ toolbarLabels: l })}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'files' && (
-              <FilesSheet
-                transfers={controller.transfers}
-                connected={connected}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'clipboard' && (
-              <ClipboardSheet
-                history={clipHistory}
-                terminal={terminal}
-                onSend={sendToRemote}
-                onType={typeText}
-                onCopyToDevice={(text) => {
-                  void writeDeviceClipboard(text).then((ok) =>
-                    showToast(
-                      ok ? sessionStrings.toasts.copiedToDevice : sessionStrings.toasts.copyFailed,
-                    ),
-                  );
-                }}
-                onReadDevice={async () => {
-                  const r = await readDeviceClipboard();
-                  if (!r.ok) {
-                    showToast(r.reason);
-                    return null;
+            <SheetBackContext.Provider value={menuBack}>
+              {menu === 'more' && (
+                <MoreSheet
+                  context={actionContext}
+                  pointerMode={effectiveMode}
+                  audioActive={snap.audioStreams > 0}
+                  hasFilesystem={transferSnap.filesystems.length > 0}
+                  toggles={{
+                    naturalScroll: settings.naturalScroll,
+                    tapDrag: settings.tapDrag,
+                    largeCursor: settings.largeCursor,
+                    textInputBar: settings.textInputBar,
+                    split,
+                    immersive: settings.immersive,
+                  }}
+                  onToggle={(key, on) => {
+                    if (key === 'split') onSettingsChange({ splitLayout: on ? 'on' : 'off' });
+                    else onSettingsChange({ [key]: on });
+                  }}
+                  onEditToolbar={() => setMenu('toolbar')}
+                  quality={settings.quality}
+                  audio={settings.audio}
+                  viewOnly={settings.viewOnly}
+                  reconnectToApply={snap.reconnectToApply}
+                  onQuality={(q) => onSettingsChange({ quality: q })}
+                  onAudio={(a) => onSettingsChange({ audio: a })}
+                  onReconnect={() => {
+                    setMenu(null);
+                    controller.reconnect();
+                  }}
+                  terminal={
+                    terminal
+                      ? terminalControls(snap.mutableArguments, (n, v) =>
+                          controller.setArgument(n, v),
+                        )
+                      : null
                   }
-                  return r.text;
-                }}
-                onClear={() => clipDispatch({ type: 'clear' })}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'share' && props.sharing && (
-              <ShareSheet
-                sharing={props.sharing}
-                tunnelUuid={controller.tunnelUuid()}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'info' && (
-              <InfoSheet
-                title={title}
-                protocol={protocol}
-                isDemo={isDemo}
-                settings={settings}
-                getInfo={controller.getInfo}
-                keepAwake={
-                  settings.keepAwake
-                    ? t.info.keepAwake[keepAwakeState]
-                    : t.info.keepAwakeOffInSettings
-                }
-                mutableArguments={snap.mutableArguments}
-                {...(props.onEditConnection ? { onEditConnection: props.onEditConnection } : {})}
-                onSetArgument={(name, value) => {
-                  const ok = controller.setArgument(name, value);
-                  showToast(
-                    ok ? sessionStrings.toasts.argumentSent : sessionStrings.toasts.argumentLocked,
-                  );
-                  return ok;
-                }}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'view' && (
-              <ViewMenu
-                fitMode={settings.fitMode}
-                matchDeviceSize={settings.matchDeviceSize}
-                protocol={protocol}
-                onFitMode={(m) => {
-                  onSettingsChange({ fitMode: m });
-                  showToast(
-                    m === settings.fitMode
-                      ? t.toasts.viewReset
-                      : t.toasts.view(t.fitModes.labels[m].toLowerCase()),
-                  );
-                  if (m === settings.fitMode) controller.resetZoom();
-                }}
-                onResetZoom={() => {
-                  controller.resetZoom();
-                  showToast(t.toasts.zoomReset);
-                }}
-                onZoom={(f) => controller.zoomBy(f)}
-                onMatchDeviceSize={(on) => {
-                  onSettingsChange({ matchDeviceSize: on });
-                  showToast(on ? t.toasts.matchOn : t.toasts.matchOff);
-                }}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'input' && (
-              <InputMenu
-                settings={settings}
-                touchSupport={snap.touchSupport}
-                overridden={overridden}
-                onChange={onSettingsChange}
-                {...(props.onUseDefault ? { onUseDefault: useDefault } : {})}
-                onEditList={(editor) =>
-                  setMenu(
-                    editor === 'toolbar' ? 'toolbar' : editor === 'keySets' ? 'keysets' : 'combos',
-                  )
-                }
-                summaryContext={{ keySetName: () => keySetName(activeSet) }}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'keypicker' && (
-              <KeySetPicker
-                sets={sets}
-                activeId={activeSet.id}
-                onUse={(id) => chooseSet(id, true)}
-                onManage={() => setMenu('keysets')}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'keysets' && (
-              <KeySetManager
-                library={library}
-                onLibrary={setLibrary}
-                activeId={activeSet.id}
-                onUse={(id) => chooseSet(id)}
-                legacy={legacy}
-                onCombos={() => setMenu('combos')}
-                {...(props.saveTextFile ? { saveFile: props.saveTextFile } : {})}
-                onClose={closeMenu}
-              />
-            )}
-            {menu === 'combos' && (
-              <ComboMenu
-                combos={library.combos}
-                legacy={settings.customCombos}
-                onRun={runSteps}
-                onLibrary={libraryAction}
-                newId={() => newComboId(library)}
-                onTypeClipboard={typeClipboard}
-                onClose={closeMenu}
-              />
-            )}
+                  {...(props.sharing ? { onShare: () => setMenu('share') } : {})}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'toolbar' && (
+                <ToolbarEditor
+                  items={settings.toolbarItems}
+                  style={settings.toolbarStyle}
+                  labels={settings.toolbarLabels}
+                  context={actionContext}
+                  onItems={(items) => onSettingsChange({ toolbarItems: items })}
+                  onStyle={(s) => onSettingsChange({ toolbarStyle: s })}
+                  onLabels={(l) => onSettingsChange({ toolbarLabels: l })}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'files' && (
+                <FilesSheet
+                  transfers={controller.transfers}
+                  connected={connected}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'clipboard' && (
+                <ClipboardSheet
+                  history={clipHistory}
+                  terminal={terminal}
+                  onSend={sendToRemote}
+                  onType={typeText}
+                  onCopyToDevice={(text) => {
+                    void writeDeviceClipboard(text).then((ok) =>
+                      showToast(
+                        ok
+                          ? sessionStrings.toasts.copiedToDevice
+                          : sessionStrings.toasts.copyFailed,
+                      ),
+                    );
+                  }}
+                  onReadDevice={async () => {
+                    const r = await readDeviceClipboard();
+                    if (!r.ok) {
+                      showToast(r.reason);
+                      return null;
+                    }
+                    return r.text;
+                  }}
+                  onClear={() => clipDispatch({ type: 'clear' })}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'share' && props.sharing && (
+                <ShareSheet
+                  sharing={props.sharing}
+                  tunnelUuid={controller.tunnelUuid()}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'info' && (
+                <InfoSheet
+                  title={title}
+                  protocol={protocol}
+                  isDemo={isDemo}
+                  settings={settings}
+                  getInfo={controller.getInfo}
+                  keepAwake={
+                    settings.keepAwake
+                      ? t.info.keepAwake[keepAwakeState]
+                      : t.info.keepAwakeOffInSettings
+                  }
+                  mutableArguments={snap.mutableArguments}
+                  {...(props.onEditConnection ? { onEditConnection: props.onEditConnection } : {})}
+                  onSetArgument={(name, value) => {
+                    const ok = controller.setArgument(name, value);
+                    showToast(
+                      ok
+                        ? sessionStrings.toasts.argumentSent
+                        : sessionStrings.toasts.argumentLocked,
+                    );
+                    return ok;
+                  }}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'view' && (
+                <ViewMenu
+                  fitMode={settings.fitMode}
+                  matchDeviceSize={settings.matchDeviceSize}
+                  protocol={protocol}
+                  onFitMode={(m) => {
+                    onSettingsChange({ fitMode: m });
+                    showToast(
+                      m === settings.fitMode
+                        ? t.toasts.viewReset
+                        : t.toasts.view(t.fitModes.labels[m].toLowerCase()),
+                    );
+                    if (m === settings.fitMode) controller.resetZoom();
+                  }}
+                  onResetZoom={() => {
+                    controller.resetZoom();
+                    showToast(t.toasts.zoomReset);
+                  }}
+                  onZoom={(f) => controller.zoomBy(f)}
+                  onMatchDeviceSize={(on) => {
+                    onSettingsChange({ matchDeviceSize: on });
+                    showToast(on ? t.toasts.matchOn : t.toasts.matchOff);
+                  }}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'input' && (
+                <InputMenu
+                  settings={settings}
+                  touchSupport={snap.touchSupport}
+                  overridden={overridden}
+                  onChange={onSettingsChange}
+                  {...(props.onUseDefault ? { onUseDefault: useDefault } : {})}
+                  onEditList={(editor) =>
+                    setMenu(
+                      editor === 'toolbar'
+                        ? 'toolbar'
+                        : editor === 'keySets'
+                          ? 'keysets'
+                          : 'combos',
+                    )
+                  }
+                  summaryContext={{ keySetName: () => keySetName(activeSet) }}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'keypicker' && (
+                <KeySetPicker
+                  sets={sets}
+                  activeId={activeSet.id}
+                  onUse={(id) => chooseSet(id, true)}
+                  onManage={() => setMenu('keysets')}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'keysets' && (
+                <KeySetManager
+                  library={library}
+                  onLibrary={setLibrary}
+                  activeId={activeSet.id}
+                  onUse={(id) => chooseSet(id)}
+                  legacy={legacy}
+                  onCombos={() => setMenu('combos')}
+                  {...(props.saveTextFile ? { saveFile: props.saveTextFile } : {})}
+                  onClose={closeMenu}
+                />
+              )}
+              {menu === 'combos' && (
+                <ComboMenu
+                  combos={library.combos}
+                  legacy={settings.customCombos}
+                  onRun={runSteps}
+                  onLibrary={libraryAction}
+                  newId={() => newComboId(library)}
+                  onTypeClipboard={typeClipboard}
+                  onClose={closeMenu}
+                />
+              )}
+            </SheetBackContext.Provider>
 
             {transferSnap.prompts[0] && !prompt && (
               <IncomingFileSheet
