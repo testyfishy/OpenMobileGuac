@@ -31,6 +31,12 @@ import {
   type SessionSettingsPatch,
   type AppSettings,
 } from '../settings/settingsModel.ts';
+import {
+  affectsConnection,
+  publishSettingsChange,
+  subscribeSettingsChanges,
+} from '../settings/connectionSettingsBus.ts';
+import { sessionStrings } from '../session/sessionStrings.ts';
 import { strings } from '../strings.ts';
 import { sessionTransportFor } from '../tls/nativeTunnel.ts';
 import { deviceTimezone, makeConnectDataBuilder } from './connectData.ts';
@@ -92,6 +98,11 @@ export default function SessionHost({
   const [stored, setStored] = useState<SessionSettingsPatch | undefined>(undefined);
   const [serverLayer, setServerLayer] = useState<SessionSettingsPatch>({});
   const [confirmExit, setConfirmExit] = useState(false);
+  // Bumped when the stored settings were changed elsewhere (Settings › Connections): the
+  // session screen then drops its in-session overlay and follows the new values.
+  const [revision, setRevision] = useState(0);
+  const [reloads, setReloads] = useState(0);
+  const origin = `session-${session.id}`;
 
   useEffect(() => {
     let live = true;
@@ -102,38 +113,84 @@ export default function SessionHost({
       if (!live) return;
       setServerLayer(parseServerOptions(o).sessionDefaults);
       setStored(applyConnectionPatch(s, {}));
+      if (reloads > 0) setRevision((r) => r + 1);
     });
     return () => {
       live = false;
     };
-  }, [services.profiles, serverId, ref]);
+  }, [services.profiles, serverId, ref, reloads]);
+
+  // Live: edits made in Settings to this connection (or its server's defaults) apply here
+  // without remounting the session.
+  useEffect(
+    () =>
+      subscribeSettingsChanges(origin, (c) => {
+        if (affectsConnection(c, serverId, ref)) setReloads((n) => n + 1);
+      }),
+    [origin, serverId, ref],
+  );
+
+  const save = useCallback(
+    (next: SessionSettingsPatch) => {
+      // A joined session is someone else's: changes apply to it only, nothing is stored.
+      if (joined) return;
+      void services.profiles
+        .setConnectionSettings(serverId, ref, next)
+        .then(() => publishSettingsChange(serverId, ref, origin))
+        .catch(() => undefined);
+    },
+    [services.profiles, serverId, ref, joined, origin],
+  );
+
+  // First pointer mode change in any session: "Saved for this connection" once (SET-1).
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  const noticePending = !joined && !isShareServerId(serverId) && !app.perConnectionNoticeSeen;
 
   const settings: SessionSettings = useMemo(
     () => mergeSessionSettings(DEFAULT_SESSION_SETTINGS, app.sessionDefaults, stored, serverLayer),
     [app.sessionDefaults, stored, serverLayer],
   );
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  });
 
+  const storedRef = useRef(stored);
+  useEffect(() => {
+    storedRef.current = stored;
+  });
   const onSettingsChange = useCallback(
     (patch: Partial<SessionSettings>) => {
-      setStored((prev) => {
-        const next = applyConnectionPatch(prev, patch);
-        // A joined session is someone else's: changes apply to it only, nothing is stored.
-        if (!joined) void services.profiles.setConnectionSettings(serverId, ref, next);
-        return next;
-      });
+      const prev = storedRef.current;
+      const next = applyConnectionPatch(prev, patch);
+      storedRef.current = next;
+      setStored(next);
+      save(next);
+      if (
+        noticePending &&
+        patch.pointerMode !== undefined &&
+        patch.pointerMode !== settingsRef.current.pointerMode
+      ) {
+        setNotice(sessionStrings.toasts.perConnection);
+        const cur = appRef.current;
+        if (!cur.perConnectionNoticeSeen) {
+          const seen = { ...cur, perConnectionNoticeSeen: true };
+          appRef.current = seen;
+          updateApp(seen);
+        }
+      }
     },
-    [services.profiles, serverId, ref, joined],
+    [save, noticePending, updateApp],
   );
 
   const onUseDefault = useCallback(
     (keys: string[]) => {
-      setStored((prev) => {
-        const next = removeConnectionKeys(prev, keys);
-        if (!joined) void services.profiles.setConnectionSettings(serverId, ref, next);
-        return next;
-      });
+      const next = removeConnectionKeys(storedRef.current, keys);
+      storedRef.current = next;
+      setStored(next);
+      save(next);
     },
-    [services.profiles, serverId, ref, joined],
+    [save],
   );
   const overridden = useMemo(() => overriddenKeys(stored), [stored]);
 
@@ -198,6 +255,25 @@ export default function SessionHost({
 
   // Quality helper: "Edit this connection" when the user may edit it (Performance presets).
   const nav = useNav();
+  // More › "All settings for this connection": Settings › Connections › this one, over the
+  // app chrome; the session stays open and Back there returns to it.
+  const openConnectionSettings =
+    joined || isShareServerId(serverId)
+      ? undefined
+      : () => {
+          onHide();
+          nav.push({
+            name: 'layer-settings',
+            target: {
+              kind: 'connection',
+              serverId,
+              ref,
+              name: target.name,
+              protocol: target.protocol,
+              sessionId: session.id,
+            },
+          });
+        };
   const token = isDemo ? undefined : services.auth.current(serverId)?.token;
   const editConnection =
     token && target.type === 'c' && mayEditConnection(token, target.dataSource, target.identifier)
@@ -325,6 +401,9 @@ export default function SessionHost({
         onSettingsChange={onSettingsChange}
         overriddenKeys={overridden}
         onUseDefault={onUseDefault}
+        settingsRevision={revision}
+        {...(notice ? { notice, onDismissNotice: () => setNotice(undefined) } : {})}
+        {...(openConnectionSettings ? { onConnectionSettings: openConnectionSettings } : {})}
         onExit={exit}
         isDemo={isDemo}
         active={active}

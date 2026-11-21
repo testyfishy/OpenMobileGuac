@@ -545,6 +545,7 @@ export const en = {
         sessions: 'Sessions',
         security: 'Security & privacy',
         backup: 'Backup & restore',
+        connections: 'Connections',
       },
       groups: {
         serverList: 'Server list',
@@ -577,6 +578,64 @@ export const en = {
           `Key set: ${set} · ${combos} saved ${plural(combos, 'combo', 'combos')}`,
         remember: (policy: string) => `Passwords: ${policy}`,
       },
+    },
+    /** Settings per connection (Settings › Connections and the layered editor). */
+    perConnection: {
+      title: 'Settings per connection',
+      summaryNone: 'All connections use the defaults',
+      summaryCount: (n: number) =>
+        plural(n, '1 connection has its own settings', `${n} connections have their own settings`),
+      intro:
+        'Each connection remembers what you change in its session (pointer mode, view, toolbar and more). Tap one to see or change its settings. Nothing here needs a sign-in.',
+      filtered: (page: string) => `With their own ${page} settings`,
+      showAll: 'Show all connections',
+      empty: 'No connections yet. Open a connection once and it is listed here.',
+      emptyFiltered: 'No connection has its own settings on this page.',
+      usesDefaults: 'Uses the defaults',
+      sameAsDefaults: (n: number) =>
+        `${n} own ${plural(n, 'value', 'values')}, same as the defaults`,
+      changes: (n: number) => `${n} ${plural(n, 'change', 'changes')}`,
+      unnamed: (id: string) => `Connection ${id}`,
+      unnamedGroup: (id: string) => `Group ${id}`,
+      serverDefaults: 'Defaults for this server',
+      on: 'On',
+      off: 'Off',
+      andMore: (names: string, n: number) => `${names} and ${n} more`,
+      defaultsLine: 'These are the defaults for every connection.',
+      defaultsOwn: (n: number) =>
+        plural(
+          n,
+          '1 connection has its own values here.',
+          `${n} connections have their own values here.`,
+        ),
+      defaultsNoneOwn: 'Each connection can keep its own values.',
+      seeConnections: 'Settings per connection',
+      overriddenOn: (list: string) => `Own setting on: ${list}`,
+      alsoSetFor: (list: string) => `Also set for: ${list}`,
+      editorIntro:
+        'Settings for this connection only. Values marked “This connection” are its own; the rest follow the defaults. Changes apply at once, also to an open session.',
+      serverEditorIntro:
+        'Defaults for every connection on this server, over the app defaults. A connection’s own values still win.',
+      own: 'This connection',
+      ownServer: 'This server',
+      inherited: 'Uses the default',
+      defaultValue: (value: string) => `Default: ${value}`,
+      useDefault: 'Use default',
+      useDefaultFor: (label: string) => `Use the default for ${label}`,
+      ownCount: (n: number) =>
+        n === 0 ? 'Uses the defaults' : `${n} own ${plural(n, 'value', 'values')}`,
+      resetPage: 'Use the defaults for this page',
+      resetPageHint: 'Removes this connection’s own values on this page.',
+      resetPageServerHint: 'Removes this server’s own defaults on this page.',
+      resetAll: 'Reset all for this connection',
+      resetAllServer: 'Reset all for this server',
+      resetAllHint: 'Every setting goes back to the defaults.',
+      resetConfirmTitle: (name: string) => `Reset all settings of ${name}?`,
+      resetConfirmBody:
+        'Its own values are removed and it uses the defaults again. This cannot be undone.',
+      reset: 'Reset',
+      backToSession: 'Back to the session',
+      forConnection: 'Settings for this connection',
     },
     appearance: 'Appearance',
     theme: 'Theme',

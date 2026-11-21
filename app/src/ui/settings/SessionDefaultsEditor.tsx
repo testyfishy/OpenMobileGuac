@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { RangeField, Segmented, Toggle } from '../components/Form.tsx';
 import { Icon } from '../components/Icon.tsx';
 import type { ResolvedSessionSettings, SessionSettings } from '../session/settings.ts';
@@ -8,6 +9,7 @@ import {
   DEFAULT_SUMMARY_CONTEXT,
   type ListEditor,
   type SettingDescriptor,
+  type SettingKey,
   type SummaryContext,
 } from '../session/settingsSchema.ts';
 import { sessionStrings } from '../session/sessionStrings.ts';
@@ -20,7 +22,21 @@ import {
 import { GestureFigure } from '../session/GestureFigure.tsx';
 import { strings } from '../strings.ts';
 import { splitHint } from './settingsCatalog.ts';
+import { valueText } from './connectionLayers.ts';
 import './sessionDefaults.css';
+
+/**
+ * Editing one connection's (or one server's) own values instead of the app defaults: each
+ * control shows the effective value, marked as its own or inherited, with "Use default".
+ */
+export interface SettingLayer {
+  readonly kind: 'connection' | 'server';
+  /** Keys this layer stores a value for. */
+  readonly own: ReadonlySet<string>;
+  /** What it would use without its own values. */
+  readonly inherited: ResolvedSessionSettings;
+  readonly onUseDefault: (keys: SettingKey[]) => void;
+}
 
 /** What a session setting's control needs: pure props (no context), so tests can render it. */
 export interface SessionBlockProps {
@@ -31,6 +47,46 @@ export interface SessionBlockProps {
   readonly onEditList: (editor: ListEditor) => void;
   /** Names for list summaries (key sets from the key library). */
   readonly summaryContext?: SummaryContext;
+  /** Set when editing a connection's or server's own values (not the app defaults). */
+  readonly layer?: SettingLayer;
+  /** Shown under one setting's control (e.g. which connections override it). */
+  readonly below?: (key: SettingKey) => ReactNode;
+}
+
+/** Under a setting in a layer: its own value (with the default and "Use default") or inherited. */
+function LayerNote({ d, p }: { d: SettingDescriptor; p: SessionBlockProps }) {
+  const l = p.layer;
+  if (!l) return null;
+  const t = strings.settings.perConnection;
+  if (!l.own.has(d.key)) {
+    return (
+      <p className="layer-note" data-layer="inherited">
+        <span className="layer-tag layer-tag-inherited">{t.inherited}</span>
+      </p>
+    );
+  }
+  return (
+    <p className="layer-note" data-layer="own">
+      <span className="layer-tag">{l.kind === 'server' ? t.ownServer : t.own}</span>
+      <span className="layer-default">
+        {t.defaultValue(valueText(d, l.inherited, p.summaryContext ?? DEFAULT_SUMMARY_CONTEXT))}
+      </span>
+      <button
+        type="button"
+        className="btn btn-small btn-ghost layer-use-default"
+        aria-label={t.useDefaultFor(d.label())}
+        data-action="use-default"
+        onClick={() => l.onUseDefault([d.key])}
+      >
+        {t.useDefault}
+      </button>
+    </p>
+  );
+}
+
+function settingClass(p: SessionBlockProps, key: string): string {
+  if (p.layer) return p.layer.own.has(key) ? 'setting setting-changed setting-own' : 'setting';
+  return p.changed.has(key) ? 'setting setting-changed' : 'setting';
 }
 
 /** The rest of a long hint, collapsed (outside any label, so tapping it never toggles). */
@@ -121,10 +177,7 @@ function Control({
 /** One session setting's control, marked when changed from the built-in default. */
 export function SessionSettingBlock({ d, p }: { d: SettingDescriptor; p: SessionBlockProps }) {
   return (
-    <div
-      className={p.changed.has(d.key) ? 'setting setting-changed' : 'setting'}
-      data-setting-key={d.key}
-    >
+    <div className={settingClass(p, d.key)} data-setting-key={d.key}>
       <Control
         d={d}
         s={p.values}
@@ -132,6 +185,8 @@ export function SessionSettingBlock({ d, p }: { d: SettingDescriptor; p: Session
         onEditList={p.onEditList}
         ctx={p.summaryContext ?? DEFAULT_SUMMARY_CONTEXT}
       />
+      <LayerNote d={d} p={p} />
+      {p.below?.(d.key)}
     </div>
   );
 }
@@ -153,16 +208,14 @@ function GestureRow({ g, p }: { g: GestureInfo; p: SessionBlockProps }) {
         <GestureFigure kind={g.figure} />
         <div className="gesture-main">
           {toggle ? (
-            <div
-              className={p.changed.has(toggle.key) ? 'setting setting-changed' : 'setting'}
-              data-setting-key={toggle.key}
-            >
+            <div className={settingClass(p, toggle.key)} data-setting-key={toggle.key}>
               <Toggle
                 label={item.name}
                 hint={item.desc}
                 checked={s[toggle.key] === true}
                 onChange={(v) => p.onChange(settingPatch(toggle.key, v))}
               />
+              <LayerNote d={toggle} p={p} />
             </div>
           ) : (
             <div className="gesture-text">

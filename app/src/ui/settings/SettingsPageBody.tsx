@@ -22,7 +22,10 @@ export interface SettingsPageBodyProps extends SessionBlockProps {
   readonly page: SettingsPageId;
   /** The control of an app-level item (lock, theme, sign-out …). */
   readonly renderApp: (id: AppItemId) => ReactNode;
-  /** "Reset this page to the defaults": drops these keys from the app's session defaults. */
+  /**
+   * "Reset this page to the defaults": drops these keys from the app's session defaults (or,
+   * with `layer`, from that connection's or server's own values).
+   */
   readonly onResetKeys: (keys: SettingKey[]) => void;
   /** Shown above the first group. */
   readonly intro?: ReactNode;
@@ -30,6 +33,8 @@ export interface SettingsPageBodyProps extends SessionBlockProps {
 
 function Item({ r, p }: { r: ItemRef; p: SettingsPageBodyProps }) {
   if (isAppRef(r)) {
+    // A connection's or server's own values: session settings only.
+    if (p.layer) return null;
     const id = r.slice(4) as AppItemId;
     return (
       <div className="setting" data-setting-id={id}>
@@ -52,19 +57,29 @@ function GroupItems({ g, p }: { g: SettingsGroup; p: SettingsPageBodyProps }) {
   );
 }
 
+/** A group with at least one session setting (what a connection's own page shows). */
+function hasSessionItems(g: SettingsGroup): boolean {
+  return g.gestureArea !== undefined || g.items.some((r) => !isAppRef(r));
+}
+
 /**
  * One Settings category: its groups under small headings, the rarely needed ones collapsed
  * under "Advanced", and destructive actions last under "Reset and remove". Pure props, so the
  * completeness tests can render every page.
+ *
+ * With `layer` (Settings › Connections › one connection, or a server's defaults) only the
+ * session settings are shown, each marked as its own value or inherited, and the page's
+ * reset drops that layer's own values.
  */
 export function SettingsPageBody(p: SettingsPageBodyProps) {
   const t = strings.settings.pages;
   const c = categoryOf(p.page);
   const keys = sessionKeysOf(p.page);
-  const dirty = keys.some((k) => p.changed.has(k));
-  const normal = c.groups.filter((g) => !g.advanced && !g.danger);
-  const advanced = c.groups.filter((g) => g.advanced);
-  const danger = c.groups.filter((g) => g.danger);
+  const dirty = keys.some((k) => (p.layer ? p.layer.own.has(k) : p.changed.has(k)));
+  const groups = p.layer ? c.groups.filter(hasSessionItems) : c.groups;
+  const normal = groups.filter((g) => !g.advanced && !g.danger);
+  const advanced = groups.filter((g) => g.advanced);
+  const danger = groups.filter((g) => g.danger);
   const id = (g: string) => `sp-${p.page}-${g}`;
   return (
     <div className="form settings settings-page" data-page={p.page}>
@@ -100,8 +115,14 @@ export function SettingsPageBody(p: SettingsPageBodyProps) {
           {keys.length > 0 ? (
             <div className="list-setting" data-action="reset-page">
               <span className="toggle-label">
-                <span>{t.resetPage}</span>
-                <span className="toggle-hint">{t.resetPageHint}</span>
+                <span>{p.layer ? strings.settings.perConnection.resetPage : t.resetPage}</span>
+                <span className="toggle-hint">
+                  {p.layer
+                    ? p.layer.kind === 'server'
+                      ? strings.settings.perConnection.resetPageServerHint
+                      : strings.settings.perConnection.resetPageHint
+                    : t.resetPageHint}
+                </span>
               </span>
               <button
                 type="button"

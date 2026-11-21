@@ -46,6 +46,7 @@ import { microphoneAvailable, primeAudioInput } from './microphone.ts';
 import type { StreamRequest } from './fileSave.ts';
 import { keySetName, keySetNameIn } from './keySetNames.ts';
 import { MoreSheet, type TerminalControls } from './MoreSheet.tsx';
+import { sendAndPaste, shouldPasteAfterSend } from './sendPaste.ts';
 import { ShareSheet, type SessionSharing } from './ShareSheet.tsx';
 import { SheetBackContext, SheetSwipeContext } from './sheetBack.ts';
 import { nextColorScheme, parseFontSize, stepFontSize } from '../../session/terminalFont.ts';
@@ -162,6 +163,16 @@ export interface SessionScreenProps {
   saveTextFile?: SaveTextFile;
   /** Session info "Edit this connection" (only when the user may edit it). */
   onEditConnection?: () => void;
+  /** More › "All settings for this connection" (Settings for it; the session stays open). */
+  onConnectionSettings?: () => void;
+  /**
+   * Changes when the host's stored settings were edited elsewhere (Settings): the in-session
+   * overlay is dropped so `settings` is followed again.
+   */
+  settingsRevision?: number;
+  /** A note to show until dismissed ("Saved for this connection …"). */
+  notice?: string;
+  onDismissNotice?: () => void;
   /** "Share this session" (sharing profiles); absent for the demo. */
   sharing?: SessionSharing;
   /**
@@ -185,6 +196,13 @@ export interface SessionScreenProps {
    */
   credentialMemory?: CredentialMemory & { readonly policy: RememberPolicy };
 }
+
+/**
+ * The time for a clipboard history entry. Only called from event handlers and promise
+ * callbacks; a function of its own because the purity lint cannot tell that `sendToRemote`,
+ * handed to `sendAndPaste`, never runs during render.
+ */
+const clockNow = (): number => Date.now();
 
 /** Longest clipboard text typed as keystrokes (each character is two key events). */
 const MAX_TYPED_CHARS = 4000;
@@ -254,6 +272,12 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
   // In-session overlay: the shell may not persist (yet) every field this screen offers,
   // so changes apply here at once and are also reported to the host.
   const [overlay, setOverlay] = useState<Partial<SessionSettings>>({});
+  // Settings edited elsewhere (a new revision): follow the host's values again.
+  const [overlayRevision, setOverlayRevision] = useState(props.settingsRevision);
+  if (overlayRevision !== props.settingsRevision) {
+    setOverlayRevision(props.settingsRevision);
+    setOverlay({});
+  }
   const settings = useMemo(
     () => normalizeSessionSettings({ ...props.settings, ...overlay }),
     [props.settings, overlay],
@@ -266,6 +290,10 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     },
     [hostChange],
   );
+  const latestSettings = useRef(settings);
+  useEffect(() => {
+    latestSettings.current = settings;
+  });
   const settingsChangeRef = useRef(onSettingsChange);
   useEffect(() => {
     settingsChangeRef.current = onSettingsChange;
@@ -719,27 +747,45 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
 
   /**
    * Set the remote clipboard. Terminal protocols paste guacd's terminal clipboard with
-   * Ctrl+Shift+V or a right-click (guacamole-server `terminal/terminal.c`). That is not
-   * pressed automatically: with `disable-paste` the terminal keeps its own buffer (the last
-   * selection, `ssh/user.c`), and an automatic paste would type stale text into a shell.
+   * Ctrl+Shift+V or a right-click (guacamole-server `terminal/terminal.c`). Only the Send
+   * action presses that (or Ctrl+V) afterwards, and only with `sendPastes` on
+   * (`sendPaste.ts`): with `disable-paste` the terminal keeps its own buffer (the last
+   * selection, `ssh/user.c`), so turn the setting off for such connections.
    */
   const sendToRemote = (text: string): boolean => {
     if (!controller.sendClipboard(text)) return false;
-    clipDispatch({ type: 'add', text, direction: 'to-remote', at: Date.now() });
+    clipDispatch({ type: 'add', text, direction: 'to-remote', at: clockNow() });
     return true;
   };
 
+  /** The Send action: the device clipboard to the remote, then (`sendPastes`) paste it. */
   const paste = () => {
+    const { sendPastes, viewOnly } = latestSettings.current;
     void readDeviceClipboard().then((r) => {
       if (!r.ok) return showToast(r.reason);
       const s = sessionStrings.toasts;
       if (r.text === '') return showToast(s.clipboardEmpty);
-      if (sendToRemote(r.text)) {
-        const n = [...r.text].length;
-        showToast(terminal ? s.clipboardSentTerminal(n) : s.clipboardSent(n));
-      } else {
-        showToast(sessionStrings.common.notConnected);
-      }
+      const doPaste = shouldPasteAfterSend({
+        trigger: 'send-action',
+        sendPastes,
+        viewOnly,
+        connected: controller.isConnected(),
+      });
+      const result = sendAndPaste(r.text, doPaste, terminal, {
+        sendClipboard: sendToRemote,
+        pressShortcut: (combo) => {
+          const c = parseCombo(combo);
+          if (c.ok) controller.runCombo(c.combo);
+        },
+        stillAllowed: () => controller.isConnected(),
+        schedule: (fn, ms) => {
+          setTimeout(fn, ms);
+        },
+      });
+      const n = [...r.text].length;
+      if (result === 'not-sent') showToast(sessionStrings.common.notConnected);
+      else if (result === 'sent-and-pasting') showToast(s.clipboardSentPasted(n));
+      else showToast(terminal ? s.clipboardSentTerminal(n) : s.clipboardSent(n));
     });
   };
 
@@ -860,7 +906,13 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
     viewOnly: settings.viewOnly,
     showCtrlAltDel,
     canMinimize: onMinimize !== undefined,
-    pasteHint: terminal ? t.screen.pasteHintTerminal : t.screen.pasteHint,
+    pasteHint: terminal
+      ? settings.sendPastes
+        ? t.screen.pasteHintAutoTerminal
+        : t.screen.pasteHintTerminal
+      : settings.sendPastes
+        ? t.screen.pasteHintAuto
+        : t.screen.pasteHint,
     pasteLongPress: settings.pasteLongPress,
     runningTransfers,
     onTogglePointerMode: togglePointerMode,
@@ -1089,6 +1141,7 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                     quality={settings.quality}
                     audio={settings.audio}
                     viewOnly={settings.viewOnly}
+                    sendPastes={settings.sendPastes}
                     reconnectToApply={snap.reconnectToApply}
                     onQuality={(q) => onSettingsChange({ quality: q })}
                     onAudio={(a) => onSettingsChange({ audio: a })}
@@ -1104,6 +1157,14 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
                         : null
                     }
                     {...(props.sharing ? { onShare: () => setMenu('share') } : {})}
+                    {...(props.onConnectionSettings
+                      ? {
+                          onConnectionSettings: () => {
+                            closeMenu();
+                            props.onConnectionSettings?.();
+                          },
+                        }
+                      : {})}
                     onClose={closeMenu}
                   />
                 )}
@@ -1351,6 +1412,17 @@ export function SessionScreen(props: SessionScreenProps): JSX.Element {
               ) : null}
 
               <div className="omg-toast-region" role="status" aria-live="polite">
+                {props.notice && (
+                  <div className="omg-toast omg-toast--notice" data-notice="per-connection">
+                    <span>{props.notice}</span>
+                    <ChromeButton
+                      className="omg-btn--small omg-btn--ghost"
+                      onClick={() => props.onDismissNotice?.()}
+                    >
+                      {sessionStrings.toasts.perConnectionDismiss}
+                    </ChromeButton>
+                  </div>
+                )}
                 {toast && (
                   <div key={toast.id} className="omg-toast">
                     {toast.text}

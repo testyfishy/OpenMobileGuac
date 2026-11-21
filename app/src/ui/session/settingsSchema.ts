@@ -483,6 +483,12 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
     () => S().options.clipboardRemoteToDeviceHint,
   ),
   sw(
+    'sendPastes',
+    'clipboard',
+    () => S().options.sendPastes,
+    () => S().options.sendPastesHint,
+  ),
+  sw(
     'clipboardSendOnConnect',
     'clipboard',
     () => S().options.clipboardSendOnConnect,

@@ -9,6 +9,32 @@ maintainer uses the iOS app daily through TestFlight against a real Guacamole se
 The device checklists in docs/checklists have not been completed, and the Android app has
 not been run on a device yet. See "Untested on device" in [docs/FEATURES.md](docs/FEATURES.md).
 
+## [Unreleased]
+
+### Added
+
+- Settings › Connections ("Settings per connection"): every connection known on this device,
+  grouped by server, with a one-line summary of what it changes from the defaults. Each one
+  opens its own settings on the same pages as the defaults, with every value marked as its
+  own ("Default: Direct touch", "Use default") or inherited, and "Reset all for this
+  connection". Also opened from the connection details, the session's More sheet ("All
+  settings for this connection") and, as "Defaults for this server", from the server's
+  options. Changes reach an open session of that connection at once.
+- The defaults pages say how many connections keep their own values there; Pointer mode lists
+  them, and search results show "Also set for: …".
+- A one-time note after the first pointer mode change in a session: "Saved for this
+  connection. Other connections keep their own setting."
+- "Send also pastes" (Settings › Sessions › Clipboard, per connection, on by default): Send
+  puts the device clipboard on the remote and then presses the remote's paste shortcut
+  (Ctrl+V; Ctrl+Shift+V in SSH / telnet / Kubernetes terminals) about 150 ms after the
+  clipboard stream has ended. Turn it off to send only. Automatic clipboard sending and
+  "Type clipboard" never paste.
+
+### Changed
+
+- The "Paste" action is now called "Send" ("Send clipboard" in More), because it sends this
+  device's clipboard to the remote.
+
 ## [1.0.1] - 2026-11-21
 
 ### Fixed

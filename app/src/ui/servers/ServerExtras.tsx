@@ -17,6 +17,7 @@ import { InfoBanner } from '../components/Feedback.tsx';
 import { Segmented, TextField, Toggle } from '../components/Form.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { useToast } from '../components/toastContext.ts';
+import { useNav } from '../nav/NavContext.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
 import { haptic } from '../services/native.ts';
 import {
@@ -46,6 +47,7 @@ type Inherit<T extends string> = T | 'inherit';
 export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
   const services = useServices();
   const { options, save } = useServerOptions(profile.id);
+  const nav = useNav();
   const [warn, setWarn] = useState<boolean | undefined>(undefined);
   const f = strings.serverForm;
   const t = strings.settings;
@@ -132,6 +134,28 @@ export function ServerOptionsSection({ profile }: { profile: ServerProfile }) {
           { value: 'off', label: f.clipboardOff },
         ]}
       />
+      <div className="link-list">
+        <button
+          type="button"
+          className="row-main link-row"
+          data-action="server-defaults"
+          onClick={() =>
+            nav.push({
+              name: 'layer-settings',
+              target: { kind: 'server', serverId: profile.id, name: profile.name },
+            })
+          }
+        >
+          <Icon name="gear" />{' '}
+          <span className="row-text">
+            <span>{t.perConnection.serverDefaults}</span>
+            <span className="row-subtitle">
+              {t.perConnection.ownCount(Object.keys(patch).length)}
+            </span>
+          </span>
+          <Icon name="chevron-right" className="row-chevron" />
+        </button>
+      </div>
       {isInsecureUrl(profile.baseUrl) && warn !== undefined ? (
         <Toggle
           label={f.httpWarning}

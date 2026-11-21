@@ -113,6 +113,11 @@ export interface SessionSettings {
   audio?: AudioMode;
   /** CLP-1: send the device clipboard once when the session connects (iOS may prompt). */
   clipboardSendOnConnect?: boolean;
+  /**
+   * The Send action (toolbar, More) also presses the remote's paste shortcut once the
+   * clipboard is there (Ctrl+V; Ctrl+Shift+V in a terminal). Off: send only.
+   */
+  sendPastes?: boolean;
   /** Quality (AUDIT §4.4): what size, DPI and media to request at connect. */
   quality?: Quality;
   /** Remote desktop size to request; `auto` follows the quality. */
@@ -228,6 +233,7 @@ export const DEFAULT_SESSION_SETTINGS: ResolvedSessionSettings = {
   audioMuted: false,
   audio: 'on',
   clipboardSendOnConnect: false,
+  sendPastes: true,
   quality: 'auto',
   remoteResolution: 'auto',
   remoteWidth: 1280,
@@ -361,6 +367,7 @@ export function normalizeSessionSettings(
     pointerLock: bool(raw['pointerLock'], d.pointerLock),
     ...audioFields(raw),
     clipboardSendOnConnect: bool(raw['clipboardSendOnConnect'], d.clipboardSendOnConnect),
+    sendPastes: bool(raw['sendPastes'], d.sendPastes),
     quality: oneOf(raw['quality'], QUALITIES, d.quality),
     remoteResolution: oneOf(raw['remoteResolution'], REMOTE_RESOLUTIONS, d.remoteResolution),
     remoteWidth: Math.round(clampTo(raw['remoteWidth'], 'remoteWidth')),
@@ -422,6 +429,7 @@ export const INPUT_SETTING_KEYS = [
   'audioMuted',
   'audio',
   'clipboardSendOnConnect',
+  'sendPastes',
   'quality',
   'remoteResolution',
   'remoteWidth',

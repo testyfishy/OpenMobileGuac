@@ -86,6 +86,11 @@ export interface AppSettings {
   readonly connectionSort: ConnectionSort;
   /** First-run introduction seen. */
   readonly onboardingDone: boolean;
+  /**
+   * The one-time "Saved for this connection" note was shown (after the first pointer mode
+   * change in a session). Device-local, like `onboardingDone`.
+   */
+  readonly perConnectionNoticeSeen: boolean;
   /** Diagnostics: hide host names when copying/sharing the log. */
   readonly logHideHosts: boolean;
   /** The built-in Demo in the server list: `auto` = only while no server is saved. */
@@ -142,6 +147,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   thumbnails: true,
   connectionSort: 'server',
   onboardingDone: false,
+  perConnectionNoticeSeen: false,
   logHideHosts: true,
   showDemo: 'auto',
   keys: DEFAULT_KEY_LIBRARY,
@@ -337,6 +343,10 @@ export function parseAppSettings(raw: unknown): AppSettings {
     ),
     onboardingDone:
       typeof raw['onboardingDone'] === 'boolean' ? raw['onboardingDone'] : d.onboardingDone,
+    perConnectionNoticeSeen:
+      typeof raw['perConnectionNoticeSeen'] === 'boolean'
+        ? raw['perConnectionNoticeSeen']
+        : d.perConnectionNoticeSeen,
     logHideHosts: typeof raw['logHideHosts'] === 'boolean' ? raw['logHideHosts'] : d.logHideHosts,
     showDemo: pick(raw['showDemo'], ['auto', 'show', 'hide'] as const, d.showDemo),
     keys: kd.keys,
@@ -376,6 +386,7 @@ export function settingsRestore(
       sessionDefaults: defaults.value as SessionSettingsPatch,
       lock: current.lock,
       onboardingDone: current.onboardingDone,
+      perConnectionNoticeSeen: current.perConnectionNoticeSeen,
       rememberConnectionPasswords: current.rememberConnectionPasswords,
       rememberConnectionUnlock: current.rememberConnectionUnlock,
       serverSignOutAfterSeconds: current.serverSignOutAfterSeconds,

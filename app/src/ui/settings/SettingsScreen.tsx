@@ -64,6 +64,14 @@ import {
 import { MoreHint } from './SessionDefaultsEditor.tsx';
 import { SettingsPageBody } from './SettingsPageBody.tsx';
 import { SessionListEditor } from './SessionListEditors.tsx';
+import {
+  allEntries,
+  entriesOverriding,
+  entriesOverridingPage,
+  overrideList,
+  overrideNames,
+} from './connectionLayers.ts';
+import { useConnectionInventory } from './useConnectionInventory.ts';
 import './settingsPages.css';
 
 function durationLabel(seconds: number | null): string {
@@ -151,6 +159,9 @@ export function SettingsScreen() {
   const android = isAndroid();
   const ios = platformName() === 'ios';
   const openSessions = sessions.state.sessions.length;
+  // Settings per connection: who keeps its own values (counts, "Also set for", Pointer mode).
+  const inventory = useConnectionInventory();
+  const entries = useMemo(() => allEntries(inventory ?? []), [inventory]);
 
   // ---- Sub-page navigation: back returns to the list (only while Settings is on top).
   const rootRef = useRef<HTMLDivElement>(null);
@@ -823,6 +834,10 @@ export function SettingsScreen() {
           settings.lock.enabled && lockAvailable ? tp.summaries.lockOn : tp.summaries.lockOff,
           tp.summaries.remember(t.rememberConnectionOptions[settings.rememberConnectionPasswords]),
         );
+      case 'connections': {
+        const n = entriesOverriding(entries).length;
+        return n > 0 ? t.perConnection.summaryCount(n) : t.perConnection.summaryNone;
+      }
       case 'backup':
         return settings.autoBackup.enabled
           ? tp.summaries.autoBackupOn(
@@ -853,7 +868,11 @@ export function SettingsScreen() {
   };
 
   const results = query.trim()
-    ? searchSettings(query, { values: session, biometryLabel: t.biometryMethods[method] })
+    ? searchSettings(query, {
+        values: session,
+        biometryLabel: t.biometryMethods[method],
+        alsoSetFor: (key) => overrideNames(entries, key) || undefined,
+      })
     : [];
 
   const editorAndDialogs = (
@@ -977,6 +996,9 @@ export function SettingsScreen() {
     const c = categoryOf(page.id);
     const hasSession = c.groups.some((g) => g.items.some((r) => !r.startsWith('app:')));
     const gestureHint = splitHint(sessionStrings.options.sectionHints.gestures);
+    const pc = t.perConnection;
+    const ownHere = entriesOverridingPage(entries, page.id).length;
+    const pageId = page.id;
     return (
       <Screen key={`page-${page.id}`} title={c.title()} onBack={closePage}>
         <div ref={rootRef}>
@@ -989,10 +1011,33 @@ export function SettingsScreen() {
             summaryContext={{ keySetName }}
             renderApp={renderApp}
             onResetKeys={resetKeys}
+            below={(key) =>
+              key === 'pointerMode' && entriesOverriding(entries, [key]).length > 0 ? (
+                <p className="field-hint layer-overrides" data-overrides={key}>
+                  {pc.overriddenOn(overrideList(entries, key, { keySetName }))}
+                </p>
+              ) : null
+            }
             intro={
               hasSession ? (
                 <>
-                  <p className="muted">{t.sessionDefaultsHint}</p>
+                  <p className="muted defaults-line" data-own-here={ownHere}>
+                    {pc.defaultsLine} {ownHere > 0 ? pc.defaultsOwn(ownHere) : pc.defaultsNoneOwn}{' '}
+                    <button
+                      type="button"
+                      className="inline-link"
+                      data-action="per-connection"
+                      onClick={() =>
+                        nav.push(
+                          ownHere > 0
+                            ? { name: 'connection-settings', page: pageId }
+                            : { name: 'connection-settings' },
+                        )
+                      }
+                    >
+                      {pc.seeConnections}
+                    </button>
+                  </p>
                   {page.id === 'gestures' ? (
                     <>
                       <p className="field-hint">{gestureHint[0]}</p>
@@ -1061,6 +1106,11 @@ export function SettingsScreen() {
                     <span className="row-text">
                       <span className="row-title">{r.label}</span>
                       <span className="row-subtitle">{r.where}</span>
+                      {r.alsoSetFor ? (
+                        <span className="row-subtitle settings-result-also">
+                          {t.perConnection.alsoSetFor(r.alsoSetFor)}
+                        </span>
+                      ) : null}
                     </span>
                     <Icon name="chevron-right" className="row-chevron" />
                   </button>

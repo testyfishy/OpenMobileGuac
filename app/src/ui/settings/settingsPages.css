@@ -120,3 +120,51 @@
     outline-offset: 0.25rem;
   }
 }
+
+/* A link inside a sentence ("Settings per connection"). */
+.inline-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--omg-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+/* Settings › Connections. */
+.per-connection-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 0.5rem;
+  margin: 0;
+}
+
+.per-connection-filter .btn-small {
+  margin-top: 0;
+}
+
+.per-connection-server .settings-cats {
+  margin: 0;
+}
+
+.row-fav {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--omg-warning);
+  flex: none;
+}
+
+.settings-result-also {
+  font-size: 0.8125rem;
+}
+
+.per-connection-host {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}

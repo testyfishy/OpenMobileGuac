@@ -122,11 +122,11 @@ describe('session settings descriptor table', () => {
 });
 
 describe('Settings categories and search', () => {
-  it('has a short top level (6–9 rows) with unique ids', () => {
+  it('has a short top level (6–10 rows) with unique ids', () => {
     const ids = SETTINGS_CATEGORIES.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.length).toBeGreaterThanOrEqual(6);
-    expect(ids.length).toBeLessThanOrEqual(9);
+    expect(ids.length).toBeLessThanOrEqual(10);
     expect(ids).toEqual([...SETTINGS_PAGES]);
   });
 
@@ -148,7 +148,11 @@ describe('Settings categories and search', () => {
     expect(rendered.sort()).toEqual([...APP_ITEMS].sort());
   });
 
-  it('every group has items; Backup opens its own screen directly', () => {
+  it('every group has items; Backup and Connections open their own screens directly', () => {
+    expect(SETTINGS_CATEGORIES.filter((c) => c.route).map((c) => [c.id, c.route])).toEqual([
+      ['connections', 'connection-settings'],
+      ['backup', 'backup'],
+    ]);
     for (const c of SETTINGS_CATEGORIES) {
       if (c.route) expect(c.groups, c.id).toEqual([]);
       for (const g of c.groups) expect(g.items.length, `${c.id}/${g.id}`).toBeGreaterThan(0);

@@ -21,13 +21,34 @@ export interface SessionTarget {
   readonly join?: string;
 }
 
+/** Whose own session settings an editor shows (Settings › Connections, SET-1). */
+export type LayerTarget =
+  | {
+      readonly kind: 'connection';
+      readonly serverId: string;
+      readonly ref: {
+        readonly dataSource: string;
+        readonly identifier: string;
+        readonly type: 'c' | 'g';
+      };
+      readonly name?: string;
+      readonly protocol?: string;
+      /** Opened from this open session: Back shows it again. */
+      readonly sessionId?: string;
+    }
+  | { readonly kind: 'server'; readonly serverId: string; readonly name?: string };
+
 export type Route =
   | { readonly name: 'servers' }
   | { readonly name: 'server-edit'; readonly serverId?: string }
   | { readonly name: 'connections'; readonly serverId: string }
   | { readonly name: 'settings' }
   | { readonly name: 'backup' }
-  | { readonly name: 'diagnostics' };
+  | { readonly name: 'diagnostics' }
+  /** Settings › Connections, optionally only those with their own values on one page. */
+  | { readonly name: 'connection-settings'; readonly page?: string }
+  /** One connection's (or one server's) own session settings. */
+  | { readonly name: 'layer-settings'; readonly target: LayerTarget };
 
 export interface NavEntry {
   readonly key: number;

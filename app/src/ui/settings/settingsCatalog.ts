@@ -33,6 +33,7 @@ export const SETTINGS_PAGES = [
   'gestures',
   'keyboard',
   'sessions',
+  'connections',
   'security',
   'backup',
 ] as const;
@@ -108,7 +109,7 @@ export interface SettingsCategory {
   readonly title: () => string;
   readonly groups: readonly SettingsGroup[];
   /** Opens this screen instead of a sub-page. */
-  readonly route?: 'backup';
+  readonly route?: 'backup' | 'connection-settings';
 }
 
 const T = () => strings.settings;
@@ -246,13 +247,26 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
       {
         id: 'clipboard',
         title: () => O().sections.clipboard,
-        items: ['clipboardRemoteToDevice', 'clipboardSendOnConnect', 'clipboardAutoSendOnFocus'],
+        items: [
+          'clipboardRemoteToDevice',
+          'sendPastes',
+          'clipboardSendOnConnect',
+          'clipboardAutoSendOnFocus',
+        ],
       },
       { id: 'files', title: () => O().sections.files, items: ['remoteFiles', 'receivedFiles'] },
       { id: 'sound', title: () => O().sections.sound, items: ['audio', 'microphone'] },
       { id: 'thumbnails', title: () => P().groups.thumbnails, items: [app('thumbnails')] },
       { id: 'danger', title: () => P().danger, items: [app('clearThumbnails')], danger: true },
     ],
+  },
+  {
+    // Settings per connection: its own screen (each connection's values over these defaults).
+    id: 'connections',
+    icon: 'server',
+    title: () => P().categories.connections,
+    groups: [],
+    route: 'connection-settings',
   },
   {
     id: 'security',
@@ -319,6 +333,8 @@ export interface SearchContext {
   readonly values: ResolvedSessionSettings;
   /** Device check wording ("Face ID", "your fingerprint", …). */
   readonly biometryLabel: string;
+  /** Connections with their own value for a session setting ("Office desktop, Tablet"), if any. */
+  readonly alsoSetFor?: (key: SettingKey) => string | undefined;
 }
 
 export interface SearchResult {
@@ -328,6 +344,8 @@ export interface SearchResult {
   readonly label: string;
   /** "Category › Group". */
   readonly where: string;
+  /** Session settings some connections override: their names (not searched). */
+  readonly alsoSetFor?: string;
 }
 
 function durations(): string[] {
@@ -516,7 +534,14 @@ export function searchSettings(query: string, ctx: SearchContext): SearchResult[
         const item = itemText(ref, ctx);
         if (!item) continue;
         if (matches(words, [item.label, ...item.text, groupTitle])) {
-          out.push({ ref, page: c.id, label: item.label, where: `${c.title()} › ${groupTitle}` });
+          const also = isAppRef(ref) ? undefined : ctx.alsoSetFor?.(ref);
+          out.push({
+            ref,
+            page: c.id,
+            label: item.label,
+            where: `${c.title()} › ${groupTitle}`,
+            ...(also ? { alsoSetFor: also } : {}),
+          });
         }
       }
     }

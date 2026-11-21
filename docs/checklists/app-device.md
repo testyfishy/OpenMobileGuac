@@ -18,6 +18,25 @@ Things that cannot be verified in a desktop browser. Run on a real iPhone and An
       cancelling shows the sign-in form with "Saved credentials were not used…".
 - [ ] iOS: Face ID permission prompt shows the `NSFaceIDUsageDescription` text.
 
+## Settings per connection (SET-2)
+
+- [ ] In a session, tap the pointer button: the note "Saved for this connection. Other
+      connections keep their own setting." appears once (OK dismisses it); a later change, or
+      another connection, does not show it again.
+- [ ] Settings › Connections lists that connection under its server with "Trackpad" (or the
+      mode chosen); other connections say "Uses the defaults". Works with the server signed out
+      and in airplane mode.
+- [ ] Settings › Pointer & touch says "1 connection has its own values here" and lists it next to
+      Pointer mode; the link opens the filtered list.
+- [ ] More › "All settings for this connection": the editor opens over the app, the session stays
+      open; change Pointer mode there, "Back to the session" (or hardware back): the session
+      uses the new mode without reconnecting.
+- [ ] "Use default" on a value and "Reset all for this connection" (confirm) take effect in the
+      open session too.
+- [ ] Connection details › "Settings for this connection" and Edit server › "Defaults for this
+      server" open the same editor; the server's quick options show the new values afterwards.
+- [ ] With TalkBack / VoiceOver: "Use the default for Pointer mode" is announced.
+
 ## Stored TOTP seed (SRV-9)
 
 - [ ] Edit server › Stored two-factor key is unavailable until the lock is on.

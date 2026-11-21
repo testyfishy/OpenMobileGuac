@@ -57,6 +57,8 @@ export interface MoreSheetProps {
   readonly quality: Quality;
   readonly audio: AudioMode;
   readonly viewOnly: boolean;
+  /** Send also pastes (`sendPastes`): the Send row's hint says so. */
+  readonly sendPastes?: boolean;
   readonly reconnectToApply: boolean;
   readonly onQuality: (q: Quality) => void;
   readonly onAudio: (a: AudioMode) => void;
@@ -64,6 +66,8 @@ export interface MoreSheetProps {
   readonly terminal: TerminalControls | null;
   /** "Share this session", when the host supports it (not the demo). */
   readonly onShare?: () => void;
+  /** "All settings for this connection" (Settings for it), when the host supports it. */
+  readonly onConnectionSettings?: () => void;
   readonly onClose: () => void;
 }
 
@@ -309,7 +313,12 @@ export function MoreSheet(p: MoreSheetProps) {
       )}
 
       <Group title={t.groups.clipFiles}>
-        <Row icon={a.paste.icon} label={t.paste} hint={t.pasteHint} onClick={run(a.paste)} />
+        <Row
+          icon={a.paste.icon}
+          label={t.paste}
+          hint={p.sendPastes ? t.pasteHintAuto : t.pasteHint}
+          onClick={run(a.paste)}
+        />
         <Row
           icon={a.clipboard.icon}
           label={t.clipboard}
@@ -388,6 +397,14 @@ export function MoreSheet(p: MoreSheetProps) {
           onClick={run(a.info)}
           sheet
         />
+        {p.onConnectionSettings && (
+          <Row
+            icon={a.options.icon}
+            label={t.connectionSettings}
+            hint={t.connectionSettingsHint}
+            onClick={p.onConnectionSettings}
+          />
+        )}
       </Group>
 
       <div className="omg-more__danger">

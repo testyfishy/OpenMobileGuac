@@ -134,6 +134,16 @@ Default: Free side. Phone only (a tablet, portrait and the split layout keep the
       device" off it does not.
 - [ ] Auto-send on foreground on: switch to another app, copy, come back: sent once, and a
       second return without a new copy does not resend.
+- [ ] "Send also pastes" (Settings › Sessions › Clipboard, on by default): copy text on the
+      phone, focus a text field on the remote, tap Send: the text appears without pressing
+      Ctrl+V; the toast says "Sent and pasted N characters". Check on a **Windows** remote (RDP,
+      Notepad), a **Linux desktop** (VNC or RDP, a text editor) and an **SSH terminal**
+      (Ctrl+Shift+V is pressed; on a connection with `disable-paste` the terminal pastes its
+      own buffer, so turn the setting off there). A **Mac** remote needs ⌘V, which is not
+      pressed: not covered. Note whether 150 ms is enough on a slow link (stale clipboard
+      pasted).
+- [ ] With the setting off, Send only sends (toast "Paste on the remote"). With View only on,
+      nothing is pasted. Auto-send on foreground / on connect and Type clipboard never paste.
 
 ## Gestures: direct mode (PTR-1)
 

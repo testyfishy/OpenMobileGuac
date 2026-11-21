@@ -3,6 +3,7 @@ import { AdminConnectionActions } from '../admin/EntryPoints.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { Sheet } from '../components/Sheet.tsx';
 import { useToast } from '../components/toastContext.ts';
+import { useNav } from '../nav/NavContext.ts';
 import { copyText, haptic } from '../services/native.ts';
 import { strings } from '../strings.ts';
 import { protocolLabel, refOf, type ConnectionMatch } from './treeView.ts';
@@ -29,7 +30,21 @@ export function ConnectionDetails({
 }) {
   const c = strings.connections;
   const toast = useToast();
+  const nav = useNav();
   const conn = match.connection;
+  const openSettings = () => {
+    onClose();
+    nav.push({
+      name: 'layer-settings',
+      target: {
+        kind: 'connection',
+        serverId,
+        ref: refOf(conn),
+        name: conn.name,
+        protocol: conn.protocol,
+      },
+    });
+  };
   const copyLink = async () => {
     const ok = await copyText(buildConnectLink(serverId, refOf(conn)));
     haptic(ok ? 'success' : 'error');
@@ -93,6 +108,14 @@ export function ConnectionDetails({
         </button>
         <button type="button" className="btn btn-block" onClick={() => void copyLink()}>
           <Icon name="link" /> {c.copyLink}
+        </button>
+        <button
+          type="button"
+          className="btn btn-block"
+          data-action="connection-settings"
+          onClick={openSettings}
+        >
+          <Icon name="gear" /> {strings.settings.perConnection.forConnection}
         </button>
       </div>
       <AdminConnectionActions connection={conn} onAction={onClose} />

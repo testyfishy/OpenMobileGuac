@@ -5,7 +5,12 @@ import {
   type KeyValueStore,
   type StorageLike,
 } from './KeyValueStore.ts';
-import { ProfileStore, type ConnectionRef } from './ProfileStore.ts';
+import {
+  ProfileStore,
+  connectionRefKey,
+  parseConnectionRefKey,
+  type ConnectionRef,
+} from './ProfileStore.ts';
 import {
   InsecureDevLocalStorageSecureStore,
   MemorySecureStore,
@@ -224,6 +229,28 @@ describe('ProfileStore favourites, recents, settings', () => {
     expect((await store.listRecents('p')).map((e) => e.at)).toEqual([5, 4, 3]);
     await store.clearRecents('p');
     expect(await store.listRecents('p')).toEqual([]);
+  });
+
+  it('lists every connection with remembered settings (Settings › Connections)', async () => {
+    const { store, kv } = makeStore();
+    const odd: ConnectionRef = { dataSource: 'my/source', identifier: 'a b%2F', type: 'c' };
+    await store.setConnectionSettings('p', refA, { pointerMode: 'trackpad' });
+    await store.setConnectionSettings('p', refD, { fitMode: 'fit-width' });
+    await store.setConnectionSettings('p', odd, { haptics: false });
+    await store.setConnectionSettings('other', refB, { haptics: true });
+    // A key this store did not write is skipped, not thrown.
+    const raw = JSON.parse((await kv.get('profile/p/connectionSettings')) ?? '{}') as object;
+    await kv.set('profile/p/connectionSettings', JSON.stringify({ ...raw, junk: { a: 1 } }));
+    expect(await store.listConnectionSettings('p')).toEqual([
+      { ref: refA, settings: { pointerMode: 'trackpad' } },
+      { ref: refD, settings: { fitMode: 'fit-width' } },
+      { ref: odd, settings: { haptics: false } },
+    ]);
+    expect(await store.listConnectionSettings('nobody')).toEqual([]);
+    for (const r of [refA, refD, odd])
+      expect(parseConnectionRefKey(connectionRefKey(r))).toEqual(r);
+    expect(parseConnectionRefKey('x/a/b')).toBeUndefined();
+    expect(parseConnectionRefKey('c/%E0%A4%A/1')).toBeUndefined();
   });
 
   it('remembers settings per connection and distinguishes connections from groups', async () => {

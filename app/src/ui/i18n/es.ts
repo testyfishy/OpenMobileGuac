@@ -551,6 +551,7 @@ export const es: Strings = {
         sessions: 'Sesiones',
         security: 'Seguridad y privacidad',
         backup: 'Copia de seguridad',
+        connections: 'Conexiones',
       },
       groups: {
         serverList: 'Lista de servidores',
@@ -637,6 +638,61 @@ export const es: Strings = {
     channelName: 'Sesiones conectadas',
     channelDescription:
       'Se muestra mientras las sesiones remotas siguen conectadas en segundo plano',
+    perConnection: {
+      title: 'Ajustes por conexión',
+      summaryNone: 'Todas las conexiones usan los valores predeterminados',
+      summaryCount: (n: number) =>
+        `${n} ${plural(n, 'conexión tiene', 'conexiones tienen')} ajustes propios`,
+      intro:
+        'Cada conexión recuerda lo que cambias en su sesión (modo del puntero, vista, barra de herramientas y más). Toca una para ver o cambiar sus ajustes. Aquí no hace falta iniciar sesión.',
+      filtered: (page: string) => `Con ajustes propios en ${page}`,
+      showAll: 'Mostrar todas las conexiones',
+      empty: 'Aún no hay conexiones. Abre una conexión una vez y aparecerá aquí.',
+      emptyFiltered: 'Ninguna conexión tiene ajustes propios en esta página.',
+      usesDefaults: 'Usa los valores predeterminados',
+      sameAsDefaults: (n: number) =>
+        `${n} ${plural(n, 'valor propio', 'valores propios')}, iguales a los predeterminados`,
+      changes: (n: number) => `${n} ${plural(n, 'cambio', 'cambios')}`,
+      unnamed: (id: string) => `Conexión ${id}`,
+      unnamedGroup: (id: string) => `Grupo ${id}`,
+      serverDefaults: 'Valores predeterminados de este servidor',
+      on: 'Activado',
+      off: 'Desactivado',
+      andMore: (names: string, n: number) => `${names} y ${n} más`,
+      defaultsLine: 'Estos son los valores predeterminados de todas las conexiones.',
+      defaultsOwn: (n: number) =>
+        `${n} ${plural(n, 'conexión tiene', 'conexiones tienen')} valores propios aquí.`,
+      defaultsNoneOwn: 'Cada conexión puede guardar sus propios valores.',
+      seeConnections: 'Ajustes por conexión',
+      overriddenOn: (list: string) => `Ajuste propio en: ${list}`,
+      alsoSetFor: (list: string) => `También en: ${list}`,
+      editorIntro:
+        'Ajustes solo de esta conexión. Los marcados con «Esta conexión» son propios; el resto sigue los valores predeterminados. Los cambios se aplican al momento, también a una sesión abierta.',
+      serverEditorIntro:
+        'Valores predeterminados para todas las conexiones de este servidor, por encima de los de la app. Los valores propios de cada conexión siguen teniendo prioridad.',
+      own: 'Esta conexión',
+      ownServer: 'Este servidor',
+      inherited: 'Usa el predeterminado',
+      defaultValue: (value: string) => `Predeterminado: ${value}`,
+      useDefault: 'Usar predeterminado',
+      useDefaultFor: (label: string) => `Usar el valor predeterminado para ${label}`,
+      ownCount: (n: number) =>
+        n === 0
+          ? 'Usa los valores predeterminados'
+          : `${n} ${plural(n, 'valor propio', 'valores propios')}`,
+      resetPage: 'Usar los predeterminados en esta página',
+      resetPageHint: 'Elimina los valores propios de esta conexión en esta página.',
+      resetPageServerHint: 'Elimina los valores propios de este servidor en esta página.',
+      resetAll: 'Restablecer todo en esta conexión',
+      resetAllServer: 'Restablecer todo en este servidor',
+      resetAllHint: 'Todos los ajustes vuelven a los valores predeterminados.',
+      resetConfirmTitle: (name: string) => `¿Restablecer todos los ajustes de ${name}?`,
+      resetConfirmBody:
+        'Se eliminan sus valores propios y vuelve a usar los predeterminados. No se puede deshacer.',
+      reset: 'Restablecer',
+      backToSession: 'Volver a la sesión',
+      forConnection: 'Ajustes de esta conexión',
+    },
     title: 'Ajustes',
     appearance: 'Apariencia',
     theme: 'Tema',

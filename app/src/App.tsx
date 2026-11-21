@@ -47,6 +47,10 @@ import {
 import { Dialog } from './ui/components/Dialog.tsx';
 import { Toggle } from './ui/components/Form.tsx';
 import { SettingsScreen } from './ui/settings/SettingsScreen.tsx';
+import {
+  ConnectionSettingsListScreen,
+  LayerSettingsScreen,
+} from './ui/settings/ConnectionSettingsScreens.tsx';
 import { activeLocale, setActiveLocale, strings } from './ui/strings.ts';
 import {
   applyTheme,
@@ -170,6 +174,10 @@ function renderRoute(route: Route) {
       return <BackupScreen />;
     case 'diagnostics':
       return <DiagnosticsScreen />;
+    case 'connection-settings':
+      return <ConnectionSettingsListScreen {...(route.page ? { page: route.page } : {})} />;
+    case 'layer-settings':
+      return <LayerSettingsScreen target={route.target} />;
   }
 }
 

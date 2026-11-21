@@ -747,6 +747,9 @@
   right: 0;
   top: calc(env(safe-area-inset-top, 0px) + 12px);
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   justify-content: center;
   pointer-events: none;
   z-index: 30;
@@ -766,6 +769,21 @@
   font-size: 13.5px;
   text-align: center;
   animation: omg-toast-in var(--_dur) ease-out;
+}
+
+/* A one-time note with its own dismiss button ("Saved for this connection …"). */
+.omg-toast--notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 14px;
+  padding: 6px 6px 6px 14px;
+  text-align: start;
+  pointer-events: auto;
+}
+
+.omg-toast--notice .omg-btn--small {
+  flex: none;
 }
 
 @keyframes omg-toast-in {

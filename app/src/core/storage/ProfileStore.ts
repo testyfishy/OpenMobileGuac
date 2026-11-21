@@ -118,6 +118,22 @@ export function connectionRefKey(ref: ConnectionRef): string {
   return `${ref.type}/${encodeURIComponent(ref.dataSource)}/${encodeURIComponent(ref.identifier)}`;
 }
 
+/** The inverse of `connectionRefKey`; `undefined` for a key it did not make. */
+export function parseConnectionRefKey(key: string): ConnectionRef | undefined {
+  const m = /^([cg])\/([^/]*)\/([^/]*)$/.exec(key);
+  if (!m) return undefined;
+  try {
+    const [, type, ds, id] = m;
+    return {
+      type: type as 'c' | 'g',
+      dataSource: decodeURIComponent(ds ?? ''),
+      identifier: decodeURIComponent(id ?? ''),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function sameRef(a: ConnectionRef, b: ConnectionRef): boolean {
   return a.type === b.type && a.dataSource === b.dataSource && a.identifier === b.identifier;
 }
@@ -666,6 +682,21 @@ export class ProfileStore {
     ref: ConnectionRef,
   ): Promise<ConnectionSettings | undefined> {
     return this.serialized(async () => (await this.readSettings(profileId))[connectionRefKey(ref)]);
+  }
+
+  /**
+   * Every connection of one profile with remembered settings (Settings › Connections), in
+   * stored order. Keys that do not parse as a connection are skipped.
+   */
+  listConnectionSettings(
+    profileId: string,
+  ): Promise<{ readonly ref: ConnectionRef; readonly settings: ConnectionSettings }[]> {
+    return this.serialized(async () =>
+      Object.entries(await this.readSettings(profileId)).flatMap(([k, settings]) => {
+        const ref = parseConnectionRefKey(k);
+        return ref ? [{ ref, settings }] : [];
+      }),
+    );
   }
 
   /** Replaces the remembered settings for one connection. `undefined` clears them. */
