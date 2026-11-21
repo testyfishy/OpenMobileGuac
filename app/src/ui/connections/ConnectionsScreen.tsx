@@ -195,7 +195,8 @@ function ServerConnections({ profile }: { profile: ServerProfile }) {
         if (id !== profile.id || signingOutHere.current || auth.current(id)) return;
         if (services.devServer?.profile.id === id) return;
         void auth.hasSavedPassword(profile).then((saved) => {
-          if (saved || auth.current(id)) return;
+          // A saved password that the server just refused is as good as none.
+          if ((saved && !auth.silentSignInFailed(id)) || auth.current(id)) return;
           setTree({ nonce: 0 });
           setTreeNonce((n) => n + 1);
           dispatch({ type: 'signed-out-elsewhere' });

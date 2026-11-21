@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Dialog } from '../components/Dialog.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { useAppSettings, useServices } from '../services/context.ts';
+import { useBackInterceptor } from '../nav/NavContext.ts';
 import { onAppActiveChange, setPrivacyScreen, type AuthOutcome } from '../services/native.ts';
-import { shouldLockOnResume } from '../sessions/sessionModel.ts';
+import { closePipWindow, onPipWindowChange, pipWindowActive } from '../session/pipFeed.ts';
+import { shouldLockInBackground, shouldLockOnResume } from '../sessions/sessionModel.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { strings } from '../strings.ts';
 import { AppAwayTracker } from './appAwayTracker.ts';
@@ -52,18 +54,50 @@ export function LockGate() {
   useEffect(() => {
     // Tells the biometric prompt's own pause/resume from a real trip away (appAwayTracker.ts).
     const away = new AppAwayTracker(lock);
+    let awayAt: number | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // A Picture in Picture window keeps showing the remote screen while away: the lock is
+    // not held off by it. When it falls due, the window closes and the app locks there and
+    // then (locked, the session stops feeding the window).
+    const lockIfDueInBackground = () => {
+      const l = settingsRef.current.lock;
+      const due = shouldLockInBackground({
+        enabled: lock.isEnabled() && l.enabled,
+        afterSeconds: l.afterSeconds,
+        backgroundedAt: awayAt,
+        now: Date.now(),
+        pipWindowUp: pipWindowActive(),
+      });
+      if (!due) return;
+      log.info('lock', 'locked in the background: closing Picture in Picture');
+      closePipWindow();
+      lock.lock();
+    };
+    // The window usually opens just after the app left: also check when it does.
+    const offPip = onPipWindowChange((up) => {
+      if (up && awayAt !== null) lockIfDueInBackground();
+    });
     const sub = onAppActiveChange((active) => {
       const change = away.change(active);
       if (change.kind === 'ignore' || (change.kind === 'away' && change.tentative)) return;
       // SRV-11: the connection-password check waits for the foreground and its grace ends
       // in the background, also while the app lock is off.
       lock.setActive(active);
+      clearTimeout(timer);
       if (change.kind === 'away') {
         // Hide the UI now, so the first frame after returning is the lock screen, not the
         // remote desktop (the privacy screen covers the app switcher itself).
         lock.cover();
+        awayAt = change.at;
+        if (lock.isEnabled() && settingsRef.current.lock.enabled) {
+          timer = setTimeout(
+            lockIfDueInBackground,
+            Math.max(0, settingsRef.current.lock.afterSeconds) * 1000 + 50,
+          );
+        }
         return;
       }
+      awayAt = null;
       const backgroundedAt = change.awaySince;
       const l = settingsRef.current.lock;
       if (
@@ -80,7 +114,11 @@ export function LockGate() {
         lock.uncover();
       }
     });
-    return () => sub.dispose();
+    return () => {
+      clearTimeout(timer);
+      offPip();
+      sub.dispose();
+    };
   }, [lock, log]);
 
   const unlock = async () => {
@@ -88,11 +126,22 @@ export function LockGate() {
     setOutcome(await lock.unlock(strings.lock.reason, strings.lock.cancel));
   };
 
-  // Prompt automatically when the lock screen appears (not while only covered).
+  // Prompt automatically when the lock screen appears (not while only covered), and only in
+  // the foreground: a lock engaged in the background waits for the return.
   useEffect(() => {
     if (state !== 'locked') return;
-    void lock.unlock(strings.lock.reason, strings.lock.cancel).then(setOutcome);
+    let live = true;
+    void lock.whenActive().then(() => {
+      if (!live || lock.state() !== 'locked') return;
+      void lock.unlock(strings.lock.reason, strings.lock.cancel).then(setOutcome);
+    });
+    return () => {
+      live = false;
+    };
   }, [state, lock]);
+
+  // Android Back on the lock screen must not act on the screens behind it.
+  useBackInterceptor(state !== 'unlocked', () => setConfirmReset(false));
 
   const resetLock = async () => {
     setConfirmReset(false);

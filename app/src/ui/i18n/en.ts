@@ -720,12 +720,12 @@ export const en = {
       'Before connecting, the app asks the server whether the connection already has active sessions, for example one left running when the app was closed or lost its sign-in. If so, it offers to open the existing one, end it and start fresh, or open another. “When a connection is already open” is about sessions open in this app; this one is about sessions the server reports. If the server does not answer within 2 seconds, the app just connects. Never asked for the Demo, share links or joining a session.',
     backgroundDisconnect: 'Disconnect sessions after the app is in the background for',
     backgroundDisconnectIos:
-      'On iPhone and iPad the system pauses the app soon after you leave it, so it cannot keep a session alive: the Guacamole server ends it about 15 seconds after the app goes quiet, whatever is chosen here. When you come back, the session reconnects by itself.',
+      'On iPhone and iPad the system pauses the app soon after you leave it, so it cannot keep a session alive: the Guacamole server ends it about 15 seconds after the app goes quiet, whatever is chosen here, unless Picture in picture is on and its window is open. When you come back, the session reconnects by itself.',
     backgroundDisconnectHint:
       'Saves battery and data. This does not sign you out of the server: reconnecting takes one tap.',
     serverSignOut: 'Sign out of servers after the app is in the background for',
     serverSignOutHint:
-      'After this time the app signs out of every server, and the next sign-in asks for the password even if one is saved. “Never” keeps you signed in until the server itself ends the sign-in. Separate from disconnecting sessions and from the app lock. Does not apply while Android keeps sessions connected in the background.',
+      'After this time the app signs out of every server, and the next sign-in asks for the password even if one is saved. “Never” keeps you signed in until the server itself ends the sign-in. Separate from disconnecting sessions and from the app lock. Does not apply while Android keeps sessions connected in the background. Nor while a Picture in picture window is open.',
     thumbnails: 'Save a thumbnail of each session',
     thumbnailsHint:
       'A small picture of the last screen, shown in recents. Stored on this device only.',

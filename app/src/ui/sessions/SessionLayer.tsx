@@ -1,9 +1,10 @@
-import { Suspense, lazy, useEffect, useRef } from 'react';
+import { Suspense, lazy, useEffect, useRef, useSyncExternalStore } from 'react';
 import { Dialog } from '../components/Dialog.tsx';
 import { Spinner } from '../components/Feedback.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { useBackInterceptor, useNav } from '../nav/NavContext.ts';
 import { protocolIcon } from '../connections/treeView.ts';
+import { useServices } from '../services/context.ts';
 import { strings } from '../strings.ts';
 import { AlreadyOpenDialog } from './AlreadyOpenDialog.tsx';
 import { ConnectConfirmDialog, InUseDialog } from './InUseDialog.tsx';
@@ -114,6 +115,13 @@ export function SessionLayer() {
 function SessionSlot({ session, active }: { session: OpenSession; active: boolean }) {
   const sessions = useSessions();
   const nav = useNav();
+  const { lock } = useServices();
+  const lockState = useSyncExternalStore(lock.subscribe, lock.getSnapshot);
+  // Behind the lock screen the session does not count as shown: no Picture in Picture feed
+  // (so no remote picture leaves the app, and the window cannot start from the lock
+  // screen), no keep-awake, no microphone. Only `locked`: `covered` is every trip away,
+  // where Picture in Picture must keep working.
+  const running = active && lockState !== 'locked';
   return (
     <div
       className={active ? 'session-slot session-slot-active' : 'session-slot session-slot-hidden'}
@@ -132,11 +140,12 @@ function SessionSlot({ session, active }: { session: OpenSession; active: boolea
           <SessionHost
             key={session.epoch}
             session={session}
-            active={active}
+            active={running}
             onHide={sessions.hide}
             onExit={() => sessions.close(session.id)}
             onSignInExpired={() => sessions.recoverSignIn(session.id)}
             onNeedsSignIn={() => {
+              sessions.needsSignIn(session.id);
               sessions.hide();
               nav.open({ name: 'connections', serverId: session.serverId });
             }}

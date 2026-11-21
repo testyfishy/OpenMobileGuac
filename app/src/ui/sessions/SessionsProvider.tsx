@@ -25,7 +25,15 @@ import {
 } from '../services/keepAlive.ts';
 import { haptic, onAppActiveChange, platformName } from '../services/native.ts';
 import { strings } from '../strings.ts';
-import { graceApplies, shouldSuspendInBackground, wantKeepAlive } from './backgroundPolicy.ts';
+import { onPipWindowChange, pipWindowActive as pipWindowActiveNow } from '../session/pipFeed.ts';
+import {
+  PAGE_STALL_MS,
+  backgroundClockStart,
+  pipWindowOnReturn,
+  graceApplies,
+  shouldSuspendInBackground,
+  wantKeepAlive,
+} from './backgroundPolicy.ts';
 import { isInsecureUrl } from '../servers/serverForm.ts';
 import { parseServerOptions } from '../settings/settingsModel.ts';
 import { seedPolicy } from '../servers/seedPolicy.ts';
@@ -110,12 +118,27 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   );
   /** Targets whose in-use check is running: a second tap meanwhile does nothing. */
   const checking = useRef(new Set<string>());
+  /** Bumped on every tap (`openWith`). */
+  const tapSeq = useRef(0);
   const stateRef = useRef(state);
   const settingsRef = useRef(settings);
   useEffect(() => {
     stateRef.current = state;
     settingsRef.current = settings;
   });
+
+  /**
+   * Questions waiting for an answer leave with their server's sign-in: answered later, they
+   * would open a session that has none.
+   */
+  const dropQuestions = useCallback((match: (serverId: string) => boolean) => {
+    const keep = <T extends { readonly serverId: string }>(x: T | null) =>
+      x !== null && match(x.serverId) ? null : x;
+    setPending(keep);
+    setAsk(keep);
+    setInUse(keep);
+    setConfirmAsk(keep);
+  }, []);
 
   const openNow = useCallback(
     (serverId: string, serverName: string, target: SessionTarget, resumed = false) => {
@@ -246,12 +269,17 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         const r = await revalidateServer(profile);
         services.log.info('session', `reconnect: ${r}`);
         if (r === 'needs-sign-in') dispatch({ type: 'reauth', id });
-        // 'failed' (network trouble): reconnect anyway, the session screen shows its own
-        // error and retry.
+        else if (r === 'failed' && !services.auth.current(profile.id)) {
+          // Network trouble after the token was dropped: a session mounted now would have no
+          // sign-in. It stays disconnected; Reconnect tries again.
+          haptic('error');
+        }
+        // 'failed' with the sign-in still there: reconnect anyway, the session screen shows
+        // its own error and retry.
         else dispatch({ type: 'reconnect', id, now: Date.now() });
       })();
     },
-    [findProfile, revalidateServer, services.log],
+    [findProfile, revalidateServer, services.auth, services.log],
   );
 
   /**
@@ -266,8 +294,11 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'show', id, now: Date.now() });
       setSwitcherOpen(false);
       if (s.state === 'suspended') reconnect(id);
+      // Signed in again since its sign-in failed: the session reconnects instead of showing
+      // "Sign in again".
+      else if (s.state === 'reauth' && services.auth.current(s.serverId)) reconnect(id);
     },
-    [reconnect],
+    [reconnect, services.auth],
   );
 
   const openWith = useCallback(
@@ -291,6 +322,10 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         shareLink: isShareServerId(serverId),
         signedIn: session !== undefined,
       });
+      // The latest tap wins: an in-use answer for an earlier tap that comes back late is
+      // dropped, so it never replaces a question already showing or opens a session behind
+      // it. A repeated tap on the connection being checked is not a new tap (deduped below).
+      if (d.kind !== 'check') tapSeq.current++;
       switch (d.kind) {
         case 'existing':
           goTo(d.id);
@@ -315,8 +350,15 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       const key = `${serverId}|${target.type}:${target.dataSource}:${target.identifier}`;
       if (checking.current.has(key)) return;
       checking.current.add(key);
+      const seq = ++tapSeq.current;
       void checkServerUse(checkApi, session, target)
         .then((use) => {
+          if (seq !== tapSeq.current) {
+            services.log.info('session', 'in-use check: superseded by a later tap');
+            return;
+          }
+          // Signed out while the server answered: a session opened now would have no sign-in.
+          if (!services.auth.current(serverId)) return;
           const state = stateRef.current;
           const plan = planInUse({
             setting,
@@ -342,6 +384,8 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
             if (again.kind === 'limit')
               setPending({ serverId, serverName, target, suggest: again.suggest, resumed });
             else if (again.kind === 'existing') goTo(again.id);
+            // Opened meanwhile (a link, Admin › Sessions) and the setting is Ask: ask.
+            else if (again.kind === 'ask') setAsk({ serverId, serverName, target });
             else openNow(serverId, serverName, target, resumed);
           } else if (plan.kind === 'confirm') {
             setConfirmAsk({ serverId, serverName, target, checked: plan.checked });
@@ -404,6 +448,22 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     [findProfile, revalidateServer, services.log],
   );
 
+  /**
+   * A session was mounted without a sign-in for its server: it turns into its "Sign in
+   * again" card instead of a spinner that never ends (a later tap on the connection goes to
+   * that card, not to the spinner). Not while that server's sign-in is being renewed
+   * (`revalidateServer` settles it).
+   */
+  const needsSignIn = useCallback(
+    (id: string) => {
+      const s = stateRef.current.sessions.find((x) => x.id === id);
+      if (!s || s.state !== 'live' || s.serverId === DEMO_PROFILE_ID) return;
+      if (revalidating.current.has(s.serverId) || services.auth.current(s.serverId)) return;
+      dispatch({ type: 'reauth', id });
+    },
+    [services.auth],
+  );
+
   // ---- Android keep-alive: a foreground service while at least one session is live and
   // "Keep sessions connected in the background" is on. Started and updated while the app is
   // visible (sessions open in the foreground); stopped when the last session closes.
@@ -436,17 +496,39 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
   }, [closeAll]);
 
   // ---- T2.1 lifecycle: grace timer (best effort) plus a timestamp check on return. With the
-  // keep-alive service running, the timer does not disconnect.
+  // keep-alive service running, or while a Picture in Picture window is up, the clocks do
+  // not run; after the window closes they count from then (`backgroundClockStart`).
   useEffect(() => {
-    let backgroundedAt: number | null = null;
+    /** When the app left (null: in the foreground). */
+    let awaySince: number | null = null;
+    let tentative = false;
+    /** When the Picture in Picture window closed during this trip away. */
+    let pipClosedAt: number | null = null;
+    let signedOutThisTrip = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let signOutTimer: ReturnType<typeof setTimeout> | undefined;
+    // Away heartbeat: a long gap between ticks means iOS froze the page, so the window state
+    // may be stale on return (`pipWindowOnReturn`).
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let lastTick = 0;
+    let stalledFrom: number | null = null;
+    let windowKnownClosed = false;
+    const noteTick = () => {
+      const now = Date.now();
+      if (lastTick > 0 && now - lastTick > PAGE_STALL_MS) stalledFrom ??= lastTick;
+      lastTick = now;
+    };
+    const pipWindowActive = () => !windowKnownClosed && pipWindowActiveNow();
+    const clockStart = () =>
+      backgroundClockStart({ awaySince, pipWindowUp: pipWindowActive(), pipClosedAt });
     const suspendIfDue = () => {
       const grace = settingsRef.current.backgroundDisconnectSeconds;
       const due = shouldSuspendInBackground({
-        backgroundedAt,
+        backgroundedAt: clockStart(),
         now: Date.now(),
         graceSeconds: grace,
         keepAliveRunning: keepAliveRunning(),
+        pipWindowUp: pipWindowActive(),
       });
       if (!due) return;
       if (stateRef.current.sessions.some((s) => s.state === 'live')) {
@@ -458,59 +540,119 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
     // and the in-memory sign-ins are dropped synchronously, before a resumed session can
     // reconnect with the old token.
     const signOutIfDue = () => {
+      if (signedOutThisTrip) return;
       const afterSeconds = settingsRef.current.serverSignOutAfterSeconds;
       if (
         !shouldSignOutAfterBackground({
           afterSeconds,
-          backgroundedAt,
+          backgroundedAt: clockStart(),
           now: Date.now(),
           keepAliveRunning: keepAliveRunning(),
+          pipWindowUp: pipWindowActive(),
         })
       ) {
         return;
       }
+      signedOutThisTrip = true;
       services.log.info('session', 'background sign-out time over: signing out of servers');
       const all = stateRef.current.sessions;
       for (const s of all) {
         if (s.serverId !== DEMO_PROFILE_ID) dispatch({ type: 'close', id: s.id });
       }
       if (all.every((s) => s.serverId !== DEMO_PROFILE_ID)) setSwitcherOpen(false);
+      dropQuestions((id) => id !== DEMO_PROFILE_ID);
       void services.auth.signOutAfterBackground();
     };
+    const clearTimers = () => {
+      clearTimeout(timer);
+      clearTimeout(signOutTimer);
+      timer = undefined;
+      signOutTimer = undefined;
+    };
+    const armTimers = () => {
+      clearTimers();
+      // No timers while a prompt is open: that pause is most likely the prompt's.
+      if (tentative) return;
+      const from = clockStart();
+      if (from === null) return;
+      const grace = settingsRef.current.backgroundDisconnectSeconds;
+      if (
+        graceApplies({
+          graceSeconds: grace,
+          keepAliveRunning: keepAliveRunning(),
+          pipWindowUp: pipWindowActive(),
+        }) &&
+        grace !== null
+      ) {
+        timer = setTimeout(suspendIfDue, Math.max(0, from + grace * 1000 - Date.now()) + 50);
+      }
+      // After a Picture in Picture window the page is known to run in the background: the
+      // sign-out is then due there too. Otherwise it is decided on return, as before.
+      const after = settingsRef.current.serverSignOutAfterSeconds;
+      if (pipClosedAt !== null && after !== null) {
+        signOutTimer = setTimeout(signOutIfDue, Math.max(0, from + after * 1000 - Date.now()) + 50);
+      }
+    };
+    const offPip = onPipWindowChange((up) => {
+      if (awaySince === null) return;
+      if (!up) {
+        pipClosedAt = Date.now();
+        // The persisted clock moves with it (checked at start-up if the app is ended).
+        if (settingsRef.current.serverSignOutAfterSeconds !== null) {
+          services.backgroundClock.note(pipClosedAt);
+        }
+      }
+      armTimers();
+    });
     // The biometric prompt itself can pause/resume the app (appAwayTracker.ts).
     const away = new AppAwayTracker(services.lock);
     const sub = onAppActiveChange((active) => {
       const change = away.change(active);
       if (change.kind === 'ignore') return;
       if (change.kind === 'away') {
-        backgroundedAt = change.at;
+        awaySince = change.at;
+        tentative = change.tentative;
+        pipClosedAt = null;
+        signedOutThisTrip = false;
+        stalledFrom = null;
+        windowKnownClosed = false;
+        lastTick = change.at;
+        clearInterval(heartbeat);
+        heartbeat = setInterval(noteTick, 1000);
         // Persisted too: the system may end the app while it is away (checked at start-up).
         if (settingsRef.current.serverSignOutAfterSeconds !== null) {
-          services.backgroundClock.note(backgroundedAt);
+          services.backgroundClock.note(change.at);
         }
-        // No grace timer while a prompt is open: that pause is most likely the prompt's.
-        const grace = settingsRef.current.backgroundDisconnectSeconds;
-        if (
-          !change.tentative &&
-          graceApplies({ graceSeconds: grace, keepAliveRunning: keepAliveRunning() }) &&
-          grace !== null
-        ) {
-          timer = setTimeout(suspendIfDue, grace * 1000 + 50);
-        }
+        armTimers();
       } else {
-        clearTimeout(timer);
-        backgroundedAt = change.awaySince;
+        clearTimers();
+        clearInterval(heartbeat);
+        heartbeat = undefined;
+        noteTick();
+        awaySince = change.awaySince;
+        tentative = false;
+        const seen = pipWindowOnReturn({
+          pipWindowUp: pipWindowActiveNow(),
+          pipClosedAt,
+          stalledFrom,
+        });
+        pipClosedAt = seen.pipClosedAt;
+        windowKnownClosed = !seen.pipWindowUp;
         signOutIfDue();
         suspendIfDue();
-        backgroundedAt = null;
+        awaySince = null;
+        pipClosedAt = null;
+        windowKnownClosed = false;
         services.backgroundClock.clear();
       }
     });
     return () => {
-      clearTimeout(timer);
+      clearTimers();
+      clearInterval(heartbeat);
+      offPip();
       sub.dispose();
     };
-  }, [services.lock, services.log, services.auth, services.backgroundClock]);
+  }, [services.lock, services.log, services.auth, services.backgroundClock, dropQuestions]);
 
   // Sessions of a server whose sign-in ended elsewhere (sign out) cannot continue.
   useEffect(
@@ -523,8 +665,9 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
           (s) => s.serverId === profileId && s.state === 'live',
         );
         for (const s of affected) dispatch({ type: 'reauth', id: s.id });
+        dropQuestions((id) => id === profileId);
       }),
-    [services.auth],
+    [services.auth, dropQuestions],
   );
 
   const limit = useMemo(
@@ -620,20 +763,46 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       },
       endAndStart: (dontAskAgain: boolean) => {
         if (plan.end.length === 0) return;
+        // Only this question: never a later one that took its place.
+        const askedAt = inUse.askedAt;
+        const mine = (cur: InUsePending | null) => cur !== null && cur.askedAt === askedAt;
         setInUse({ ...inUse, busy: true, error: undefined });
+        // The current sign-in: it may have been renewed since the server was asked.
+        const session = services.auth.current(serverId) ?? inUse.session;
         // Only the active connections listed in the plan: the user's own ones on this
         // connection (or, for an administrator, the ones shown), never anything else.
-        void services.admin.killActiveConnections(inUse.session, target.dataSource, plan.end).then(
+        void services.admin.killActiveConnections(session, target.dataSource, plan.end).then(
           () => {
             services.log.info('session', `in use: ended ${plan.end.length} session(s)`);
-            setInUse(null);
+            setInUse((cur) => (mine(cur) ? null : cur));
             storeAskInUse('end', dontAskAgain);
             fresh();
           },
-          () => {
+          async () => {
             haptic('error');
+            // Some may have ended already, or the list changed: ask the server again, so a
+            // retry sends what is still running.
+            const use = await checkServerUse(checkApi, session, target).catch(() => undefined);
+            const state = stateRef.current;
+            const again = use
+              ? planInUse({
+                  setting: settingsRef.current.askInUse,
+                  use,
+                  username: session.username,
+                  liveInApp: liveInAppCount(state, serverId, target),
+                  inAppId: findOpenSession(state, serverId, target)?.id,
+                })
+              : undefined;
             setInUse((cur) =>
-              cur ? { ...cur, busy: false, error: strings.session.inUseEndFailed } : cur,
+              mine(cur) && cur
+                ? {
+                    ...cur,
+                    session,
+                    ...(again?.kind === 'prompt' ? { plan: again } : {}),
+                    busy: false,
+                    error: strings.session.inUseEndFailed,
+                  }
+                : cur,
             );
           },
         );
@@ -647,7 +816,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
         if (!inUse.busy) setInUse(null);
       },
     };
-  }, [inUse, goTo, openWith, services.admin, services.log, storeAskInUse]);
+  }, [inUse, checkApi, goTo, openWith, services.admin, services.auth, services.log, storeAskInUse]);
 
   const connectConfirm = useMemo(() => {
     if (!confirmAsk) return null;
@@ -679,6 +848,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       closeAll,
       reconnect,
       recoverSignIn,
+      needsSignIn,
       switcherOpen,
       setSwitcherOpen,
     }),
@@ -696,6 +866,7 @@ export function SessionsProvider({ children }: { children: ReactNode }) {
       closeAll,
       reconnect,
       recoverSignIn,
+      needsSignIn,
       switcherOpen,
     ],
   );

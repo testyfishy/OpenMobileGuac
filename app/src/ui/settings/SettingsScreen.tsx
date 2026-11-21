@@ -50,9 +50,9 @@ import {
   mergeSessionSettings,
   parseServerOptions,
   resetSessionDefaults,
-  serverOptionsToJson,
   setSessionDefault,
 } from './settingsModel.ts';
+import { patchServerOptions } from '../servers/serverOptionsStore.ts';
 import {
   SETTINGS_CATEGORIES,
   categoryOf,
@@ -270,9 +270,9 @@ export function SettingsScreen() {
           await services.profiles.getOptions(p.id).catch(() => undefined),
         );
         if (o.totpAutofill) {
-          await services.profiles
-            .setOptions(p.id, serverOptionsToJson({ ...o, totpAutofill: false }))
-            .catch(() => undefined);
+          await patchServerOptions(services.profiles, p.id, { totpAutofill: false }).catch(
+            () => undefined,
+          );
         }
       }
     }
@@ -333,8 +333,7 @@ export function SettingsScreen() {
     setConfirmLockOff(null);
     for (const id of ids) {
       await services.auth.saveTotpSeed(id, null);
-      const o = parseServerOptions(await services.profiles.getOptions(id));
-      await services.profiles.setOptions(id, serverOptionsToJson({ ...o, totpAutofill: false }));
+      await patchServerOptions(services.profiles, id, { totpAutofill: false });
     }
     update({ ...settings, lock: { ...settings.lock, enabled: false } });
   };

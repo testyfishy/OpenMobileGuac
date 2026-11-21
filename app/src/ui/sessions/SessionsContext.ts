@@ -74,6 +74,8 @@ export interface SessionsApi {
    * reconnect, or show "Sign in again" (T2.1).
    */
   readonly recoverSignIn: (id: string) => void;
+  /** A session was mounted with no sign-in for its server: show "Sign in again". */
+  readonly needsSignIn: (id: string) => void;
   readonly switcherOpen: boolean;
   readonly setSwitcherOpen: (open: boolean) => void;
 }

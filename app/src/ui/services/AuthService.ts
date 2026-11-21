@@ -92,6 +92,8 @@ export class AuthService {
   /** Waits while the app lock is shown; every use of a stored secret passes it. */
   private unlocked: () => Promise<void> = () => Promise.resolve();
   private readonly listeners = new Set<(profileId: string) => void>();
+  /** Servers whose last `revalidate` ended in `needs-sign-in` (`silentSignInFailed`). */
+  private readonly silentSignInFailures = new Set<string>();
   private readonly passwordListeners = new Set<(profileId: string, password: string) => void>();
   private readonly backgroundSignOutListeners = new Set<(profileId: string) => void>();
   private readonly signedOutListeners = new Set<(profileId: string) => void>();
@@ -691,6 +693,27 @@ export class AuthService {
     profile: ServerProfile,
     opts: { readonly httpAllowed: boolean; readonly totpAutofill: boolean },
   ): Promise<RevalidateResult> {
+    const r = await this.revalidateOnce(profile, opts);
+    if (r === 'needs-sign-in' && !this.sessions.has(profile.id)) {
+      // Screens that wait for a renewal because a password is saved learn it failed.
+      this.silentSignInFailures.add(profile.id);
+      this.emit(profile.id);
+    }
+    return r;
+  }
+
+  /**
+   * The last silent sign-in (`revalidate`) for this server failed although a password may
+   * be saved, and nobody has signed in since: the user must sign in.
+   */
+  silentSignInFailed(profileId: string): boolean {
+    return this.silentSignInFailures.has(profileId) && !this.sessions.has(profileId);
+  }
+
+  private async revalidateOnce(
+    profile: ServerProfile,
+    opts: { readonly httpAllowed: boolean; readonly totpAutofill: boolean },
+  ): Promise<RevalidateResult> {
     await this.ready();
     const live = this.sessions.get(profile.id);
     if (live && (await this.api.isSessionValid(live))) return 'ok';
@@ -749,6 +772,7 @@ export class AuthService {
   }
 
   private emit(profileId: string): void {
+    if (this.sessions.has(profileId)) this.silentSignInFailures.delete(profileId);
     for (const l of this.listeners) l(profileId);
   }
 }

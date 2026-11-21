@@ -39,11 +39,8 @@ import { ServersScreen } from './ui/servers/ServersScreen.tsx';
 import { SessionLayer } from './ui/sessions/SessionLayer.tsx';
 import { useSessions } from './ui/sessions/SessionsContext.ts';
 import { SessionsProvider } from './ui/sessions/SessionsProvider.tsx';
-import {
-  parseServerOptions,
-  serverOptionsToJson,
-  type AppSettings,
-} from './ui/settings/settingsModel.ts';
+import { patchServerOptions } from './ui/servers/serverOptionsStore.ts';
+import { parseServerOptions, type AppSettings } from './ui/settings/settingsModel.ts';
 import { Dialog } from './ui/components/Dialog.tsx';
 import { Toggle } from './ui/components/Form.tsx';
 import { SettingsScreen } from './ui/settings/SettingsScreen.tsx';
@@ -110,7 +107,8 @@ export default function App({
   const launch = useMemo<LaunchApi>(
     () => ({
       request: (p) => {
-        pending.current = p;
+        // Every launch expires (`launchExpired`), deep links included.
+        pending.current = { ...p, at: p.at ?? Date.now() };
         setLaunchVersion((v) => v + 1);
       },
       take: (serverId) => {
@@ -304,11 +302,7 @@ function DeepLinks() {
     const link = ask;
     setAsk(undefined);
     if (dontAsk) {
-      const o = parseServerOptions(await services.profiles.getOptions(link.serverId));
-      await services.profiles.setOptions(
-        link.serverId,
-        serverOptionsToJson({ ...o, confirmLinks: false }),
-      );
+      await patchServerOptions(services.profiles, link.serverId, { confirmLinks: false });
     }
     open(link, true);
   };

@@ -48,6 +48,7 @@ export const sessionEs: SessionStrings = {
     viewOnlyOff: 'Solo ver desactivado',
     remoteClipboardCopied: 'Portapapeles remoto copiado a este dispositivo',
     deviceClipboardSent: 'Portapapeles del dispositivo enviado al remoto',
+    pipFailed: 'No se pudo abrir la imagen dentro de imagen. Inténtalo de nuevo en un momento.',
     pointerMode: (mode: string, hint: string) => `${mode}: ${hint}`,
     clipboardEmpty: 'El portapapeles del dispositivo está vacío',
     clipboardSent: (n: number) =>

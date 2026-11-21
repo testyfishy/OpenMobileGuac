@@ -226,15 +226,8 @@ export function openTargetKeys(state: SessionsState, serverId: string): Set<stri
 
 // ---- lifecycle (timestamps, not timers: background WebViews throttle or freeze timers) --
 
-/** Whether open sessions should be disconnected after `backgroundedAt`. */
-export function shouldSuspend(
-  backgroundedAt: number | null,
-  now: number,
-  graceSeconds: number | null,
-): boolean {
-  if (backgroundedAt === null || graceSeconds === null) return false;
-  return now - backgroundedAt >= graceSeconds * 1000;
-}
+// The grace-period rule (disconnect after the time away) is `shouldSuspendInBackground` in
+// backgroundPolicy.ts.
 
 /** Whether the app lock applies when returning to the foreground. */
 export function shouldLockOnResume(
@@ -248,18 +241,37 @@ export function shouldLockOnResume(
 }
 
 /**
+ * Whether the app lock must engage while still in the background: only while a Picture in
+ * Picture window shows the remote screen (the page runs then; otherwise the check on return
+ * decides, as before). The caller closes the window and locks. The lock is never held off.
+ */
+export function shouldLockInBackground(input: {
+  readonly enabled: boolean;
+  readonly afterSeconds: number;
+  readonly backgroundedAt: number | null;
+  readonly now: number;
+  readonly pipWindowUp: boolean;
+}): boolean {
+  if (!input.pipWindowUp) return false;
+  return shouldLockOnResume(input.enabled, input.afterSeconds, input.backgroundedAt, input.now);
+}
+
+/**
  * Whether to sign out of the servers on return (or at start-up, with the persisted
  * timestamp) after `backgroundedAt` ("Sign out of servers after …"; `null` = never).
  * Not while the Android keep-alive service held the sessions: the user chose to keep them.
+ * Not while the Picture in Picture window is up either; `backgroundedAt` then counts from
+ * when it closed (`backgroundClockStart`).
  */
 export function shouldSignOutAfterBackground(input: {
   readonly afterSeconds: number | null;
   readonly backgroundedAt: number | null;
   readonly now: number;
   readonly keepAliveRunning?: boolean;
+  readonly pipWindowUp?: boolean;
 }): boolean {
   if (input.afterSeconds === null || input.backgroundedAt === null) return false;
-  if (input.keepAliveRunning) return false;
+  if (input.keepAliveRunning || input.pipWindowUp) return false;
   // A clock set back (timestamp in the future) cannot prove the time passed.
   const away = input.now - input.backgroundedAt;
   return away >= 0 && away >= input.afterSeconds * 1000;

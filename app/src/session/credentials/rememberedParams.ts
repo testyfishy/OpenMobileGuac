@@ -237,8 +237,11 @@ export class RequiredAnswerGuard {
   private answered = new Set<string>();
   private auto: Answer[] = [];
   private typed: Answer[] = [];
-  /** Answers remembered or refreshed when this attempt connected. */
-  private committed: Answer[] = [];
+  /**
+   * Names answered when this attempt connected. Names only: the values are not needed
+   * afterwards and must not outlive their time limit in this session's memory.
+   */
+  private committed: (readonly string[])[] = [];
   private refused = false;
   private connectedOnce = false;
 
@@ -296,7 +299,7 @@ export class RequiredAnswerGuard {
   serverError(code: number): (readonly string[])[] {
     if (!this.connectedOnce) this.refused = true;
     if (!isCredentialRejection(code)) return [];
-    const out = [...this.committed, ...this.auto].map((a) => a.names);
+    const out = [...this.committed, ...this.auto.map((a) => a.names)];
     this.committed = [];
     this.auto = [];
     this.typed = [];
@@ -308,7 +311,7 @@ export class RequiredAnswerGuard {
     if (this.connectedOnce) return [];
     this.connectedOnce = true;
     const out = [...this.typed, ...this.auto];
-    this.committed = out;
+    this.committed = out.map((a) => a.names);
     this.typed = [];
     this.auto = [];
     return out;

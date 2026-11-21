@@ -5,6 +5,7 @@ import {
   isFresh,
   parseDeviceRecord,
   pickValues,
+  policyTtlMs,
   serializeDeviceRecord,
   type RememberPolicy,
   type RememberTarget,
@@ -59,6 +60,8 @@ export class ConnectionSecrets {
   private readonly memory = new Map<string, Map<string, RememberedEntry>>();
   /** Read-modify-write of the secure-store records, one at a time. */
   private queue: Promise<unknown> = Promise.resolve();
+  /** Fires `prune` when the earliest memory entry runs out (`schedulePrune`). */
+  private pruneTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: ConnectionSecretsOptions) {
     this.secure = opts.secure;
@@ -102,6 +105,7 @@ export class ConnectionSecrets {
       if (mem && answer) {
         // Time limits count from the last use.
         this.memory.get(profileId)?.set(key, { ...mem, at: this.now() });
+        this.schedulePrune(policy);
         return answer;
       }
     }
@@ -136,6 +140,7 @@ export class ConnectionSecrets {
         this.memory.set(profileId, m);
       }
       m.set(key, entry);
+      this.schedulePrune(policy);
       return;
     }
     this.memory.get(profileId)?.delete(key);
@@ -239,6 +244,25 @@ export class ConnectionSecrets {
       for (const [k, e] of m) if (!isFresh(e, policy, now)) m.delete(k);
       if (m.size === 0) this.memory.delete(id);
     }
+    this.schedulePrune(policy);
+  }
+
+  /**
+   * Prunes again when the earliest memory entry expires: without it, a value typed once and
+   * never used again would stay in memory for the rest of the run.
+   */
+  private schedulePrune(policy: RememberPolicy): void {
+    if (this.pruneTimer !== null) clearTimeout(this.pruneTimer);
+    this.pruneTimer = null;
+    const due = nextExpiry(this.memory, policy);
+    if (due === null) return;
+    this.pruneTimer = setTimeout(
+      () => {
+        this.pruneTimer = null;
+        this.prune(policy);
+      },
+      Math.max(0, due - this.now()) + 50,
+    );
   }
 
   private async read(profileId: string): Promise<Map<string, RememberedEntry>> {
@@ -272,6 +296,26 @@ export class ConnectionSecrets {
     this.queue = run.catch(() => undefined);
     return run;
   }
+}
+
+/**
+ * When the first memory entry expires under `policy` (ms since the epoch), or null when
+ * none ever does (no time limit, or nothing kept). Pure.
+ */
+export function nextExpiry(
+  memory: ReadonlyMap<string, ReadonlyMap<string, RememberedEntry>>,
+  policy: RememberPolicy,
+): number | null {
+  const ttl = policyTtlMs(policy);
+  if (ttl === null || ttl === 0) return null;
+  let first: number | null = null;
+  for (const m of memory.values()) {
+    for (const e of m.values()) {
+      const end = e.at + ttl;
+      if (first === null || end < first) first = end;
+    }
+  }
+  return first;
 }
 
 function sameValues(

@@ -8,7 +8,7 @@ import { FakeHttpClient, jsonResponse } from '../../core/testing/FakeHttpClient.
 import { authResultJson } from '../../core/testing/fixtures.ts';
 import type { RememberTarget } from '../../session/credentials/rememberedParams.ts';
 import { AuthService } from './AuthService.ts';
-import { ConnectionSecrets } from './connectionSecrets.ts';
+import { ConnectionSecrets, nextExpiry } from './connectionSecrets.ts';
 
 const BASE = 'https://guac.example/guacamole';
 const CONN: RememberTarget = { server: BASE, dataSource: 'postgresql', type: 'c', identifier: '7' };
@@ -58,6 +58,39 @@ describe('ConnectionSecrets (memory policies)', () => {
     advance(5 * MIN);
     expect(await store.recall('5m', 'p1', CONN, NAMES)).toBeNull();
     expect(store.memoryCount()).toBe(0);
+  });
+
+  it('drops an unused value from memory when its time runs out, without another call', async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new ConnectionSecrets({
+        secure: new MemorySecureStore(),
+        mayUseStored: async () => true,
+      });
+      await store.remember('5m', 'p1', CONN, NAMES, VALUES);
+      expect(store.memoryCount()).toBe(1);
+      vi.advanceTimersByTime(5 * MIN - 1000);
+      expect(store.memoryCount()).toBe(1);
+      vi.advanceTimersByTime(2000);
+      expect(store.memoryCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('knows when the first memory entry expires', () => {
+    const memory = new Map([
+      [
+        'p1',
+        new Map([
+          ['a', { values: {}, at: 5000 }],
+          ['b', { values: {}, at: 1000 }],
+        ]),
+      ],
+    ]);
+    expect(nextExpiry(memory, '5m')).toBe(1000 + 5 * MIN);
+    expect(nextExpiry(memory, 'app')).toBeNull();
+    expect(nextExpiry(new Map(), '5m')).toBeNull();
   });
 
   it('never offers values to another connection, server, profile or set of fields', async () => {

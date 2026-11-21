@@ -778,12 +778,12 @@ export const es: Strings = {
       'Antes de conectar, la app pregunta al servidor si la conexión ya tiene sesiones activas, por ejemplo una que quedó abierta al cerrarse la app o al perder el inicio de sesión. Si es así, ofrece abrir la existente, cerrarla y empezar de nuevo, o abrir otra. «Si una conexión ya está abierta» trata de las sesiones abiertas en esta app; este ajuste, de las sesiones que indica el servidor. Si el servidor no responde en 2 segundos, la app conecta sin más. Nunca se pregunta en la demo, en los enlaces compartidos ni al unirse a una sesión.',
     backgroundDisconnect: 'Desconectar las sesiones cuando la app lleve en segundo plano',
     backgroundDisconnectIos:
-      'En iPhone y iPad el sistema pausa la app poco después de salir de ella, así que no puede mantener una sesión: el servidor Guacamole la cierra unos 15 segundos después de que la app deja de responder, elijas lo que elijas aquí. Al volver, la sesión se reconecta sola.',
+      'En iPhone y iPad el sistema pausa la app poco después de salir de ella, así que no puede mantener una sesión: el servidor Guacamole la cierra unos 15 segundos después de que la app deja de responder, elijas lo que elijas aquí, salvo si Imagen dentro de imagen está activada y su ventana abierta. Al volver, la sesión se reconecta sola.',
     backgroundDisconnectHint:
       'Ahorra batería y datos. No cierra tu sesión en el servidor: volver a conectar es un toque.',
     serverSignOut: 'Cerrar sesión en los servidores cuando la app lleve en segundo plano',
     serverSignOutHint:
-      'Pasado este tiempo, la app cierra la sesión en todos los servidores y el siguiente inicio de sesión pide la contraseña aunque esté guardada. «Nunca» mantiene la sesión hasta que el propio servidor la termine. Es distinto de desconectar las sesiones y del bloqueo de la app. No se aplica mientras Android mantiene las sesiones conectadas en segundo plano.',
+      'Pasado este tiempo, la app cierra la sesión en todos los servidores y el siguiente inicio de sesión pide la contraseña aunque esté guardada. «Nunca» mantiene la sesión hasta que el propio servidor la termine. Es distinto de desconectar las sesiones y del bloqueo de la app. No se aplica mientras Android mantiene las sesiones conectadas en segundo plano. Tampoco mientras haya una ventana de Imagen dentro de imagen abierta.',
     thumbnails: 'Guardar una miniatura de cada sesión',
     thumbnailsHint:
       'Una imagen pequeña de la última pantalla, que se muestra en recientes. Solo se guarda en este dispositivo.',

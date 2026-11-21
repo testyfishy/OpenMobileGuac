@@ -172,6 +172,26 @@ describe('AuthService', () => {
     );
   });
 
+  it('tells listeners when the silent sign-in failed, until the next sign-in', async () => {
+    let refuse = true;
+    const http = new FakeHttpClient().on('POST', TOKENS, () =>
+      refuse ? jsonResponse(403, permissionDeniedJson) : jsonResponse(200, authResultJson),
+    );
+    const { auth, profile, secure } = await setup(http);
+    await secure.set(secretKeys.password(profile.id), 'pw');
+    const seen: string[] = [];
+    auth.onSessionChange((id) => seen.push(id));
+    expect(auth.silentSignInFailed(profile.id)).toBe(false);
+    expect(await auth.revalidate(profile, { httpAllowed: true, totpAutofill: false })).toBe(
+      'needs-sign-in',
+    );
+    expect(auth.silentSignInFailed(profile.id)).toBe(true);
+    expect(seen).toContain(profile.id);
+    refuse = false;
+    await auth.login(profile, { username: 'testuser', password: 'pw', remember: true, extra: {} });
+    expect(auth.silentSignInFailed(profile.id)).toBe(false);
+  });
+
   it('keeps a valid token on a pre-1.6.0 server without HEAD api/session', async () => {
     // guacamole-client <= 1.5.5 has no SessionResource @HEAD: a valid token gets 405.
     const http = new FakeHttpClient()

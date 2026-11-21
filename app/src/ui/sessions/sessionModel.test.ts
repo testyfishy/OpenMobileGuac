@@ -11,8 +11,8 @@ import {
   openTargetKeys,
   sessionsReducer,
   shouldLockOnResume,
+  shouldLockInBackground,
   shouldSignOutAfterBackground,
-  shouldSuspend,
   type OpenSession,
   type SessionsState,
 } from './sessionModel.ts';
@@ -176,13 +176,6 @@ describe('decideOpen', () => {
 });
 
 describe('lifecycle timing', () => {
-  it('suspends after the grace period, never when disabled', () => {
-    expect(shouldSuspend(null, 1000, 60)).toBe(false);
-    expect(shouldSuspend(0, 59_999, 60)).toBe(false);
-    expect(shouldSuspend(0, 60_000, 60)).toBe(true);
-    expect(shouldSuspend(0, 10_000_000, null)).toBe(false);
-  });
-
   it('locks on resume after the configured time', () => {
     expect(shouldLockOnResume(false, 0, 0, 10)).toBe(false);
     expect(shouldLockOnResume(true, 0, 0, 0)).toBe(true);
@@ -206,6 +199,29 @@ describe('lifecycle timing', () => {
       false,
     );
     expect(decide(60, at - 120_000)).toBe(false);
+    // A Picture in Picture window is up: the clock does not run.
+    expect(
+      shouldSignOutAfterBackground({
+        afterSeconds: 300,
+        backgroundedAt: at,
+        now: at + 10 * 3600_000,
+        pipWindowUp: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('locks in the background only while a Picture in Picture window is up', () => {
+    const base = { enabled: true, afterSeconds: 60, backgroundedAt: 0 };
+    expect(shouldLockInBackground({ ...base, now: 60_000, pipWindowUp: true })).toBe(true);
+    expect(shouldLockInBackground({ ...base, now: 59_999, pipWindowUp: true })).toBe(false);
+    // No window: decided on return, as before.
+    expect(shouldLockInBackground({ ...base, now: 10 ** 9, pipWindowUp: false })).toBe(false);
+    expect(
+      shouldLockInBackground({ ...base, enabled: false, now: 10 ** 9, pipWindowUp: true }),
+    ).toBe(false);
+    expect(
+      shouldLockInBackground({ ...base, backgroundedAt: null, now: 10 ** 9, pipWindowUp: true }),
+    ).toBe(false);
   });
 });
 

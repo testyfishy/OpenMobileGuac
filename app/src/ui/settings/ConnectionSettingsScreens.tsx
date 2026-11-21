@@ -46,9 +46,9 @@ import {
   applyConnectionPatch,
   parseServerOptions,
   removeConnectionKeys,
-  serverOptionsToJson,
   type SessionSettingsPatch,
 } from './settingsModel.ts';
+import { patchServerOptions } from '../servers/serverOptionsStore.ts';
 import { useConnectionInventory } from './useConnectionInventory.ts';
 import './settingsPages.css';
 
@@ -310,11 +310,9 @@ export function LayerSettingsScreen({ target }: { target: LayerTarget }) {
               Object.keys(next).length > 0 ? (next as Record<string, never>) : undefined,
             );
           } else {
+            // Only this field: the server's other options may be changed elsewhere meanwhile.
             const o = parseServerOptions(await p.getOptions(serverId));
-            await p.setOptions(
-              serverId,
-              serverOptionsToJson({ ...o, sessionDefaults: fn(o.sessionDefaults) }),
-            );
+            await patchServerOptions(p, serverId, { sessionDefaults: fn(o.sessionDefaults) });
           }
           publishSettingsChange(serverId, ref, origin);
         } catch {
