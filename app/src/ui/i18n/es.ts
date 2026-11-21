@@ -24,6 +24,8 @@ export const es: Strings = {
     loading: 'Cargando…',
     refresh: 'Actualizar',
     settings: 'Ajustes',
+    lightMode: 'Cambiar a modo claro',
+    darkMode: 'Cambiar a modo oscuro',
     copy: 'Copiar',
     copied: 'Copiado',
     share: 'Compartir',

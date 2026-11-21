@@ -23,6 +23,8 @@ export const en = {
     loading: 'Loading…',
     refresh: 'Refresh',
     settings: 'Settings',
+    lightMode: 'Switch to light mode',
+    darkMode: 'Switch to dark mode',
     copy: 'Copy',
     copied: 'Copied',
     share: 'Share',

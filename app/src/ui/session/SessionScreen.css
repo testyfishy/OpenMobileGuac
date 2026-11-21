@@ -2282,3 +2282,11 @@
 .omg-session[data-keybar='right'] .omg-toast-region {
   right: var(--omg-dock-right, 0px);
 }
+
+/* More sheet: "Back to connections" first, set apart like the Disconnect row at the end. */
+.omg-more__top {
+  margin-bottom: 12px;
+  border: 1px solid var(--_border);
+  border-radius: var(--_radius);
+  overflow: hidden;
+}

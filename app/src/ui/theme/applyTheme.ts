@@ -3,7 +3,7 @@ import { resolveTheme, THEME_BACKGROUND, type ThemePreference } from './theme.ts
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
-function systemPrefersDark(): boolean {
+export function systemPrefersDark(): boolean {
   return typeof matchMedia === 'function' && matchMedia(DARK_QUERY).matches;
 }
 

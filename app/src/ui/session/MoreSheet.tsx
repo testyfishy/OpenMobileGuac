@@ -206,6 +206,16 @@ export function MoreSheet(p: MoreSheetProps) {
           </ChromeButton>
         </div>
       )}
+      {a.back.available && (
+        <div className="omg-more__top">
+          <Row
+            icon={a.back.icon}
+            label={t.backToConnections}
+            hint={t.keepOpen}
+            onClick={run(a.back)}
+          />
+        </div>
+      )}
       <Group title={t.groups.input}>
         <SwitchRow
           icon={<IconEye off={false} />}
@@ -378,14 +388,6 @@ export function MoreSheet(p: MoreSheetProps) {
           onClick={run(a.info)}
           sheet
         />
-        {a.back.available && (
-          <Row
-            icon={a.back.icon}
-            label={t.backToConnections}
-            hint={t.keepOpen}
-            onClick={run(a.back)}
-          />
-        )}
       </Group>
 
       <div className="omg-more__danger">

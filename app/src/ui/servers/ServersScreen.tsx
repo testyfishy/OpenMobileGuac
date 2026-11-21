@@ -8,6 +8,8 @@ import { selectedServerId } from '../nav/navigation.ts';
 import { useAppSettings, useServices } from '../services/context.ts';
 import { demoVisible } from '../settings/settingsModel.ts';
 import { strings } from '../strings.ts';
+import { systemPrefersDark } from '../theme/applyTheme.ts';
+import { resolveTheme } from '../theme/theme.ts';
 import { useSessions } from '../sessions/SessionsContext.ts';
 import { QuickConnect } from './QuickConnect.tsx';
 import { hostOf, isInsecureUrl } from './serverForm.ts';
@@ -24,7 +26,8 @@ export function ServersScreen() {
   const { profiles, reload } = useSavedProfiles();
   const shares = useShareProfiles();
   const sessions = useSessions();
-  const { settings } = useAppSettings();
+  const { settings, update } = useAppSettings();
+  const dark = resolveTheme(settings.theme, systemPrefersDark()) === 'dark';
   const showDemo = demoVisible(settings.showDemo, profiles?.length);
   const [reordering, setReordering] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -57,6 +60,11 @@ export function ServersScreen() {
             />
           ) : null}
           <IconButton icon="link" label={s.openShareLink} onClick={() => setShareOpen(true)} />
+          <IconButton
+            icon={dark ? 'sun' : 'moon'}
+            label={dark ? strings.common.lightMode : strings.common.darkMode}
+            onClick={() => update({ ...settings, theme: dark ? 'light' : 'dark' })}
+          />
           <IconButton
             icon="gear"
             label={strings.common.settings}
